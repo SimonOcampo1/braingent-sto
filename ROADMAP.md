@@ -391,9 +391,19 @@ Candidates:
 | **STO Continuum** | yes — continuity of *everything* | yes | says the value, promises no kernel |
 | **STO Control Plane** | yes | yes | precise, cold, infrastructural |
 | **STO Carryover** / **STO Relay** | yes | yes | shorter, less solemn |
+| **STO BrainKit** | yes — brain = memory, kit = the setup | yes | keeps the warmth of "brain" and adds the half it was missing |
+| **STO Portable Brain** | yes, by saying it | yes | explicit; the name *is* the tagline, at the cost of length |
+| **STO Brainstem** | yes — the brain plus the wiring | yes | evocative, slightly clinical |
 | **STO Agentic Brain** | no — brain ≠ skills/plugins | no — `claude-sync`'s tagline | warm and instantly readable, which is worth something |
 | **STO Brain** | no | no | same, minus the filler adjective; "agentic" adds no information |
 | keep **agenticOS** | yes, vaguely | crowded | free: the repo is already public under it |
+
+The trap the "brain" family walks into: **memory is the crowded half**. Eight
+projects do agent memory; the thing none of them does is carry the *setup* — the
+skills, plugins and settings — in the same private repo. A name that says brain
+and nothing else sells the half you would have to win on someone else's turf. The
+fix is not to drop the metaphor, it is to pair it with the other half
+(`BrainKit`) or to state the portability outright (`Portable Brain`).
 
 Implementation note if the name changes: keep the TUI wordmark as plain `STO`.
 `WORDMARK` is hand-built Block Elements glyphs and only `S`, `T` and `O` exist —
