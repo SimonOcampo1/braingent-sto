@@ -5,12 +5,12 @@ up the first time you push.
 
 ```
 knowledge/
-├── sessions/<machine>/      # Claude Code transcripts, trimmed and redacted
+├── sessions/<machine>/           # Claude Code transcripts, trimmed and redacted
 ├── memory/<project>/<machine>/   # the memories, plain markdown with frontmatter
-└── config/                  # the ~/.claude modules you chose to sync
+└── config/                       # the ~/.claude modules you chose to sync
     ├── claude-md/  settings/  keybindings/
     ├── skills/  agents/  hooks/
-    └── plugins/             # marketplaces + installed plugins manifest
+    └── plugins/                  # marketplaces + installed plugins manifest
 ```
 
 Everything here is plain text on purpose: you can read it, `grep` it, edit it
