@@ -16,12 +16,15 @@ Claude Code still has [no native way to sync config and skills across machines](
 | Config sync | [claude-sync](https://github.com/renefichtmueller/claude-sync), [claude-code-dotfiles](https://github.com/elizabethfuentes12/claude-code-dotfiles) | No sessions, no usage, no UI — sync and nothing else |
 | Session browsing | [claude-code-log](https://github.com/daaain/claude-code-log), [claude-code-trace](https://github.com/delexw/claude-code-trace), [claude-history](https://github.com/raine/claude-history) | Local-only: what you did on the laptop is invisible from the desktop |
 
+Claude Code's own auto memory is part of the same gap: it writes plain markdown into `~/.claude/projects/<repo>/memory/`, and [the docs are explicit](https://code.claude.com/docs/en/memory#storage-location) that those files "are not shared across machines or cloud environments".
+
 STO is the union of the three, on one substrate. Every artifact is **plain text in your own repo** — memories are markdown with frontmatter, sessions are trimmed and redacted JSONL, config is the real files. You can read them, `grep` them, edit them by hand, and roll them back with `git revert`.
 
 ---
 
 ## 🚀 Features
 
+- **Built on the native memory, not beside it.** No second memory store, no protocol to paste into `CLAUDE.md`, nothing new to teach the model: Claude Code writes its auto memory as markdown, and STO mirrors those exact files between machines.
 - **One repo, everything in it.** `sto push` exports sessions, memories, `~/.claude` modules and your vault, commits and pushes. `sto pull` applies them on the other machine — including installing missing plugins and marketplaces.
 - **Modular sync.** Pick exactly which parts of `~/.claude` travel: `claude-md`, `settings`, `keybindings`, `skills`, `agents`, `hooks`, `plugins`. Memories, sessions and vault always travel.
 - **Redaction on export.** Session transcripts are trimmed to what a reader needs (prompts, tool names, errors) and scrubbed of API-key-shaped strings before they ever hit a commit.
@@ -116,7 +119,7 @@ Honesty beats a feature matrix:
 
 - **No embeddings, no semantic recall.** Search is lexical. If you want vector recall inside the agent loop, run [claude-mem](https://github.com/thedotmack/claude-mem) or [engram](https://github.com/Gentleman-Programming/engram) alongside it — they solve a different problem.
 - **No MCP server.** The agent does not query STO at runtime; STO moves the files Claude Code already reads.
-- **No automatic memory extraction.** Memories are written by the agent under your conventions, not distilled by a background job.
+- **No memory system of its own.** Claude Code's auto memory writes the files; STO makes them travel. Nothing is distilled by a background job.
 - **Windows-first.** The TUI needs `msvcrt` and the installer is PowerShell. The engine and CLI are portable; the terminal UI is not, yet.
 - **Single user.** It syncs *your* machines. It is not a team knowledge base.
 

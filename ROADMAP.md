@@ -135,6 +135,43 @@ dependency.
 
 ---
 
+## Prior art: what to copy, what not to
+
+Read before building items 1, 5 and 9.
+
+### Where memories come from, in each system
+
+|  | Who writes the memory | Where it lives | Recall |
+|---|---|---|---|
+| **Claude Code (auto memory)** | Claude itself, when it judges something worth keeping | `~/.claude/projects/<repo>/memory/*.md`, plain markdown | `MEMORY.md` index loaded every session (first 200 lines / 25KB); topic files read on demand |
+| **STO** | nobody new — it syncs the files above | the same files, mirrored into `knowledge/memory/<project>/<machine>/` | whatever Claude Code already does, plus `sto memory search` from the terminal |
+| **[engram](https://github.com/Gentleman-Programming/engram)** | the agent, calling `mem_save` explicitly | its own SQLite (`~/.engram/engram.db`, FTS5) | 20 MCP tools; needs a "Memory Protocol" pasted in CLAUDE.md to survive compaction |
+| **[claude-mem](https://github.com/thedotmack/claude-mem)** | a hook, distilling the session automatically | its own SQLite + Chroma vectors | injects context at session start; 4 MCP search tools |
+
+The distinction that matters for the design: STO is the only one **built on the
+native memory** instead of next to it. Nothing new writes memories, nothing has
+to be taught to the model, and there is no second store to keep in sync with the
+first. Anthropic's docs are explicit that auto memory is machine-local — "files
+are not shared across machines or cloud environments" — and that is exactly the
+hole STO fills.
+
+The corollary is where the ceiling is: native recall is an index in context plus
+Claude opening topic files. No vectors, no cross-project search, and the index
+is capped. Item 1 raises that ceiling without adding a second store; item 10 is
+what would go past it, and only if lexical search visibly misses things.
+
+### From engram
+
+**Copy.** MCP over stdio as a short-lived subprocess, not a daemon. One-command
+install through the plugin marketplace. A `doctor`. Conflicts surfaced instead of
+silently skipped.
+
+**Do not copy.** Twenty tools — their own docs admit the model forgets to use
+them after compaction and recommend pasting a protocol into `CLAUDE.md`; a
+surface small enough not to need that is the better answer. A SQLite store you
+cannot read or diff. Compressed sync chunks: append-only avoids conflicts, but
+gives up the thing that makes plain files worth it.
+
 ## Not planned
 
 - **A daemon.** The CLI imports the engine directly; the server is for the web
