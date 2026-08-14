@@ -168,18 +168,47 @@ first thing a stranger needs.
 
 ---
 
-## 7. Repo polish: LICENSE, CI, banner
+## 7. The public repo as a product: README, banner, CI
 
-The public repo is the product now.
+For a tool nobody has heard of, the README *is* the product. In impact order:
 
-- **LICENSE** — MIT. Without one, "public" legally means all rights reserved.
-- **CI** — a GitHub Action running the four suites on push, so the build badge is
-  real instead of decorative.
-- **Banner** — an SVG wordmark reusing the TUI's block-glyph `STO OS`, switching
-  with `<picture>` + `prefers-color-scheme`.
-- **A terminal recording** — one GIF of `sto ui` (tab switch → PUSH with the
-  progress panel → memory graph) does more than three paragraphs of README.
-- **GitHub topics and social preview**, so it is findable at all.
+**1. A terminal recording.** The single highest-return asset for a TUI project,
+and the one thing no screenshot replaces. Script it with
+[vhs](https://github.com/charmbracelet/vhs) (a `.tape` file is reproducible and
+re-recordable when the UI changes) or asciinema + `agg`. One take, under 20
+seconds: switch tabs → `p` → the confirmation manifest → the progress panel
+ticking → `g` on the Memory tab → the graph window. It goes right under the
+pitch, above every table.
+
+**2. A banner that is ours.** The wordmark already exists: the Block Elements
+`STO` glyphs the TUI paints. Trace it to SVG in the accent palette, and serve
+light/dark with `<picture>` + `prefers-color-scheme` so it does not sit on a
+white slab in light mode. A banner drawn from the app's own typography beats any
+generator. Keep the SVG in `docs/` and never inline a raster.
+
+**3. Four badges, all true.** `license MIT`, `python 3.11+`, `dependencies: 0`,
+`tests: N passing`. One row, right under the banner. The tests badge only after
+the CI in point 5 exists — a build badge that runs nothing is noticed and it
+costs credibility.
+
+**4. Above the fold, in this order.** Banner → one-sentence pitch → three-command
+quickstart → GIF. Nothing else. The comparison table, "what it does not do" and
+the command reference all move below, and the long ones fold into `<details>` so
+the page stays scannable.
+
+**5. CI.** A GitHub Action running the four suites on push. It makes the badge
+honest and catches a broken `ui.py` before someone else clones it.
+
+**6. A screenshot of the memory graph.** Wide, dark, detail panel open, filters
+visible. It is the most distinctive thing on screen and the hardest to imagine
+from prose.
+
+**7. Repo metadata.** Description, topics (`claude-code`, `agent-memory`,
+`dotfiles-sync`, `tui`, `knowledge-management`), and a social preview image —
+without them the repo is invisible in search and ugly when linked.
+
+**8. LICENSE** — MIT, done. Without one, "public" legally means all rights
+reserved.
 
 ---
 
@@ -342,18 +371,36 @@ Items 1 and 3 raise it without a second store; item 14 goes past it, if ever.
 ## Naming
 
 `agenticOS` is aspirational and slightly wrong: there is no scheduler, no
-processes, no sandbox. What there *is* is a control plane for one agent's setup
-and memory, and continuity of both across machines. The name should say
-continuity or control, not operating system. Candidates:
+processes, no sandbox. What there *is* is continuity — your setup and your memory
+keep existing on the other machine — plus a control plane over both. The name
+should say that, not operating system.
 
-1. **STO Continuum** — what it actually delivers: your setup and memory continue
-   on the other machine. `sto` stays the command.
-2. **STO Control Plane** — accurate for the config/skills/plugins half, colder.
-3. **STO Carryover** / **STO Relay** — same idea, shorter, less pretentious.
-4. Keep **agenticOS**, and let the tagline carry the meaning — the repo is public
-   under that name already, and renaming costs discoverability.
+Two tests any candidate has to pass:
 
-Whatever wins, the tagline is the load-bearing part: *shared memory and setup for
+- **Does it cover both halves?** Memory *and* setup (skills, plugins, settings).
+  A name that only says memory sells half the product, and the memory half is the
+  crowded one.
+- **Is the metaphor already taken?** `claude-sync` ships under "one Claude brain
+  across all your devices"; "second brain" belongs to the PKM world. Walking into
+  someone else's metaphor makes you sound like their clone.
+
+Candidates:
+
+| Name | Covers both halves | Free metaphor | Note |
+|---|---|---|---|
+| **STO Continuum** | yes — continuity of *everything* | yes | says the value, promises no kernel |
+| **STO Control Plane** | yes | yes | precise, cold, infrastructural |
+| **STO Carryover** / **STO Relay** | yes | yes | shorter, less solemn |
+| **STO Agentic Brain** | no — brain ≠ skills/plugins | no — `claude-sync`'s tagline | warm and instantly readable, which is worth something |
+| **STO Brain** | no | no | same, minus the filler adjective; "agentic" adds no information |
+| keep **agenticOS** | yes, vaguely | crowded | free: the repo is already public under it |
+
+Implementation note if the name changes: keep the TUI wordmark as plain `STO`.
+`WORDMARK` is hand-built Block Elements glyphs and only `S`, `T` and `O` exist —
+any new word means drawing a new glyph set by hand, for a banner nobody asked to
+change. The command stays `sto` in every case.
+
+Whatever wins, the tagline carries the weight: *shared memory and setup for
 Claude Code, across your machines, in a repo you own.*
 
 ---
