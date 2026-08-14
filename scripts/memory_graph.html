@@ -1,0 +1,293 @@
+<!doctype html>
+<!-- Memory graph template. `sto graph --memory` swaps __DATA__ for the JSON
+     of srv.memory_graph() and opens the result in a Chromium window (--app).
+     Canvas 2D and hand-rolled physics: with no CDN the file opens offline and
+     depends on nothing being installed. -->
+<meta charset="utf-8">
+<title>memories · sto</title>
+<style>
+  :root { --bg:#0b0e12; --panel:#12171e; --fg:#e6edf3; --dim:#7d8590;
+          --line:#232a33; --accent:#2bd6c4; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); overflow:hidden;
+         font:13px ui-monospace, "Cascadia Mono", Consolas, monospace; }
+  canvas { display:block; position:fixed; inset:0; cursor:grab; }
+  canvas.drag { cursor:grabbing; }
+
+  /* both panels live on the right: filters always, detail on top of them when
+     a node is picked — the canvas stays clear on the left */
+  aside { position:fixed; top:0; right:0; bottom:0; width:250px; background:var(--panel);
+          border-left:1px solid var(--line); padding:16px 0 24px; overflow-y:auto; }
+  aside h1 { margin:0 16px; font-size:14px; letter-spacing:.16em; text-transform:uppercase; }
+  aside .sub { margin:6px 16px 14px; color:var(--dim); font-size:11px; line-height:1.6; }
+  #q { width:calc(100% - 32px); margin:0 16px 6px; padding:6px 9px; background:#0b0e12;
+       color:var(--fg); border:1px solid var(--line); border-radius:6px;
+       font:inherit; outline:none; }
+  #q:focus { border-color:var(--accent); }
+  .head { margin:14px 16px 6px; color:var(--dim); font-size:10.5px;
+          letter-spacing:.14em; text-transform:uppercase; }
+  .row { display:flex; align-items:center; gap:8px; padding:4px 16px; cursor:pointer;
+         border-left:2px solid transparent; }
+  .row:hover { background:#171d26; }
+  .row.on { border-left-color:var(--accent); background:#151d24; }
+  .row .name { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .row .n { color:var(--dim); font-size:11px; }
+  .row i { width:8px; height:8px; border-radius:50%; flex:none; }
+
+  #detail { position:fixed; top:0; right:0; bottom:0; width:330px; background:var(--panel);
+            border-left:1px solid var(--line); padding:18px 18px 24px; overflow-y:auto;
+            display:none; z-index:3; }
+  #detail.on { display:block; }
+  #detail h2 { margin:0 0 4px; font-size:15px; word-break:break-word; }
+  #detail .meta { color:var(--dim); margin-bottom:14px; }
+  #detail p { line-height:1.6; margin:0 0 16px; }
+  #detail .head { margin:0 0 6px; }
+  #detail a { display:block; color:var(--accent); text-decoration:none; padding:3px 0;
+              cursor:pointer; word-break:break-word; }
+  #detail a:hover { text-decoration:underline; }
+  #close { position:absolute; top:14px; right:16px; color:var(--dim); cursor:pointer;
+           font-size:11px; }
+  #close:hover { color:var(--fg); }
+
+  #tip { position:fixed; max-width:320px; padding:7px 10px; background:var(--panel);
+         border:1px solid var(--line); border-radius:6px; display:none;
+         pointer-events:none; line-height:1.45; z-index:5; }
+  #tip b { color:var(--accent); }
+  #tip em { color:var(--dim); font-style:normal; }
+  #hint { position:fixed; bottom:12px; left:16px; color:var(--dim); font-size:11px; }
+</style>
+<canvas id="c"></canvas>
+<aside>
+  <h1>memories</h1>
+  <div class="sub" id="sub"></div>
+  <input id="q" placeholder="filter…" autocomplete="off">
+  <div class="head">projects</div>
+  <div id="projects"></div>
+  <div class="head">types</div>
+  <div id="types"></div>
+  <div class="head">machines</div>
+  <div id="machines"></div>
+</aside>
+<div id="detail"><span id="close">✕ filters</span><div id="detailBody"></div></div>
+<div id="tip"></div>
+<div id="hint">drag to pan · wheel to zoom · click a node for detail · Esc clears</div>
+<script>
+const DATA = __DATA__;
+const esc = s => String(s).replace(/[<>&]/g, ch => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[ch]));
+const COLOR = { project:"#2bd6c4", user:"#f2b544", feedback:"#e5666f",
+                reference:"#8b7cf6", memory:"#5aa9f0" };
+const color = n => n.kind === "project" ? COLOR.project : (COLOR[n.type] || COLOR.memory);
+const day = ms => new Date(ms * 1000).toISOString().slice(0, 10);
+
+const cv = document.getElementById("c"), ctx = cv.getContext("2d");
+const tip = document.getElementById("tip"), search = document.getElementById("q");
+const detail = document.getElementById("detail"), detailBody = document.getElementById("detailBody");
+
+// ── the model ──
+const nodes = DATA.nodes.map(n => ({ ...n, x:(Math.random()-.5)*600, y:(Math.random()-.5)*600,
+                                     vx:0, vy:0, deg:0 }));
+const byId = new Map(nodes.map(n => [n.id, n]));
+const links = DATA.links.map(l => ({ ...l, s:byId.get(l.source), t:byId.get(l.target) }))
+                        .filter(l => l.s && l.t);
+links.forEach(l => { l.s.deg++; l.t.deg++; });
+const radius = n => n.kind === "project" ? 7 + Math.min(9, n.n * .5) : 4 + Math.min(5, n.deg);
+const neighbours = n => links.filter(l => l.s === n || l.t === n)
+                         .map(l => ({ other: l.s === n ? l.t : l.s, kind: l.kind }));
+
+// ── sidebar: the panels you actually want while staring at a graph ──
+const memoryNodes = nodes.filter(n => n.kind === "memory");
+document.getElementById("sub").innerHTML =
+  `${DATA.counts.memories} memories · ${DATA.counts.projects} projects<br>` +
+  `${DATA.counts.links} wiki links · read on ${esc(DATA.machine)}`;
+
+let fProject = null, fType = null, fMachine = null, q = "", sel = null;
+
+const countBy = (arr, key) => {
+  const m = new Map();
+  arr.forEach(n => m.set(n[key], (m.get(n[key]) || 0) + 1));
+  return [...m.entries()].sort((a, b) => b[1] - a[1]);
+};
+
+function addRow(cont, { label, n, dot, active, onclick }) {
+  const el = document.createElement("div");
+  el.className = "row" + (active ? " on" : "");
+  el.innerHTML = (dot ? `<i style="background:${dot}"></i>` : "") +
+                 `<span class="name">${esc(label)}</span><span class="n">${n}</span>`;
+  el.onclick = onclick;
+  cont.appendChild(el);
+}
+
+function paintPanels() {
+  const P = document.getElementById("projects"), T = document.getElementById("types"),
+        M = document.getElementById("machines");
+  P.innerHTML = T.innerHTML = M.innerHTML = "";
+  nodes.filter(n => n.kind === "project").sort((a, b) => b.n - a.n).forEach(p =>
+    addRow(P, { label:p.label, n:p.n, dot:COLOR.project, active: fProject === p.title,
+              onclick: () => { fProject = fProject === p.title ? null : p.title; paintPanels(); } }));
+  countBy(memoryNodes, "type").forEach(([k, n]) =>
+    addRow(T, { label:k || "—", n, dot:COLOR[k] || COLOR.memory, active: fType === k,
+              onclick: () => { fType = fType === k ? null : k; paintPanels(); } }));
+  countBy(memoryNodes, "machine").forEach(([k, n]) =>
+    addRow(M, { label:k, n, active: fMachine === k,
+              onclick: () => { fMachine = fMachine === k ? null : k; paintPanels(); } }));
+}
+paintPanels();
+
+// a node either passes the four filters or gets painted dim — dropping it from
+// the canvas would make the rest jump around on every click
+function passes(n) {
+  if (fProject && (n.kind === "project" ? n.title : n.project) !== fProject) return false;
+  if (fType && (n.kind === "project" || n.type !== fType)) return false;
+  if (fMachine && (n.kind === "project" ? !n.machines.includes(fMachine) : n.machine !== fMachine)) return false;
+  if (q && !(n.label + " " + (n.desc || "") + " " + (n.title || "")).toLowerCase().includes(q)) return false;
+  return true;
+}
+
+// ── physics: O(n²) repulsion, springs and gravity ──
+// ponytail: no quadtree; the day the graph passes ~2000 nodes, Barnes-Hut.
+function step() {
+  for (let i = 0; i < nodes.length; i++) {
+    const a = nodes[i];
+    for (let j = i + 1; j < nodes.length; j++) {
+      const b = nodes[j];
+      const dx = b.x - a.x, dy = b.y - a.y, d2 = dx*dx + dy*dy || .01;
+      if (d2 > 90000) continue;                       // far apart: no push
+      const f = 900 / d2, d = Math.sqrt(d2);
+      const fx = f * dx / d, fy = f * dy / d;
+      a.vx -= fx; a.vy -= fy; b.vx += fx; b.vy += fy;
+    }
+  }
+  for (const l of links) {
+    const rest = l.kind === "in" ? 70 : 120;
+    const dx = l.t.x - l.s.x, dy = l.t.y - l.s.y;
+    const d = Math.hypot(dx, dy) || .01, f = (d - rest) * .012;
+    const fx = f * dx / d, fy = f * dy / d;
+    l.s.vx += fx; l.s.vy += fy; l.t.vx -= fx; l.t.vy -= fy;
+  }
+  for (const n of nodes) {
+    n.vx -= n.x * .002; n.vy -= n.y * .002;           // gravity towards the centre
+    if (n === held) { n.vx = n.vy = 0; continue; }
+    n.vx *= .82; n.vy *= .82;
+    n.x += Math.max(-12, Math.min(12, n.vx));
+    n.y += Math.max(-12, Math.min(12, n.vy));
+  }
+}
+
+// ── camera ──
+let scale = 1, ox = 0, oy = 0, held = null, pan = null, hover = null;
+const toWorld = (px, py) => [(px - innerWidth / 2 - ox) / scale, (py - innerHeight / 2 - oy) / scale];
+const sx = n => n.x * scale + ox + innerWidth / 2, sy = n => n.y * scale + oy + innerHeight / 2;
+
+function draw() {
+  const dpr = devicePixelRatio || 1;
+  if (cv.width !== innerWidth * dpr || cv.height !== innerHeight * dpr) {
+    cv.width = innerWidth * dpr; cv.height = innerHeight * dpr;
+    cv.style.width = innerWidth + "px"; cv.style.height = innerHeight + "px";
+  }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, innerWidth, innerHeight);
+
+  const linked = sel ? new Set(neighbours(sel).map(v => v.other)) : null;
+  for (const l of links) {
+    const shown = passes(l.s) && passes(l.t);
+    const touched = sel && (l.s === sel || l.t === sel);
+    ctx.strokeStyle = touched ? "rgba(43,214,196,.9)"
+      : l.kind === "link" ? (shown ? "rgba(90,169,240,.5)" : "rgba(90,169,240,.06)")
+                          : (shown ? "rgba(125,133,144,.32)" : "rgba(125,133,144,.05)");
+    ctx.lineWidth = touched ? 1.6 : (l.kind === "link" ? 1.2 : .8);
+    ctx.beginPath(); ctx.moveTo(sx(l.s), sy(l.s)); ctx.lineTo(sx(l.t), sy(l.t)); ctx.stroke();
+  }
+  for (const n of nodes) {
+    const r = radius(n) * Math.min(1.6, scale), shown = passes(n);
+    ctx.globalAlpha = shown ? 1 : .1;
+    ctx.fillStyle = color(n);
+    ctx.beginPath(); ctx.arc(sx(n), sy(n), r, 0, 6.2832); ctx.fill();
+    if (n === sel || n === hover) {
+      ctx.strokeStyle = n === sel ? "#fff" : "rgba(255,255,255,.6)";
+      ctx.lineWidth = 1.6; ctx.stroke();
+    }
+    if (n.kind === "project" || scale > 1.15 || n === hover || n === sel ||
+        (linked && linked.has(n))) {
+      ctx.fillStyle = n.kind === "project" ? "#e6edf3" : "#9aa4ae";
+      ctx.font = (n.kind === "project" ? "bold 12px " : "11px ") + "ui-monospace, monospace";
+      ctx.fillText(n.label, sx(n) + r + 4, sy(n) + 4);
+    }
+    ctx.globalAlpha = 1;
+  }
+}
+
+function loop() { step(); draw(); requestAnimationFrame(loop); }
+loop();
+
+// ── detail panel ──
+function openNode(n) {
+  sel = n;
+  detail.classList.add("on");
+  const vs = neighbours(n).sort((a, b) => a.other.label.localeCompare(b.other.label));
+  const body = n.kind === "project"
+    ? `<h2>${esc(n.label)}</h2>
+       <div class="meta">${n.n} memories · ${esc(n.machines.join(", "))}</div>
+       <p>${esc(n.title)}</p>`
+    : `<h2>${esc(n.label)}</h2>
+       <div class="meta">${esc(n.type)} · ${esc(n.machine)} · ${day(n.mtime)}</div>
+       <p>${esc(n.desc || "—")}</p>`;
+  detailBody.innerHTML = body +
+    `<div class="head">linked (${vs.length})</div>` +
+    (vs.map(v => `<a data-id="${esc(v.other.id)}">${v.kind === "in" ? "▸" : "→"} ${esc(v.other.label)}</a>`).join("")
+     || `<span class="meta">nothing links here</span>`);
+  detailBody.querySelectorAll("a").forEach(a =>
+    a.onclick = () => { const o = byId.get(a.dataset.id); if (o) { centreOn(o); openNode(o); } });
+}
+function centreOn(n) { ox = -n.x * scale; oy = -n.y * scale; }
+document.getElementById("close").onclick = () => { sel = null; detail.classList.remove("on"); };
+
+// ── interaction ──
+function pick(px, py) {
+  const [wx, wy] = toWorld(px, py);
+  let best = null, bd = 1e9;
+  for (const n of nodes) {
+    const d = Math.hypot(n.x - wx, n.y - wy);
+    if (d < (radius(n) + 6) / scale && d < bd) { best = n; bd = d; }
+  }
+  return best;
+}
+cv.addEventListener("mousedown", e => {
+  const n = pick(e.clientX, e.clientY);
+  if (n) { held = n; openNode(n); }
+  else { pan = [e.clientX - ox, e.clientY - oy]; cv.classList.add("drag"); }
+});
+addEventListener("mousemove", e => {
+  if (held) { const w = toWorld(e.clientX, e.clientY); held.x = w[0]; held.y = w[1]; }
+  else if (pan) { ox = e.clientX - pan[0]; oy = e.clientY - pan[1]; }
+  hover = held || pick(e.clientX, e.clientY);
+  if (hover) {
+    tip.style.display = "block";
+    tip.style.left = Math.min(innerWidth - 340, e.clientX + 14) + "px";
+    tip.style.top = (e.clientY + 16) + "px";
+    tip.innerHTML = hover.kind === "project"
+      ? `<b>${esc(hover.label)}</b><br><em>${hover.n} memories · ${esc(hover.machines.join(", "))}</em>`
+      : `<b>${esc(hover.label)}</b><br><em>${esc(hover.type)} · ${esc(hover.machine)}</em><br>${esc(hover.desc || "")}`;
+  } else { tip.style.display = "none"; }
+});
+addEventListener("mouseup", () => { held = null; pan = null; cv.classList.remove("drag"); });
+cv.addEventListener("wheel", e => {
+  e.preventDefault();
+  // zoom towards the cursor, with a big step: with the old factor it took twenty
+  // wheel notches to get close to a node
+  const k = Math.max(.5, Math.min(2, Math.exp(-e.deltaY * .006)));
+  const before = toWorld(e.clientX, e.clientY);
+  scale = Math.max(.15, Math.min(8, scale * k));
+  const after = toWorld(e.clientX, e.clientY);
+  ox += (after[0] - before[0]) * scale;
+  oy += (after[1] - before[1]) * scale;
+}, { passive: false });
+search.addEventListener("input", () => { q = search.value.trim().toLowerCase(); });
+addEventListener("keydown", e => {
+  if (e.key === "Escape") {
+    search.value = ""; q = ""; search.blur();
+    fProject = fType = fMachine = sel = null;
+    detail.classList.remove("on"); paintPanels();
+  }
+  if (e.key === "/" && document.activeElement !== search) { e.preventDefault(); search.focus(); }
+});
+</script>
