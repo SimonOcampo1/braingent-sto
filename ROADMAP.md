@@ -119,7 +119,7 @@ a prefs entry and a pathspec, not an architecture.
 
 ## 9. Ship it as a plugin
 
-`claude plugin marketplace add SimonOcampo1/sto-agenticos` is how people install
+`claude plugin marketplace add SimonOcampo1/sto-agentic-os` is how people install
 things now. A `.claude-plugin/marketplace.json` plus a plugin dir with the MCP
 server entry (item 1) and the optional hooks (items 2 and 5) makes STO
 installable in one command instead of a clone plus a PowerShell script.
