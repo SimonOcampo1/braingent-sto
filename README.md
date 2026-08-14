@@ -122,6 +122,13 @@ Honesty beats a feature matrix:
 
 ---
 
+## What is next
+
+The parking lot lives in [ROADMAP.md](ROADMAP.md): an MCP server so the agent can
+query the repo mid-session, sync that reminds you (or runs itself), a
+cross-platform TUI, and a few smaller things — each with the smallest sketch that
+would do it.
+
 ## Tests
 
 ```bash
