@@ -267,6 +267,35 @@ def test_search_sessions_accepts_precomputed_rows():
     assert [h["id"] for h in hits] == ["s1"]
 
 
+def test_the_skills_row_counts_skills_and_not_the_files_inside_them():
+    """The bug: the home said `159 local · 159 in repo` for skills while opening
+    that same module listed 32. One was counting every reference and script
+    inside each skill folder; both are read as "how many skills"."""
+    with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as repo:
+        src, cfg = Path(a), Path(repo) / "config"
+        for name in ("caveman", "tackler"):
+            d = src / "skills" / name
+            (d / "reference").mkdir(parents=True)
+            (d / "SKILL.md").write_text("---\nname: x\n---\n", encoding="utf-8")
+            (d / "reference" / "notes.md").write_text("filler", encoding="utf-8")
+            (d / "run.py").write_text("print()", encoding="utf-8")
+        assert srv.count_skills(src) == 2                     # 2 skills, 8 files
+        assert sum(1 for _ in srv._module_files(src, "skills")) == 8
+
+        export_config(["skills"], claude_dir=src, repo_config=cfg, home="C:\\x")
+        st = {m["id"]: m for m in config_status(claude_dir=src, repo_config=cfg)}
+        assert st["skills"]["localFiles"] == 2, st["skills"]
+        assert st["skills"]["repoFiles"] == 2, st["skills"]
+        # a folder without SKILL.md is not a skill
+        (src / "skills" / "loose").mkdir()
+        (src / "skills" / "loose" / "notes.md").write_text("x", encoding="utf-8")
+        assert srv.count_skills(src) == 2
+        # and the other modules still count their files
+        (src / "CLAUDE.md").write_text("# rules", encoding="utf-8")
+        st = {m["id"]: m for m in config_status(claude_dir=src, repo_config=cfg)}
+        assert st["claude-md"]["localFiles"] == 1, st["claude-md"]
+
+
 def test_a_pulled_settings_json_still_parses():
     """The bug: export tokenized the JSON-escaped `C:\\\\Users\\\\Alice`, apply
     pasted back the raw `C:\\Users\\Bob`, and `\\U` is not a legal JSON escape —

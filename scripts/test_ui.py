@@ -727,7 +727,9 @@ def test_config_rows_list_the_modules_and_the_remote_guide():
         ui.srv.get_sync_prefs = lambda: ["skills"]
         ui.srv.CONFIG_MODULES = {"skills": (), "settings": ()}
         ui._origin = lambda: "git@github.com:yo/sto.git"
-        rows = ui.load_config(ui.new_state())
+        # guide=True: the steps are folded away by default, and this is the test
+        # about what they say, not about whether they start open
+        rows = ui.load_config(dict(ui.new_state(), guide=True))
         txt = "\n".join(ui.strip_ansi(ui.fmt_config(r, 100)) for r in rows)
         assert "Color de acento" in txt
         assert "[x] skills" in txt and "[ ] settings" in txt
@@ -762,7 +764,7 @@ def test_config_teaches_the_two_remotes_and_how_to_update():
         ui._origin = lambda: "git@github.com:yo/mio.git"
         ui._upstream = lambda: "https://github.com/quien/sto-agentic-os.git"
         txt = "\n".join(ui.strip_ansi(ui.fmt_config(r, 100))
-                        for r in ui.load_config(ui.new_state()))
+                        for r in ui.load_config(dict(ui.new_state(), guide=True)))
         assert "git remote rename origin upstream" in txt
         assert "git remote add origin" in txt
         assert txt.index("rename origin upstream") < txt.index("remote add origin")
@@ -1015,6 +1017,153 @@ def test_last_sync_falls_back_to_question_mark_without_separator():
         assert ui.last_sync() == ui.t("never_synced")
     finally:
         ui.srv._git = real
+
+
+def _config_st(w=96):
+    st = ui.new_state()
+    st["tab"], st["w"] = CFG, w
+    return ui.reload_tab(st)
+
+
+def test_config_folds_the_setup_guide_so_the_screen_fits():
+    """It did not fit, and the overflow was not only cosmetic: the cursor lands
+    only on SELECTABLE rows, the window follows the cursor, and the last
+    selectable row was a module — so the whole tail was unreachable."""
+    real = ui.srv.get_sync_prefs
+    try:
+        ui.srv.get_sync_prefs = lambda: ["skills"]
+        st = _config_st()
+        assert not any(r.get("kind") == "sub" for r in st["rows"])   # plegada
+        guia = [i for i, r in enumerate(st["rows"]) if r.get("kind") == "guide"]
+        assert guia == [len(st["rows"]) - 1]     # y el toggle es la última fila
+        plegadas = len(st["rows"])
+
+        # ↵ sobre ella la despliega, y deja otro toggle al final para poder bajar
+        st["sel"] = guia[0]
+        st = ui.handle(st, "\r")
+        assert st["guide"] is True
+        assert len(st["rows"]) > plegadas
+        assert any(r.get("kind") == "sub" for r in st["rows"])
+        assert st["rows"][-1]["kind"] == "guide"
+        # el cursor se queda en el toggle que apretaste, no salta al final
+        assert st["rows"][st["sel"]]["kind"] == "guide"
+
+        # y desde el toggle de abajo se vuelve a plegar sin dejar `sel` colgado
+        st["sel"] = len(st["rows"]) - 1
+        st = ui.handle(st, "\r")
+        assert st["guide"] is False and len(st["rows"]) == plegadas
+        assert 0 <= st["sel"] < len(st["rows"])
+        assert st["rows"][st["sel"]]["kind"] == "guide"
+    finally:
+        ui.srv.get_sync_prefs = real
+
+
+def test_config_scrolls_to_the_last_row_and_back_to_the_first():
+    """`_clamp` derives the window from the cursor, so a tail of non-selectable
+    rows could never be scrolled to. The guide toggle sits at the end precisely
+    so the cursor can drag the window all the way down."""
+    real = ui.srv.get_sync_prefs
+    try:
+        ui.srv.get_sync_prefs = lambda: []
+        st = _config_st()
+        h = 16                                    # a propósito corta: no entra
+        vis = ui.visible_rows(st, h)
+        assert len(st["rows"]) > vis
+        for _ in range(len(st["rows"]) + 5):
+            st = ui.handle(st, "down")
+            ui.draw(st, 96, h)                    # draw() es quien corre _clamp
+        assert st["top"] == len(st["rows"]) - vis     # el fondo, visible
+        assert "Guía" in ui.strip_ansi(ui.fmt_config(st["rows"][-1], 96))
+        for _ in range(len(st["rows"]) + 5):
+            st = ui.handle(st, "up")
+            ui.draw(st, 96, h)
+        assert st["top"] == 0                        # y se vuelve al principio
+    finally:
+        ui.srv.get_sync_prefs = real
+
+
+class _AliveThread:
+    def is_alive(self):
+        return True
+
+
+def test_a_background_reload_clears_the_message_it_put_up():
+    """The bug: `f` put up "fetcheando…" and only an error ever replaced it, so
+    a finished fetch looked exactly like a hung one until an unrelated keypress
+    wiped the line."""
+    st = ui.new_state()
+    st["tab"], st["rows"] = SES, _rows(2)
+    st["flash"], st["fetch"] = ui.t("fetching"), True
+    try:
+        ui._BG["thread"], ui._BG["box"] = None, (_rows(3), [], "")
+        st = ui.bg_reload(st)
+        assert st["flash"] == ""
+        assert len(st["rows"]) == 3 and st["fetch"] is False
+        # an error still gets said
+        ui._BG["box"] = ([], [], "error: git no responde")
+        st = ui.bg_reload(st)
+        assert st["flash"] == "error: git no responde"
+    finally:
+        ui._BG["thread"], ui._BG["box"] = None, None
+
+
+def test_the_message_spins_while_the_work_is_really_running():
+    st = ui.new_state()
+    st["tab"], st["rows"] = SES, _rows(2)
+    st["flash"] = ui.t("fetching")
+    real = ui._BG["thread"]
+    try:
+        ui._BG["thread"] = _AliveThread()
+        assert ui.busy() is True
+        vistos = set()
+        for f in range(len(ui.SPIN)):
+            st["frame"] = f
+            bottom = ui.strip_ansi(ui.draw(st, 80, 12)[-1])
+            assert ui.t("fetching") in bottom
+            vistos.add(bottom.strip()[0])
+        assert vistos == set(ui.SPIN)          # se mueve de verdad, no es un adorno fijo
+        # y tick() sigue moviendo el cuadro mientras haya trabajo, que es lo que
+        # hace que run() marque la pantalla como sucia y repinte
+        st["loaded_at"], st["frame"] = time.monotonic(), -1
+        assert ui.tick(st)["frame"] >= 0
+    finally:
+        ui._BG["thread"] = real
+    # sin trabajo en curso no hay spinner: el mensaje sale tal cual
+    assert ui.strip_ansi(ui.draw(st, 80, 12)[-1]).strip()[0] not in ui.SPIN
+
+
+def test_a_finished_update_asks_for_a_restart_and_keeps_asking():
+    """`u` merges new code into the repo, but this process already imported the
+    old one. A flash would be gone on the next repaint, with nothing changed."""
+    st = ui.new_state()
+    assert st["updated"] is False
+    st["job"] = {"kind": "update", "steps": [], "res": {"message": "3 commits"}}
+    st = ui.job_tick(st)
+    assert st["updated"] is True
+
+    reales = _stub_home()
+    try:
+        linea = [l for l in _home_txt(st) if "reabrí" in l]
+        assert len(linea) == 1, _home_txt(st)
+        assert "sto ui" in linea[0]
+        # y sale en el color de aviso, no en el acento (que el usuario cambia)
+        pintadas = [l for l in ui.home_lines(st)
+                    if f"\033[{ui.NOTICE}m" in (l["text"] if isinstance(l, dict) else l)]
+        assert len(pintadas) == 1
+        assert ui.NOTICE not in dict(ui.ACCENTS).values()
+        # sigue ahí después de recargar: solo se va al reiniciar el proceso
+        st["loaded_at"] = 0.0
+        assert any("reabrí" in l for l in _home_txt(st))
+    finally:
+        _unstub_home(reales)
+
+
+def test_a_failed_update_has_nothing_to_restart_for():
+    st = ui.new_state()
+    st["job"] = {"kind": "update", "steps": [], "res": {"error": "merge conflict"}}
+    st = ui.job_tick(st)
+    assert st["updated"] is False
+    assert st["flash"] == "merge conflict"
 
 
 def test_the_relative_time_is_translated_and_rounds_down():

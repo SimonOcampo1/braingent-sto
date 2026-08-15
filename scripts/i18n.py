@@ -64,6 +64,8 @@ STRINGS = {
         "sec_parity": "Paridad de config", "sec_always": "Siempre sincronizan",
         "sec_modules": "Módulos de config",
         "sec_remote": "Sincronizar en la nube (GitHub)",
+        "guide_open": "Guía de setup", "guide_close": "cerrar la guía",
+        "guide_hint": "primera vez, máquina nueva y updates",
         "sec_prefs": "Preferencias",
 
         "no_usage": "sin datos de uso", "resets_at": "resetea {h}",
@@ -145,6 +147,7 @@ STRINGS = {
 
         "k_home": " ↑↓ mover  ↵ abrir  Tab sección  p push  l pull  f fetch  u update  q salir",
         "update_safe": "solo código: tus memorias no están en upstream",
+        "update_restart": "actualizado · cerrá y reabrí sto ui para usar la versión nueva",
         "unlinked_short": "repo sin enlazar a upstream",
         "unlinked_key": "`sto update --link` (una vez)",
         "k_module": " ↑↓ mover  d borrar  Esc volver  Tab sección  q salir",
@@ -199,6 +202,8 @@ STRINGS = {
         "sec_parity": "Config parity", "sec_always": "Always synced",
         "sec_modules": "Config modules",
         "sec_remote": "Cloud sync (GitHub)",
+        "guide_open": "Setup guide", "guide_close": "close the guide",
+        "guide_hint": "first time, new machine and updates",
         "sec_prefs": "Preferences",
 
         "no_usage": "no usage data", "resets_at": "resets {h}",
@@ -280,6 +285,7 @@ STRINGS = {
 
         "k_home": " ↑↓ move  ↵ open  Tab section  p push  l pull  f fetch  u update  q quit",
         "update_safe": "code only: your memories are not in upstream",
+        "update_restart": "updated · close and reopen sto ui to run the new version",
         "unlinked_short": "repo not linked to upstream",
         "unlinked_key": "`sto update --link` (once)",
         "k_module": " ↑↓ move  d delete  Esc back  Tab section  q quit",

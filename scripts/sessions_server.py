@@ -627,15 +627,31 @@ def apply_config(modules, claude_dir=None, repo_config=None, home=None,
     return applied
 
 
+def count_skills(base: Path) -> int:
+    """Skills under `base`, counted as skills and not as files.
+
+    A skill is a folder with a `SKILL.md`; the references, scripts and assets
+    beside it are its insides. Counting files said `159 local · 159 in repo`
+    on the home while opening the same module listed 32 — the same word for
+    two different units, which reads as a bug in the sync.
+    """
+    d = base / "skills"
+    return sum(1 for _ in d.glob("*/SKILL.md")) if d.is_dir() else 0
+
+
 def config_status(claude_dir=None, repo_config=None) -> list[dict]:
     cd = claude_dir or CLAUDE_DIR
     cfg = repo_config if repo_config is not None else KNOWLEDGE_CONFIG
     enabled = set(get_sync_prefs())
     out = []
     for m in CONFIG_MODULES:
+        # plugins already counted plugins and skills counted files: both rows
+        # are read as "how many of these do I have", so both count their own unit
         if m == "plugins":
             local = len(_local_plugins(cd)[1])
             repo_n = len(_repo_plugins(cfg)[1])
+        elif m == "skills":
+            local, repo_n = count_skills(cd), count_skills(cfg / m)
         else:
             local = sum(1 for _ in _module_files(cd, m))
             repo_n = sum(1 for f in (cfg / m).rglob("*") if f.is_file()) if (cfg / m).is_dir() else 0

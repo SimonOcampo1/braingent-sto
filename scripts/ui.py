@@ -47,6 +47,11 @@ STRINGS, LANGS, t = i18n.STRINGS, i18n.LANGS, i18n.t
 ACCENTS = [("c_turquesa", "36"), ("c_verde", "32"), ("c_violeta", "35"),
            ("c_azul", "34"), ("c_amarillo", "33"), ("c_rojo", "31")]
 ACCENT = "36"
+# Bold yellow, and deliberately not one of the ACCENTS: this is the only colour
+# on the home that means "this one is for you to act on", so it must not turn
+# into whatever the accent is set to. 256-colour orange would read better and
+# is not worth the bet — the old conhost paints it as a box.
+NOTICE = "1;33"
 
 
 def set_accent(code):
@@ -482,6 +487,13 @@ def home_lines(st):
         out += [_txt(l) for l in wrap_items(
             [cli.c(f"▲ {t('update_available')}: {up_st['available']}", cli.GREEN),
              cli.c(t("update_apply_key"), ACCENT)], w)]
+    # `u` merged new code into the repo, but this process is still running the
+    # old one: Python read `ui.py` at import and a redraw cannot undo that. It
+    # stays up until the TUI is restarted, which is precisely what it asks for
+    # — a flash would be gone by the next repaint, when nothing has changed yet.
+    if st.get("updated"):
+        out += [_txt(l) for l in wrap_items(
+            [cli.c("✓ " + t("update_restart"), NOTICE)], w)]
     here = f" ({t('this_one')})"
     machines = [n + (here if d["local"] else "")
                 for n, d in sorted(srv.list_machines().items())]
@@ -793,6 +805,16 @@ def load_config(st):
         rows += [{"kind": "text", "text": l} for l in head]
         rows.append({"kind": "text",
                      "text": f"{'':<9}{_short_remote(url, w - 9) or t('no_remote')}"})
+    # The setup guide is folded away by default. Twenty-odd lines you read once
+    # and never again were the reason this screen did not fit a normal terminal,
+    # and the overflow was worse than cosmetic: the cursor only lands on
+    # SELECTABLE rows, the window follows the cursor, and the last selectable row
+    # was a module — so everything under it could not be scrolled to at all.
+    # Folded, the screen fits and the toggle is the last row, which is what lets
+    # the cursor drag the window to the very bottom when the terminal is small.
+    rows += [{"kind": "gap"}, {"kind": "guide", "open": bool(st.get("guide"))}]
+    if not st.get("guide"):
+        return rows
     for sub, donde, steps in (
             (t("sub_first_time"), "where_steps",
              ("step1", "step2", "step3", "step3b", "step3c")),
@@ -808,6 +830,10 @@ def load_config(st):
             # would push the ones below out of the window
             rows += [{"kind": "text", "text": l}
                      for l in wrap_text(t(k), w, indent="  ", hang=3)]
+    # closing toggle: with the guide open the text is what runs off the bottom,
+    # so the last row has to be one the cursor can reach
+    rows += [{"kind": "text", "text": ""},
+             {"kind": "guide", "open": True, "foot": True}]
     return rows
 
 
@@ -843,6 +869,12 @@ def fmt_config(r, w=100):
                 f"{count}{tail}")
     if r["kind"] == "sub":
         return "  " + cli.c(r["text"], cli.BOLD)
+    if r["kind"] == "guide":
+        if r.get("foot"):
+            return "  " + cli.c("▴ " + t("guide_close"), cli.DIM)
+        return ("  " + cli.c(("▾ " if r["open"] else "▸ ") + t("guide_open"), ACCENT)
+                + ("" if r["open"] or w < NARROW
+                   else cli.c("   " + t("guide_hint"), cli.DIM)))
     if r["kind"] == "module":
         mark = cli.c("[x]", ACCENT) if r["on"] else cli.c("[ ]", cli.DIM)
         return (f"  {mark} {cli._pad(r['id'], lab - 2, cli.BOLD)}"
@@ -877,6 +909,14 @@ def config_activate(st):
         srv.set_sync_prefs(sorted(on))
         st["flash"] = t("flash_module", id=row["id"],
                         state=t("syncing") if row["id"] in on else t("not_syncing"))
+    elif row["kind"] == "guide":
+        st["guide"] = not st.get("guide")
+        st = reload_tab(st)
+        # the cursor stays on the toggle it just pressed: folding the guide from
+        # its closing row would otherwise leave `sel` pointing past the end
+        st["sel"] = min(i for i, r in enumerate(st["rows"])
+                        if r.get("kind") == "guide")
+        return st
     elif row["kind"] == "fixed":
         st["flash"] = t("flash_always_on", id=row["id"])
         return st
@@ -1131,7 +1171,8 @@ def new_state():
     return {"tab": HOME, "sel": 0, "top": 0, "q": "", "mode": "list",
             "rows": [], "detail": [], "dscroll": 0, "agents": False,
             "loaded_at": 0.0, "flash": "", "confirm": None, "quit": False,
-            "fetch": False, "manifest": [], "pinned": [],
+            "fetch": False, "manifest": [], "pinned": [], "updated": False,
+            "guide": False,
             "proj": None, "flat": False, "mod": None, "w": 100,
             "dwrap": [], "dwrap_w": None, "job": None, "frame": 0,
             "cache": {}}
@@ -1208,6 +1249,15 @@ def _clamp(st, h):
         # and the cursor walks the modules at the end.
         st["top"] = max(0, min(st["sel"], len(st["rows"]) - vis))
         return st
+    if st["tab"] == CONFIG:
+        # above the first selectable row there is only its section header, and
+        # `top` can never climb past `sel`: without this, scrolling down and
+        # back up left the window one line short of the top for good.
+        idx = next((i for i, r in enumerate(st["rows"])
+                    if isinstance(r, dict) and r.get("kind") in SELECTABLE), None)
+        if idx is not None and st["sel"] <= idx:
+            st["top"] = 0
+            return st
     st["top"] = max(min(st["top"], st["sel"]), st["sel"] - vis + 1, 0)
     return st
 
@@ -1359,6 +1409,10 @@ def draw(st, w, h):
             keys = (cli.c(" " + t("filter", q=st["q"]), cli.YELLOW)
                     + cli.c("  " + keys, cli.DIM))
         bottom = st["flash"] or keys
+        if st["flash"] and busy():
+            # the spinner is the whole point: "fetching…" on its own could just
+            # as well be a message left over from a fetch that already ended
+            bottom = cli.c(f" {SPIN[st['frame'] % len(SPIN)]} ", ACCENT) + st["flash"]
     if total > vis > 0:
         # ponytail: the counter is a luxury — if it does not fit without eating a
         # key hint, it is not painted. The scrollbar already says there is more.
@@ -1373,7 +1427,7 @@ def draw(st, w, h):
 # every kind `config_activate`/`_handle_enter` knows how to act on. A row
 # missing here is invisible to the cursor: `_snap` walks straight past it and
 # `↵` can never reach it — which is exactly how the badge toggle shipped dead.
-SELECTABLE = ("accent", "lang", "badge", "module", "fixed", "item")
+SELECTABLE = ("accent", "lang", "badge", "module", "fixed", "item", "guide")
 
 
 def _snap(st, step):
@@ -1648,6 +1702,8 @@ def job_tick(st):
     st["flash"] = res.get("error") or res.get("message") or t("done")
     if kind == "update":
         _UPDATE["ts"] = 0.0
+        # only on success: an update that failed to merge has nothing to restart for
+        st["updated"] = st["updated"] or not res.get("error")
     st["loaded_at"] = 0.0
     return st
 
@@ -1734,6 +1790,16 @@ def drain(st, keys):
 _BG = {"thread": None, "box": None}
 
 
+def busy():
+    """Is a background reload running right now?
+
+    The bottom bar asks so it can animate: a message that sits there perfectly
+    still is indistinguishable from a hung one, which is precisely the doubt
+    `fetching…` used to leave.
+    """
+    return bool(_BG["thread"] and _BG["thread"].is_alive())
+
+
 def bg_reload(st):
     """Refresh the rows off the main loop, keeping the old ones on screen.
 
@@ -1744,14 +1810,17 @@ def bg_reload(st):
     (`home_lines` writes `pinned`, and it writes it into the copy), so a
     snapshot is all the thread needs.
     """
-    if _BG["thread"] and _BG["thread"].is_alive():
+    if busy():
         return st                       # one at a time; the cadence can wait
     if _BG["box"] is not None:
         rows, pinned, err = _BG["box"]
         _BG["box"] = None
         st["rows"], st["pinned"] = rows, pinned
-        if err:
-            st["flash"] = err
+        # unconditionally, same contract as reload_tab: the message that was up
+        # ("fetching…") described work that has just finished. Only setting it
+        # on error left it frozen on screen until an unrelated keypress wiped
+        # it, which is how a finished fetch looked exactly like a hung one.
+        st["flash"] = err
         st["sel"] = min(st["sel"], max(0, len(st["rows"]) - 1))
         st["loaded_at"] = time.monotonic()
         st["fetch"] = False
@@ -1777,8 +1846,8 @@ def tick(st):
     """Reload the active tab if its cadence expired, or advance the push/pull."""
     if st.get("job"):
         return job_tick(st)
-    if not st["rows"] and st["loaded_at"] == 0.0:
-        st["frame"] = int(time.monotonic() * 8)   # spin while the first load runs
+    if busy() or (not st["rows"] and st["loaded_at"] == 0.0):
+        st["frame"] = int(time.monotonic() * 8)   # spin while a load runs
     if st["mode"] == "list" and time.monotonic() - st["loaded_at"] >= CADENCE[st["tab"]]:
         # empty rows means the view just changed (tab switch, filter): there is
         # nothing to keep showing, so pay for it now instead of painting a
