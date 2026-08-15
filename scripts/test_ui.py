@@ -742,6 +742,15 @@ def test_config_teaches_the_two_remotes_and_how_to_update():
         assert txt.index("rename origin upstream") < txt.index("remote add origin")
         assert "sto update --apply" in txt and "sto update --link" in txt
         assert "yo/mio" in txt and "quien/sto-agentic-os" in txt
+        # the step everybody got stuck on: WHERE do I run this. Compared on the
+        # whitespace-collapsed text, because these lines are wrapped to the
+        # terminal and a phrase can straddle two of them.
+        plano = " ".join(txt.split())
+        assert "en la carpeta que clonaste" in plano
+        assert "El repo nuevo de GitHub NO se clona" in plano
+        assert "TU repo privado" in plano        # the other machine clones yours
+        # and the reassurance that lets you PUSH on a machine full of memories
+        assert "sin publicar nunca se pisan" in plano
     finally:
         (ui.srv.get_sync_prefs, ui.srv.CONFIG_MODULES,
          ui._origin, ui._upstream) = reales

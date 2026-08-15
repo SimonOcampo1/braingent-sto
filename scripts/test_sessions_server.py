@@ -1097,6 +1097,85 @@ def test_set_badge_leaves_no_status_line_behind_when_there_was_none():
 
 
 
+
+def test_decode_slug_walks_the_disk_back_to_the_real_path():
+    """The slug collapses separators, spaces (and maybe dots) into `-`, so it
+    cannot be parsed — but at each level the real children are the only
+    candidates, and encoding a real name forward is exact."""
+    import tempfile
+    raiz = Path(tempfile.mkdtemp()).resolve()
+    hondo = raiz / "OneDrive - UTN FRLP" / "mi app v1.2" / "src"
+    hondo.mkdir(parents=True)
+    (raiz / "OneDrive").mkdir()          # the prefix trap: shorter sibling
+    for rx in (srv._SLUG_SEP, srv._SLUG_SEP_DOT):
+        assert srv._decode_slug(rx.sub("-", str(hondo))) == hondo
+    # a path that is not on this disk resolves to nothing, and says so
+    assert srv._decode_slug("Z--no-existe-nada-de-esto") is None
+    assert srv._decode_slug("no-empieza-como-un-path") is None
+
+
+def test_slug_project_survives_claude_code_pruning_the_transcripts():
+    """The bug: Claude Code drops .jsonl at 30 days but keeps memory/, so any
+    project untouched for a month fell back to its raw slug — and the slug
+    carries the machine's path, so the same project on two machines stopped
+    being one project and their memories never merged."""
+    import tempfile
+    disco = Path(tempfile.mkdtemp()).resolve()
+    proyecto = disco / "Web App Projects" / "mi-repo"
+    proyecto.mkdir(parents=True)
+    slug_dir = Path(tempfile.mkdtemp()) / srv._SLUG_SEP.sub("-", str(proyecto))
+    (slug_dir / "memory").mkdir(parents=True)      # memories, no transcripts
+
+    assert not list(slug_dir.glob("*.jsonl"))
+    real = srv._PROJECT_NAMES
+    try:
+        srv._PROJECT_NAMES = {}
+        assert srv._slug_project(slug_dir) == "mi-repo"     # not the raw slug
+        assert (slug_dir / ".sto-project").read_text(encoding="utf-8") == "mi-repo"
+        # and the walk happens once: the marker answers from here on
+        proyecto.rename(proyecto.parent / "movido")
+        srv._PROJECT_NAMES = {}
+        assert srv._slug_project(slug_dir) == "mi-repo"
+    finally:
+        srv._PROJECT_NAMES = real
+
+
+def test_repair_memory_refiles_slug_folders_and_never_clobbers():
+    import tempfile
+    disco = Path(tempfile.mkdtemp()).resolve()
+    proyecto = disco / "mi-repo"
+    proyecto.mkdir(parents=True)
+    slug = srv._SLUG_SEP.sub("-", str(proyecto))
+
+    root = Path(tempfile.mkdtemp()) / "memory"
+    (root / slug / "PC").mkdir(parents=True)
+    (root / slug / "PC" / "vieja.md").write_text("del slug", encoding="utf-8")
+    (root / slug / "PC" / "choca.md").write_text("del slug", encoding="utf-8")
+    (root / "mi-repo" / "PC").mkdir(parents=True)
+    (root / "mi-repo" / "PC" / "choca.md").write_text("la buena", encoding="utf-8")
+
+    vacio = Path(tempfile.mkdtemp())
+    real = srv._PROJECT_NAMES
+    try:
+        srv._PROJECT_NAMES = {}
+        seco = srv.repair_memory(projects_dir=vacio, src=root, dry=True)
+        assert seco == [{"from": slug, "to": "mi-repo", "files": 2}]
+        assert (root / slug).exists()          # a dry run moves nothing
+
+        srv._PROJECT_NAMES = {}
+        assert srv.repair_memory(projects_dir=vacio, src=root)
+        assert not (root / slug).exists()      # the slug folder is gone
+        assert (root / "mi-repo" / "PC" / "vieja.md").exists()
+        # the copy already filed under the real identity wins
+        assert (root / "mi-repo" / "PC" / "choca.md").read_text(encoding="utf-8") == "la buena"
+
+        srv._PROJECT_NAMES = {}
+        assert srv.repair_memory(projects_dir=vacio, src=root) == []   # idempotent
+    finally:
+        srv._PROJECT_NAMES = real
+
+
+
 if __name__ == "__main__":
     test_session_meta()
     test_session_meta_redacts_title()
@@ -1149,4 +1228,7 @@ if __name__ == "__main__":
     test_sync_pull_applies_config_even_with_the_branch_up_to_date()
     test_set_badge_chains_the_previous_status_line_and_gives_it_back()
     test_set_badge_leaves_no_status_line_behind_when_there_was_none()
+    test_decode_slug_walks_the_disk_back_to_the_real_path()
+    test_slug_project_survives_claude_code_pruning_the_transcripts()
+    test_repair_memory_refiles_slug_folders_and_never_clobbers()
     print("OK")

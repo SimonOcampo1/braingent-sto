@@ -710,11 +710,16 @@ def load_config(st):
         rows += [{"kind": "text", "text": l} for l in head]
         rows.append({"kind": "text",
                      "text": f"{'':<9}{_short_remote(url, w - 9) or t('no_remote')}"})
-    for sub, steps in ((t("sub_first_time"), ("step1", "step2", "step3", "step3b")),
-                       (t("sub_each_machine"), ("step4", "step5", "step6")),
-                       (t("sub_updates"), ("step7", "step8", "step9"))):
+    for sub, donde, steps in (
+            (t("sub_first_time"), "where_steps",
+             ("step1", "step2", "step3", "step3b", "step3c")),
+            (t("sub_each_machine"), "where_more",
+             ("step4", "step5", "step6", "step6b", "step6c")),
+            (t("sub_updates"), None, ("step7", "step8", "step9"))):
         rows += [{"kind": "text", "text": ""}, {"kind": "sub", "text": sub}]
-        for k in steps:
+        # the "where do I run this" line first: that was the whole confusion,
+        # the steps never said which folder they belonged to
+        for k in ([donde] if donde else []) + list(steps):
             # wrapped here and not in `fmt_config`: the rows are the unit the
             # cursor and the scrollbar count, so a line that grows at paint time
             # would push the ones below out of the window

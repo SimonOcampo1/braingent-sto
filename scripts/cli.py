@@ -577,8 +577,18 @@ def cmd_config(*a):
 
 
 def cmd_memory(*args):
-    """sto memory [<project> | show <project>/<slug> | search <text> | sync]"""
+    """sto memory [<project> | show <project>/<slug> | search <text> | sync | repair]"""
     sub = args[0] if args else ""
+    if sub == "repair":
+        seco = "--apply" not in args
+        moves = srv.repair_memory(dry=seco)
+        if not moves:
+            return {"message": "  " + t("cli_mem_repair_none")}
+        out = [f"  {_pad(m['from'][:44], 46, DIM)}-> {_pad(m['to'], 26, CYAN)}"
+               f"{n_memories(m['files'])}" for m in moves]
+        out.append("  " + c(t("cli_mem_repair_hint") if seco
+                            else t("cli_mem_repaired", n=len(moves)), DIM))
+        return {"message": "\n".join(out)}
     if sub == "sync":
         n = srv.export_memory() + srv.import_memory()
         for dirs in srv._memory_dirs().values():

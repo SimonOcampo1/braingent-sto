@@ -820,6 +820,13 @@ def _memory_meta(text: str) -> dict:
 _STO_PROJECT_MARKER = ".sto-project"
 
 
+# The separators Claude Code collapses into `-`. Whether it also collapses a
+# dot is not something any project here can prove, so `_encodings` offers both
+# readings instead of betting on one.
+_SLUG_SEP = re.compile(r"[ /\\:]")
+_SLUG_SEP_DOT = re.compile(r"[ /\\:.]")
+
+
 def _slug_project(slug_dir: Path) -> str:
     """Cross-machine identity of ~/.claude/projects/<slug>/.
 
@@ -833,6 +840,13 @@ def _slug_project(slug_dir: Path) -> str:
     marker, every dormant project would end up falling back to the raw slug as
     soon as its sessions were gone, even if its identity had been resolved
     before.
+
+    When the sessions are gone AND there is no marker, the slug is decoded back
+    into a real path (`_decode_slug`) and that path is asked for its identity.
+    That is the case that used to lose: Claude Code prunes transcripts at 30
+    days, so any project you have not opened in a month became its own raw slug
+    — and since the slug carries the machine's path, the same project on two
+    machines stopped being the same project and their memories never merged.
 
     ponytail: the marker is authoritative — if the real identity changes (say a
     git remote is added after the first resolution), `.sto-project` has to be
@@ -859,13 +873,69 @@ def _slug_project(slug_dir: Path) -> str:
         except OSError:
             continue
         if cwd:
-            name = project_name(jsonl, cwd)
-            try:
-                marker.write_text(name, encoding="utf-8")
-            except OSError:
-                pass
-            return name
+            return _remember_project(marker, project_name(jsonl, cwd))
+    path = _decode_slug(slug_dir.name)
+    if path is not None:
+        return _remember_project(marker, project_name(path / "x", str(path)))
     return slug_dir.name
+
+
+def _remember_project(marker: Path, name: str) -> str:
+    try:
+        marker.write_text(name, encoding="utf-8")
+    except OSError:
+        pass  # ponytail: without the marker it resolves again next time
+    return name
+
+
+def _encodings(name: str) -> list[str]:
+    """How this directory name could appear inside a slug. The dot-keeping
+    reading comes first, so it wins when both would match."""
+    out = [_SLUG_SEP.sub("-", name)]
+    dotted = _SLUG_SEP_DOT.sub("-", name)
+    if dotted != out[0]:
+        out.append(dotted)
+    return out
+
+
+def _decode_slug(slug: str) -> Path | None:
+    """The slug back into the real directory, or None if it is not on this disk.
+
+    Claude Code builds the slug by collapsing every separator, space and dot of
+    the absolute path into `-`, which is not reversible on its own: nothing in
+    `Web-App-Projects` says where a folder ends. So instead of parsing it, walk
+    the filesystem — at each level the children are the only candidates, and
+    encoding a real name back is exact. Longest first, so `OneDrive - UTN FRLP`
+    wins over a sibling called `OneDrive`.
+
+    Only ever called for a project whose transcripts are gone, and the answer
+    is written to `.sto-project`, so the directory walk happens once.
+    """
+    m = re.match(r"^([A-Za-z])--", slug)
+    if m:
+        cur, rest = Path(m.group(1) + ":/"), slug[m.end():]
+    elif slug.startswith("-"):
+        cur, rest = Path("/"), slug[1:]
+    else:
+        return None                      # not a path-shaped slug
+    while rest:
+        try:
+            kids = sorted((k for k in cur.iterdir() if k.is_dir()),
+                          key=lambda k: -len(k.name))
+        except OSError:
+            return None                  # gone, or not ours to read
+        for child in kids:
+            hit = next((e for e in _encodings(child.name)
+                        if rest == e or rest.startswith(e + "-")), None)
+            if hit is None:
+                continue
+            if rest == hit:
+                return child
+            cur, rest = child, rest[len(hit) + 1:]
+            break
+        else:
+            return None                  # the path does not exist here
+    return cur
 
 
 def _memory_dirs(projects_dir=None) -> dict[str, list[Path]]:
@@ -1037,6 +1107,57 @@ def rebuild_index(memory_dir: Path) -> None:
     # newline="\n": without this Windows translates to CRLF and rewrites the
     # bytes of every MEMORY.md on every pull, even when the content is identical.
     idx.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8", newline="\n")
+
+
+def repair_memory(projects_dir=None, src=None, dry=False) -> list[dict]:
+    """Re-file memories filed under a raw slug instead of a project identity.
+
+    Only fixes what THIS machine can resolve — a folder holding another
+    machine's path decodes to nothing here, and repairing it is that machine's
+    job. Running it on both is what makes the two halves meet.
+
+    Returns [{from, to, files}]; `dry=True` decides nothing and moves nothing.
+    """
+    root = src if src is not None else KNOWLEDGE_MEMORY
+    moves: list[dict] = []
+    if not root.exists():
+        return moves
+    # the local markers first: without them the next export writes the old name
+    # straight back and the repair undoes itself
+    for slug in sorted((projects_dir or dx.PROJECTS_DIR).iterdir()
+                       if (projects_dir or dx.PROJECTS_DIR).exists() else []):
+        if slug.is_dir() and (slug / "memory").is_dir() and not dry:
+            _slug_project(slug)
+    for pdir in sorted(root.iterdir()):
+        if not pdir.is_dir():
+            continue
+        path = _decode_slug(pdir.name)
+        if path is None:
+            continue                      # not a slug, or not a path on this disk
+        name = project_name(path / "_", str(path))
+        if name == pdir.name or not name:
+            continue                      # already filed under its identity
+        files = [f for m in pdir.iterdir() if m.is_dir() for f in m.glob("*.md")]
+        moves.append({"from": pdir.name, "to": name, "files": len(files)})
+        if dry:
+            continue
+        for mdir in sorted(x for x in pdir.iterdir() if x.is_dir()):
+            dest = root / name / mdir.name
+            dest.mkdir(parents=True, exist_ok=True)
+            for f in sorted(mdir.glob("*.md")):
+                target = dest / f.name
+                # ponytail: never clobber. A same-named memory already filed
+                # under the real identity is the newer story; the slug copy is
+                # what got stranded.
+                if not target.exists():
+                    f.replace(target)
+                else:
+                    f.unlink()
+            for leftover in mdir.iterdir():
+                leftover.unlink()
+            mdir.rmdir()
+        pdir.rmdir()
+    return moves
 
 
 def list_memory(src=None) -> list[dict]:

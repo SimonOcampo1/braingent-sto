@@ -77,25 +77,59 @@ cd sto-agentic-os
 powershell -ExecutionPolicy Bypass -File scripts/install_sto_cli.ps1
 ```
 
-Open a new terminal and you have `sto`. Now make the clone yours — you keep two
-remotes, and which is which is the whole design:
+Open a new terminal and you have `sto`. Now make the clone yours.
 
-```bash
-# 1. create an empty PRIVATE repo at github.com/new (no README)
-# 2. this clone came from the public repo: that becomes `upstream`
-git remote rename origin upstream
-# 3. `origin` is yours, and it is the only one that ever sees your knowledge
-git remote add origin git@github.com:<you>/<your-repo>.git
-git push -u origin main
-sto push
-```
+> **Every command below runs inside the `sto-agentic-os/` folder you just
+> cloned.** The new GitHub repo is never cloned — you only need its URL.
+
+1. Go to **github.com/new** and create an empty **private** repo, no README.
+   Copy its URL.
+2. The clone came from the public repo, so that one becomes `upstream`:
+   ```bash
+   git remote rename origin upstream
+   ```
+3. Your new repo becomes `origin` — the only remote that ever sees your knowledge:
+   ```bash
+   git remote add origin git@github.com:<you>/<your-repo>.git
+   ```
+4. Push the code to your repo, which also sets the branch to track it:
+   ```bash
+   git push -u origin main
+   ```
+5. Push your knowledge — `sto push` exports sessions, memories and the
+   `~/.claude` modules you chose, commits and pushes them:
+   ```bash
+   sto push
+   ```
+
+Steps 4 and 5 are both in the same folder: the first publishes the engine, the
+second publishes what the engine collected.
 
 | remote | what lives there | who writes to it |
 |---|---|---|
 | `origin` | the engine **plus your sessions, memories and config** | only you, with `sto push` |
 | `upstream` | the engine, nothing else | whoever publishes the OS |
 
-On every other machine: clone *your* repo, run `scripts/install_sto_cli.ps1` inside the clone, and `sto pull`. From then on `sto push` / `sto pull` — or `p` / `l` inside `sto ui` — keep both machines identical.
+### On every other machine
+
+Here you *do* clone — and what you clone is **your private repo**, not the public one.
+
+```bash
+git clone git@github.com:<you>/<your-repo>.git
+cd <your-repo>
+powershell -ExecutionPolicy Bypass -File scripts/install_sto_cli.ps1
+sto pull     # brings and installs what the other machines have
+sto push     # uploads the memories this machine already had
+```
+
+That machine almost certainly has months of memories of its own already —
+`sto push` picks them up on the first run, no setup, no import step. And
+pulling first is safe: a pull never overwrites a local memory you have not
+published yet.
+
+From then on `sto push` / `sto pull` — or `p` / `l` inside `sto ui` — keep every
+machine identical. The same instructions live in `sto ui` › Config, next to the
+two remotes they are about.
 
 ### Getting updates to the OS itself
 
