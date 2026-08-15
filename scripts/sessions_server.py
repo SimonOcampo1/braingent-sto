@@ -755,6 +755,13 @@ def apply_plugins(claude_dir=None, repo_config=None, runner=None, dry=False) -> 
 # ── Knowledge sync (git-based, zero tokens) ─────────────────────────────
 REPO_ROOT = Path(__file__).parent.parent
 EXPORT_MAX_BYTES = 10 * 1024 * 1024
+# A session Claude Code is writing to right now grows again the second after the
+# push that carried it, so every push produced one more file for the other
+# machine to pull, and no machine was ever "up to date". Let a session sit still
+# before exporting it. ponytail: two minutes of wall clock, not a lock on the
+# file — the session you are in is written to on every message, and one that is
+# really over travels on the next push.
+EXPORT_SETTLE = 120
 
 
 def _git(*args, timeout=120):
@@ -810,6 +817,7 @@ def export_sessions(projects_dir=None, dest=None) -> int:
     dest = dest if dest is not None else KNOWLEDGE_SESSIONS / LOCAL_MACHINE
     pd = projects_dir or dx.PROJECTS_DIR
     dest.mkdir(parents=True, exist_ok=True)
+    now = time.time()
     (dest / "machine.json").write_text(  # device identity for other machines' UIs
         json.dumps({"name": dest.name, "type": machine_type()}), encoding="utf-8")
     written = 0
@@ -820,6 +828,8 @@ def export_sessions(projects_dir=None, dest=None) -> int:
             continue
         if st.st_size > EXPORT_MAX_BYTES:
             continue  # ponytail: giant sessions stay local
+        if now - st.st_mtime < EXPORT_SETTLE:
+            continue  # still being written
         meta = session_meta(p)  # parses every file each push; fine at ≤500 sessions
         if meta["n_prompts"] == 0:
             continue

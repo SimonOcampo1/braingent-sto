@@ -206,13 +206,16 @@ def sync_buttons(sy, w=100, up=0, down=0):
     # edit under scripts/ that the push was never going to commit.
     push_on = up > 0 or sy["ahead"] > 0
     pull_on = down > 0 or sy["behind"] > 0
+    # Two dim buttons are the same picture as "I have not checked yet". With
+    # nothing to move in either direction, say so.
+    ok = [cli.c(f"  ✓ {t('all_synced')}", cli.GREEN)] if not (push_on or pull_on) else []
     if w < BUTTONS_W:
-        return [cli.c(f"  [p] ↑ PUSH {up}", ACCENT if push_on else cli.DIM)
-                + cli.c(f"   [l] ↓ PULL {down}", ACCENT if pull_on else cli.DIM)]
+        return ok + [cli.c(f"  [p] ↑ PUSH {up}", ACCENT if push_on else cli.DIM)
+                     + cli.c(f"   [l] ↓ PULL {down}", ACCENT if pull_on else cli.DIM)]
     boxes = [button("p", "↑ PUSH", up, push_on), button("l", "↓ PULL", down, pull_on)]
     if w >= BUTTONS3_W:
         boxes.append(button("f", "⟳ FETCH", None, True))
-    return ["  " + "   ".join(fila) for fila in zip(*boxes)]
+    return ok + ["  " + "   ".join(fila) for fila in zip(*boxes)]
 
 
 def sync_preview(sy=None):

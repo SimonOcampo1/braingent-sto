@@ -1424,16 +1424,42 @@ def test_pending_items_enable_the_buttons_with_git_already_in_sync():
     # BUTTONS_W and not 100: this asks about the colour of PUSH/PULL, and at a
     # wide width the always-lit FETCH box shares the line with them
     w = ui.BUTTONS_W
-    assert accent not in ui.sync_buttons(sy, w, up=0, down=0)[1]
-    assert accent in ui.sync_buttons(sy, w, up=3, down=0)[1]
-    assert accent in ui.sync_buttons(sy, w, up=0, down=3)[1]
+    def tira(**kw):
+        return "\n".join(ui.sync_buttons(sy, w, **kw))
+    assert accent not in tira(up=0, down=0)
+    assert accent in tira(up=3, down=0)
+    assert accent in tira(up=0, down=3)
+
+
+def test_the_strip_says_it_is_synced_only_when_nothing_is_pending():
+    """Two dim buttons look the same as a screen that has not loaded yet, and
+    with the session churn fixed this state is now reachable."""
+    sy = {"ahead": 0, "behind": 0, "dirty": False}
+    verde = f"\033[{ui.cli.GREEN}m"
+    for w in (100, ui.BUTTONS_W, 40):
+        lineas = ui.sync_buttons(sy, w, up=0, down=0)
+        assert "\u2713" in ui.strip_ansi(lineas[0]), (w, lineas[0])   # above the buttons
+        assert verde in lineas[0], (w, lineas[0])
+        for kw in ({"up": 1}, {"down": 1}):
+            texto = ui.strip_ansi("\n".join(ui.sync_buttons(sy, w, **kw)))
+            assert "\u2713" not in texto, (w, kw)
+    for pend in ({"ahead": 1, "behind": 0}, {"ahead": 0, "behind": 1}):
+        malo = ui.sync_buttons({**pend, "dirty": False}, 100, up=0, down=0)
+        assert "\u2713" not in ui.strip_ansi("\n".join(malo)), pend
+    for lang in ui.LANGS:
+        real = ui.i18n.LANG
+        try:
+            ui.i18n.LANG = lang
+            assert ui.t("all_synced") != "all_synced"
+        finally:
+            ui.i18n.LANG = real
 
 
 def test_fetch_gets_a_button_when_there_is_room_and_the_legend_always():
     """↑↓ is read off the last `git fetch`, not off the network, so the way to
     refresh it had better be visible. `f` existed and nothing said so."""
     sy = {"ahead": 0, "behind": 0, "dirty": False}
-    ancho = ui.sync_buttons(sy, 100)
+    ancho = ui.sync_buttons(sy, 100)[1:]          # [0] is the synced legend
     assert len(ancho) == 3                        # sigue siendo una tira de 3
     txt = "\n".join(ui.strip_ansi(l) for l in ancho)
     assert "[f]" in txt and "FETCH" in txt

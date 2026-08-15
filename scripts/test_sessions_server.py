@@ -37,6 +37,14 @@ def _write_session(dirpath, name="11111111-2222-3333-4444-555555555555.jsonl"):
     return p
 
 
+def _settled(path, age=1000):
+    """Backdate a session so `export_sessions` does not read it as still being
+    written. Every export test needs it: files created now are `age` 0."""
+    import time
+    os.utime(path, (time.time() - age, time.time() - age))
+    return path
+
+
 def test_session_meta():
     with tempfile.TemporaryDirectory() as d:
         proj = Path(d) / "projX"
@@ -455,11 +463,12 @@ def test_export_sessions():
     with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as k:
         proj = Path(d) / "projX"
         proj.mkdir()
-        p = _write_session(proj)  # contains an sk- secret line
+        p = _settled(_write_session(proj))  # contains an sk- secret line
         empty = proj / "empty.jsonl"
         empty.write_text(json.dumps(
             {"type": "assistant", "message": {"role": "assistant",
              "content": [{"type": "tool_use", "name": "Read"}]}}), encoding="utf-8")
+        _settled(empty)
         dest = Path(k) / "MyPC"
 
         n = export_sessions(projects_dir=Path(d), dest=dest)
@@ -478,8 +487,13 @@ def test_export_sessions():
         assert t[1]["detail"] == "x.py", t[1]
         # second run: nothing new
         assert export_sessions(projects_dir=Path(d), dest=dest) == 0
-        # source modified later → re-exported
+        # being written right now → not exported yet, however new it is. The bug:
+        # the session doing the push grew again a second later, so every push
+        # left one file for the other machine to pull, forever.
         os.utime(p, None)
+        assert export_sessions(projects_dir=Path(d), dest=dest) == 0
+        # once it settles it travels
+        _settled(p, srv.EXPORT_SETTLE + 1)
         assert export_sessions(projects_dir=Path(d), dest=dest) == 1
 
 
@@ -493,6 +507,7 @@ def test_project_identity_from_cwd():
         rec["cwd"] = str(Path(d) / "not-a-git-repo" / "cool-repo")  # no .git → basename
         p = proj / "44444444-2222-3333-4444-555555555555.jsonl"
         p.write_text(json.dumps(rec), encoding="utf-8")
+        _settled(p)
 
         assert session_meta(p)["project"] == "cool-repo", session_meta(p)
         dest = Path(k) / "MyPC"
