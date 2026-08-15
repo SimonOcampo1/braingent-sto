@@ -373,7 +373,7 @@ def test_usage_renders_limits_and_warns_without_ccusage():
     old_color, cli.COLOR = cli.COLOR, False
     old_snap = cli.srv.usage_snapshot
     try:
-        cli.srv.usage_snapshot = lambda: {
+        cli.srv.usage_snapshot = lambda detail=True: {
             "block": None, "daily": [],
             "limits": [{"kind": "session", "label": None, "percent": 23,
                         "resetsAt": "2026-08-14T04:30:00.318370+00:00"},
@@ -386,14 +386,14 @@ def test_usage_renders_limits_and_warns_without_ccusage():
         assert "2026-08-14 04:30" in msg
         assert "ccusage unavailable" in msg      # it warns, it does not blow up
 
-        cli.srv.usage_snapshot = lambda: {
+        cli.srv.usage_snapshot = lambda detail=True: {
             "block": None, "error": None, "limits": None,
             "daily": [{"date": "2026-08-12", "inputTokens": 1000,
                        "outputTokens": 500, "totalCost": 1.5}]}
         msg2 = cli.cmd_usage()["message"]
         assert "2026-08-12" in msg2 and "1,500" in msg2 and "1.50" in msg2
 
-        cli.srv.usage_snapshot = lambda: {"block": None, "daily": [], "limits": None,
+        cli.srv.usage_snapshot = lambda detail=True: {"block": None, "daily": [], "limits": None,
                                           "error": "ccusage unavailable"}
         assert "error" in cli.cmd_usage()        # nothing to show at all: that is an error
     finally:
@@ -603,6 +603,100 @@ def test_timeline_lines_is_what_show_prints():
         assert any("hola" in l for l in lines)
 
 
+
+def test_memory_graph_carries_the_body_so_the_window_can_read_it():
+    """The graph window is one offline HTML file with no server behind it, so
+    `read memory` only works if the text travelled inside the JSON."""
+    import tempfile
+    root = Path(tempfile.mkdtemp()) / "memory" / "proj" / "PC"
+    root.mkdir(parents=True)
+    (root / "nota.md").write_text(
+        "---\nname: nota\ndescription: una\nmetadata:\n  type: user\n---\n\ncuerpo completo acá.\n",
+        encoding="utf-8")
+    src = root.parent.parent
+    sin = cli.srv.memory_graph(src=src)
+    con = cli.srv.memory_graph(src=src, bodies=True)
+    mem = lambda g: [n for n in g["nodes"] if n["kind"] == "memory"][0]
+    assert "body" not in mem(sin)                    # the API keeps paying nothing
+    assert mem(con)["body"] == "cuerpo completo acá."  # frontmatter stripped
+
+
+def test_the_graph_template_renders_markdown_and_escapes_it():
+    """The reader is a markdown subset written by hand (no CDN in an offline
+    file). Runs it under node when node is around; skipped otherwise."""
+    import shutil as sh
+    import subprocess
+    import tempfile
+    if not sh.which("node"):
+        return
+    html = cli.MEMORY_TEMPLATE.read_text(encoding="utf-8")
+    part = html.split("// ── the reader ──", 1)[1].split("// ── detail panel ──", 1)[0]
+    stub = """
+const esc = s => String(s).replace(/[<>&]/g, ch => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[ch]));
+const nodes = [{id:'p/otra', label:'otra', kind:'memory', type:'user', machine:'PC',
+                mtime:0, project:'p', body:''}];
+const byId = new Map(nodes.map(n => [n.id, n]));
+const day = () => '';
+const document = {getElementById: () => ({classList:{add(){},remove(){},contains:()=>false},
+  querySelectorAll:()=>[], set innerHTML(v){}, set textContent(v){}, set onclick(v){}, scrollTop:0})};
+"""
+    tail = """
+const html = md(['# T', '', 'a **b** `c` [[otra]] [[nadie]].', 'sigue.', '',
+                 '- uno', '', '```', '<script>x</script>', '```'].join(String.fromCharCode(10)));
+const must = ['<h3>T</h3>', '<b>b</b>', '<code>c</code>', 'class="wiki" data-id="p/otra"',
+              'class="dead"', '<ul><li>uno</li></ul>', '&lt;script&gt;x&lt;/script&gt;',
+              'sigue.</p>'];
+let bad = must.filter(m => !html.includes(m));
+if (html.includes('<script>')) bad.push('raw script survived');
+if (bad.length) { console.error(bad.join(' | ')); process.exit(1); }
+"""
+    d = Path(tempfile.mkdtemp()) / "reader.js"
+    d.write_text(stub + part + tail.replace("`", chr(96)), encoding="utf-8")
+    r = subprocess.run(["node", str(d)], capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stdout + r.stderr
+
+
+
+
+def test_the_graph_html_survives_a_memory_that_quotes_markup():
+    """Two real bugs, both fired the day memory bodies started travelling:
+
+    1. a memory quoting `<script` put the HTML tokenizer into double-escaped
+       state, so the real closing tag stopped closing the block;
+    2. the template mentioned the data placeholder in its own opening comment,
+       so the substitution hit both copies — and a memory quoting an HTML
+       comment terminator closed that comment early and dumped the entire
+       graph into the page as text.
+    """
+    import tempfile
+    tpl = cli.MEMORY_TEMPLATE.read_text(encoding="utf-8")
+    assert tpl.count(cli.PLACEHOLDER) == 1      # bug 2: one copy, in the script
+
+    nasty = '<script>x</script> <!-- y --> ' + repr(chr(0x2028))[1:-1]
+    out = cli._embeddable(json.dumps({"body": nasty + chr(0x2028)}))
+    assert "<" not in out                      # bug 1: no raw markup at all
+    assert chr(0x2028) not in out               # legal JSON, a newline to JS
+    assert json.loads(out)["body"].startswith(nasty)   # and it still round-trips
+
+    root = Path(tempfile.mkdtemp()) / "memory" / "proj" / "PC"
+    root.mkdir(parents=True)
+    (root / "n.md").write_text("cuerpo con <script>alert(1)</script> y <!-- x -->",
+                               encoding="utf-8")
+    real = cli.srv.KNOWLEDGE_MEMORY
+    try:
+        cli.srv.KNOWLEDGE_MEMORY = root.parent.parent
+        built = cli.build_memory_graph(dest=Path(tempfile.mkdtemp()) / "g.html")
+    finally:
+        cli.srv.KNOWLEDGE_MEMORY = real
+    html = built.read_text(encoding="utf-8")
+    # the page still ends where it should: one script, one canvas, and the
+    # markup the memory quoted never became markup
+    assert html.count("</script>") == 1
+    assert html.index("<canvas") < html.index("<script>")
+    assert "alert(1)" in html and "<script>alert(1)" not in html
+
+
+
 if __name__ == "__main__":
     test_cached_sessions_reuses_entry_and_reparses_on_change()
     test_cached_sessions_drops_deleted_and_survives_corrupt_cache()
@@ -633,4 +727,7 @@ if __name__ == "__main__":
     test_graph_open_without_the_html()
     test_cached_sessions_hides_subagent_sessions_by_default()
     test_timeline_lines_is_what_show_prints()
+    test_memory_graph_carries_the_body_so_the_window_can_read_it()
+    test_the_graph_template_renders_markdown_and_escapes_it()
+    test_the_graph_html_survives_a_memory_that_quotes_markup()
     print("OK")

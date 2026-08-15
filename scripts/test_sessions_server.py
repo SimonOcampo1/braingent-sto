@@ -937,8 +937,12 @@ def test_sync_incoming_lists_paths_and_reports_fetch_error():
                                               "ahead": 0, "behind": 2, "dirty": False,
                                               "machine": "PC", "fetchError": None}
         srv._git = lambda *a, **k: (0, "knowledge/memory/proj/PC/nota.md")
-        assert srv.sync_incoming() == {"paths": ["knowledge/memory/proj/PC/nota.md"],
-                                       "error": None}
+        out = srv.sync_incoming()
+        assert out["paths"] == ["knowledge/memory/proj/PC/nota.md"]
+        assert out["error"] is None
+        # a pull is not only what git carries: these two say what would land on
+        # THIS machine even with the branch already up to date
+        assert "activate" in out and "memories" in out
 
         srv.sync_status = lambda fetch=True: {"remote": "git@x", "branch": "main",
                                               "ahead": 0, "behind": 0, "dirty": False,
@@ -968,6 +972,129 @@ def test_sync_incoming_asks_git_for_the_remote_side_only():
         assert not any("HEAD..origin/main" in a for a in vistos)
     finally:
         srv._git, srv.sync_status = real_git, real_status
+
+
+
+def test_update_apply_refuses_an_unrelated_repo_instead_of_forcing_a_merge():
+    """A repo copied instead of forked shares no commit with upstream. Merging
+    that with --allow-unrelated-histories behind the user's back is how you
+    lose a working tree; `update_link` is the explicit, one-time door."""
+    reales = (srv._git, srv.update_status, srv.sync_status)
+    try:
+        srv.update_status = lambda fetch=True: {"available": 8, "url": "u",
+                                                "linked": False, "log": [], "error": None}
+        srv._git = lambda *a, **k: (_ for _ in ()).throw(AssertionError("no git"))
+        out = srv.update_apply()
+        assert "error" in out and "--link" in out["error"]
+    finally:
+        srv._git, srv.update_status, srv.sync_status = reales
+
+
+def test_update_apply_never_merges_over_uncommitted_work():
+    reales = (srv._git, srv.update_status, srv.sync_status)
+    try:
+        srv.update_status = lambda fetch=True: {"available": 2, "url": "u",
+                                                "linked": True, "log": [], "error": None}
+        srv.sync_status = lambda fetch=True: {"remote": "x", "branch": "main", "ahead": 0,
+                                              "behind": 0, "dirty": True, "machine": "PC",
+                                              "fetchError": None}
+        srv._git = lambda *a, **k: (_ for _ in ()).throw(AssertionError("no git"))
+        assert "uncommitted" in srv.update_apply()["error"]
+    finally:
+        srv._git, srv.update_status, srv.sync_status = reales
+
+
+def test_update_apply_merges_upstream_and_says_how_much():
+    vistos, reales = [], (srv._git, srv.update_status, srv.sync_status)
+    try:
+        srv.update_status = lambda fetch=True: {"available": 3, "url": "u",
+                                                "linked": True, "log": [], "error": None}
+        srv.sync_status = lambda fetch=True: {"remote": "x", "branch": "main", "ahead": 0,
+                                              "behind": 0, "dirty": False, "machine": "PC",
+                                              "fetchError": None}
+
+        def git(*a, **k):
+            vistos.append(a)
+            if a[0] == "rev-parse":
+                return 0, "upstream/main"
+            return 0, ""
+        srv._git = git
+        out = srv.update_apply()
+        assert out["ok"] and "3 commit" in out["message"]
+        merges = [a for a in vistos if a[0] == "merge"]
+        assert len(merges) == 1 and "--allow-unrelated-histories" not in merges[0]
+    finally:
+        srv._git, srv.update_status, srv.sync_status = reales
+
+
+def test_sync_pull_applies_config_even_with_the_branch_up_to_date():
+    """The bug: `behind == 0` skipped apply_config, so a skill sitting in the
+    repo stayed uninstalled on this machine and PULL had nothing to do."""
+    aplicados, reales = [], (srv._git, srv.sync_status, srv.apply_config,
+                             srv.import_memory, srv.get_sync_prefs)
+    try:
+        srv.sync_status = lambda fetch=True: {"remote": "x", "branch": "main", "ahead": 0,
+                                              "behind": 0, "dirty": False, "machine": "PC",
+                                              "fetchError": None}
+        srv._git = lambda *a, **k: (0, "")
+        srv.get_sync_prefs = lambda: ["skills"]
+        srv.apply_config = lambda mods, **k: aplicados.append(mods) or 2
+        srv.import_memory = lambda *a, **k: 0
+        out = srv.sync_pull()
+        assert aplicados == [["skills"]]
+        assert out["ok"] and "2 config file" in out["message"]
+    finally:
+        (srv._git, srv.sync_status, srv.apply_config,
+         srv.import_memory, srv.get_sync_prefs) = reales
+
+
+
+
+def test_set_badge_chains_the_previous_status_line_and_gives_it_back():
+    """settings.json takes one statusLine. Installing ours by overwriting is
+    how a user loses the badge they already had, so the old command is kept
+    aside and restored when the badge is turned off."""
+    import tempfile
+    reales = (srv.SETTINGS, srv.UI_PREFS)
+    try:
+        d = Path(tempfile.mkdtemp())
+        srv.SETTINGS, srv.UI_PREFS = d / "settings.json", d / "sto-ui.json"
+        otro = "powershell -File otro.ps1"
+        srv.SETTINGS.write_text(json.dumps({"model": "x",
+                                            "statusLine": {"type": "command",
+                                                           "command": otro}}),
+                                encoding="utf-8")
+        assert srv.badge_status() == {"on": False, "other": otro}
+
+        assert srv.set_badge(True)["ok"]
+        st = srv.badge_status()
+        assert st["on"] and st["other"] == otro
+        conf = json.loads(srv.SETTINGS.read_text(encoding="utf-8"))
+        assert conf["statusLine"]["command"] == srv.statusline_cmd()
+        assert conf["model"] == "x"            # the rest of settings is untouched
+
+        assert srv.set_badge(False)["ok"]
+        conf = json.loads(srv.SETTINGS.read_text(encoding="utf-8"))
+        assert conf["statusLine"]["command"] == otro
+        assert srv.badge_status()["on"] is False
+    finally:
+        srv.SETTINGS, srv.UI_PREFS = reales
+
+
+def test_set_badge_leaves_no_status_line_behind_when_there_was_none():
+    import tempfile
+    reales = (srv.SETTINGS, srv.UI_PREFS)
+    try:
+        d = Path(tempfile.mkdtemp())
+        srv.SETTINGS, srv.UI_PREFS = d / "settings.json", d / "sto-ui.json"
+        srv.SETTINGS.write_text("{}", encoding="utf-8")
+        srv.set_badge(True)
+        assert srv.badge_status()["on"]
+        srv.set_badge(False)
+        assert "statusLine" not in json.loads(srv.SETTINGS.read_text(encoding="utf-8"))
+    finally:
+        srv.SETTINGS, srv.UI_PREFS = reales
+
 
 
 if __name__ == "__main__":
@@ -1016,4 +1143,10 @@ if __name__ == "__main__":
     test_sync_stage_exports_and_returns_staged_paths()
     test_sync_incoming_lists_paths_and_reports_fetch_error()
     test_sync_incoming_asks_git_for_the_remote_side_only()
+    test_update_apply_refuses_an_unrelated_repo_instead_of_forcing_a_merge()
+    test_update_apply_never_merges_over_uncommitted_work()
+    test_update_apply_merges_upstream_and_says_how_much()
+    test_sync_pull_applies_config_even_with_the_branch_up_to_date()
+    test_set_badge_chains_the_previous_status_line_and_gives_it_back()
+    test_set_badge_leaves_no_status_line_behind_when_there_was_none()
     print("OK")

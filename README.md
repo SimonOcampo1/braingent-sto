@@ -72,21 +72,49 @@ sto-agentic-os/
 ## 💻 Setup
 
 ```bash
-git clone https://github.com/<you>/sto-agentic-os.git
+git clone https://github.com/SimonOcampo1/sto-agentic-os.git
 cd sto-agentic-os
 powershell -ExecutionPolicy Bypass -File scripts/install_sto_cli.ps1
 ```
 
-Open a new terminal and you have `sto`. Then point it at a repo of your own:
+Open a new terminal and you have `sto`. Now make the clone yours — you keep two
+remotes, and which is which is the whole design:
 
 ```bash
 # 1. create an empty PRIVATE repo at github.com/new (no README)
+# 2. this clone came from the public repo: that becomes `upstream`
+git remote rename origin upstream
+# 3. `origin` is yours, and it is the only one that ever sees your knowledge
 git remote add origin git@github.com:<you>/<your-repo>.git
 git push -u origin main
 sto push
 ```
 
+| remote | what lives there | who writes to it |
+|---|---|---|
+| `origin` | the engine **plus your sessions, memories and config** | only you, with `sto push` |
+| `upstream` | the engine, nothing else | whoever publishes the OS |
+
 On every other machine: clone *your* repo, run `scripts/install_sto_cli.ps1` inside the clone, and `sto pull`. From then on `sto push` / `sto pull` — or `p` / `l` inside `sto ui` — keep both machines identical.
+
+### Getting updates to the OS itself
+
+`sto update` merges `upstream` into your repo. If you skipped the rename above
+it adds the remote itself, pointing at where the OS is published.
+
+```
+sto update            # what is available
+sto update --apply    # bring it down   (or `u` inside `sto ui`)
+```
+
+Your memories cannot be overwritten by an update, and this is structural rather
+than a promise: the published repo has never held a single file under
+`knowledge/memory/`, so a merge has nothing to bring there.
+
+If you made your repo by copying files instead of cloning or forking, the two
+histories share no commit and git refuses to merge — the home says so. `sto
+update --link` grafts them once, keeping every local file exactly as it is;
+from then on `sto update` is an ordinary merge.
 
 > Keep the repo **private**. It carries your session transcripts and memories.
 
@@ -109,7 +137,9 @@ Want the web app too? `start.cmd` installs the front-end dependencies, starts th
 | `sto config` | which `~/.claude` modules are syncing |
 | `sto machines` | the machines feeding the repo |
 | `sto usage` | plan limits and recent spend |
-| `sto graph [--memory\|--open\|<note>]` | memory graph window, repo graph, or a node's neighbours |
+| `sto graph [--memory\|--open\|<note>]` | memory graph window (read any memory in full), repo graph, or a node's neighbours |
+| `sto update [--apply]` | bring OS updates down from upstream — never touches your knowledge |
+| `sto badge [--install\|--off]` | the `◆ STO` badge in Claude Code's status line |
 
 ---
 

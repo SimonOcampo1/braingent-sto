@@ -500,9 +500,31 @@ def _module_files(base: Path, module: str):
                     yield f, f.relative_to(base)
 
 
-def export_config(modules, claude_dir=None, repo_config=None, home=None) -> int:
+def _same(target: Path, text: str | None, blob: bytes | None) -> bool:
+    """Is `target` already exactly what we were about to write?
+
+    Skipping the identical write is not only speed (149 skill files got
+    rewritten byte-for-byte on every single export): rewriting bumps the mtime,
+    and mtime is what `export_memory` and the git preview use as change
+    detector.
+    """
+    try:
+        if text is not None:
+            return target.read_text(encoding="utf-8", errors="replace") == text
+        return target.read_bytes() == blob
+    except OSError:
+        return False
+
+
+def export_config(modules, claude_dir=None, repo_config=None, home=None,
+                  dry=False) -> int:
     """Copy enabled config modules into knowledge/config/<module>/, home paths
-    tokenized as {{HOME}}, secrets redacted. Returns files written."""
+    tokenized as {{HOME}}, secrets redacted. Returns files written.
+
+    `dry=True` writes nothing and returns how many files *would* change — that
+    is what the home preview needs to say "this push carries 3 config files"
+    without touching the disk on every repaint.
+    """
     cd = claude_dir or CLAUDE_DIR
     cfg = repo_config if repo_config is not None else KNOWLEDGE_CONFIG
     home = home or str(Path.home())
@@ -511,24 +533,39 @@ def export_config(modules, claude_dir=None, repo_config=None, home=None) -> int:
         if m not in CONFIG_MODULES:
             continue
         if m == "plugins":
-            written += export_plugins(claude_dir=cd, repo_config=cfg)
+            written += export_plugins(claude_dir=cd, repo_config=cfg, dry=dry)
             continue
         dest_root = cfg / m
         for f, rel in _module_files(cd, m):
             out = dest_root / rel
-            out.parent.mkdir(parents=True, exist_ok=True)
+            text = blob = None
             if f.suffix.lower() in _TEXT_EXT:
-                out.write_text(dx._redact(_tokenize(f.read_text(encoding="utf-8", errors="replace"), home)),
-                               encoding="utf-8")
+                text = dx._redact(_tokenize(f.read_text(encoding="utf-8", errors="replace"), home))
             else:
-                out.write_bytes(f.read_bytes())
+                blob = f.read_bytes()
+            if _same(out, text, blob):
+                continue
             written += 1
+            if dry:
+                continue
+            out.parent.mkdir(parents=True, exist_ok=True)
+            if text is not None:
+                out.write_text(text, encoding="utf-8")
+            else:
+                out.write_bytes(blob)
     return written
 
 
-def apply_config(modules, claude_dir=None, repo_config=None, home=None) -> int:
+def apply_config(modules, claude_dir=None, repo_config=None, home=None,
+                 dry=False) -> int:
     """Write repo config modules into ~/.claude, {{HOME}} resolved for THIS
-    machine. Existing files are backed up under ~/.claude/.sto-backup/<ts>/."""
+    machine. Existing files are backed up under ~/.claude/.sto-backup/<ts>/.
+
+    `dry=True` writes nothing and returns how many files a pull would actually
+    activate on this machine. That number is the whole point of the PULL
+    button: `git` being up to date says nothing about whether the skills and
+    plugins the repo carries are installed *here*.
+    """
     import shutil as sh
     from datetime import datetime
     cd = claude_dir or CLAUDE_DIR
@@ -538,7 +575,7 @@ def apply_config(modules, claude_dir=None, repo_config=None, home=None) -> int:
     applied = 0
     for m in modules:
         if m == "plugins":
-            applied += apply_plugins(claude_dir=cd, repo_config=cfg)
+            applied += apply_plugins(claude_dir=cd, repo_config=cfg, dry=dry)
             continue
         src_root = cfg / m
         if m not in CONFIG_MODULES or not src_root.is_dir():
@@ -548,17 +585,25 @@ def apply_config(modules, claude_dir=None, repo_config=None, home=None) -> int:
                 continue
             rel = f.relative_to(src_root)
             target = cd / rel
+            text = blob = None
+            if f.suffix.lower() in _TEXT_EXT:
+                text = _detokenize(f.read_text(encoding="utf-8", errors="replace"), home)
+            else:
+                blob = f.read_bytes()
+            if _same(target, text, blob):
+                continue
+            applied += 1
+            if dry:
+                continue
             if target.exists():
                 bpath = backup / rel
                 bpath.parent.mkdir(parents=True, exist_ok=True)
                 sh.copy2(target, bpath)
             target.parent.mkdir(parents=True, exist_ok=True)
-            if f.suffix.lower() in _TEXT_EXT:
-                target.write_text(_detokenize(f.read_text(encoding="utf-8", errors="replace"), home),
-                                  encoding="utf-8")
+            if text is not None:
+                target.write_text(text, encoding="utf-8")
             else:
-                target.write_bytes(f.read_bytes())
-            applied += 1
+                target.write_bytes(blob)
     return applied
 
 
@@ -613,16 +658,20 @@ def _repo_plugins(repo_config=None) -> tuple[dict, list[str]]:
         return {}, []
 
 
-def export_plugins(claude_dir=None, repo_config=None) -> int:
+def export_plugins(claude_dir=None, repo_config=None, dry=False) -> int:
     """Write the local plugin manifest into knowledge/config/plugins/. 1 file."""
     cfg = repo_config if repo_config is not None else KNOWLEDGE_CONFIG
     marketplaces, plugins = _local_plugins(claude_dir)
     if not marketplaces and not plugins:
         return 0
     out = cfg / "plugins" / "plugins.json"
+    text = json.dumps({"marketplaces": marketplaces, "plugins": plugins}, indent=1)
+    if _same(out, text, None):
+        return 0
+    if dry:
+        return 1
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps({"marketplaces": marketplaces, "plugins": plugins},
-                              indent=1), encoding="utf-8")
+    out.write_text(text, encoding="utf-8")
     return 1
 
 
@@ -648,11 +697,13 @@ def _claude_plugin(*args) -> bool:
         return False
 
 
-def apply_plugins(claude_dir=None, repo_config=None, runner=None) -> int:
+def apply_plugins(claude_dir=None, repo_config=None, runner=None, dry=False) -> int:
     """Install repo-manifest plugins missing on this machine. Returns installs.
     Never uninstalls: extra local plugins are left alone."""
     run = runner or _claude_plugin
     missing_mk, missing_pl = plugins_to_apply(claude_dir, repo_config)
+    if dry:
+        return len(missing_pl)
     for repo in missing_mk.values():
         run("marketplace", "add", repo)
     return sum(1 for p in missing_pl if run("install", p))
@@ -849,11 +900,16 @@ def _newest(dirs) -> dict[str, Path]:
     return best
 
 
-def export_memory(projects_dir=None, dest=None) -> int:
+def export_memory(projects_dir=None, dest=None, dry=False) -> int:
     """Mirror the local memory into knowledge/memory/<project>/<machine>/.
 
     A real mirror (it deletes what is no longer local) but scoped to this
-    machine's folder, so it cannot destroy what another one learned."""
+    machine's folder, so it cannot destroy what another one learned.
+
+    `dry=True` writes nothing and returns how many memories a push would carry.
+    Without it the home preview showed 0 memories until you actually pressed
+    `p`: nothing is dirty in git until the export has run.
+    """
     root = dest if dest is not None else KNOWLEDGE_MEMORY
     written = 0
     for project, dirs in _memory_dirs(projects_dir).items():
@@ -863,24 +919,33 @@ def export_memory(projects_dir=None, dest=None) -> int:
         if not src:
             continue  # no real memories: do not create an empty folder
         out = root / project / LOCAL_MACHINE
-        out.mkdir(parents=True, exist_ok=True)
+        if not dry:
+            out.mkdir(parents=True, exist_ok=True)
         for f in out.glob("*.md"):
             if f.name not in src:
-                f.unlink()
+                written += 1          # a deletion travels too
+                if not dry:
+                    f.unlink()
         for name, f in src.items():
             st = f.stat()
             tgt = out / name
             if tgt.exists() and tgt.stat().st_mtime >= st.st_mtime:
                 continue
+            written += 1
+            if dry:
+                continue
             tgt.write_text(dx._redact(f.read_text(encoding="utf-8", errors="replace")),
                            encoding="utf-8")
             os.utime(tgt, (st.st_atime, st.st_mtime))  # mtime = detector de cambio
-            written += 1
     return written
 
 
-def import_memory(projects_dir=None, src=None) -> int:
+def import_memory(projects_dir=None, src=None, dry=False) -> int:
     """Merge knowledge/memory/<project>/*/ into the local memory. Returns writes.
+
+    `dry=True` writes nothing and returns how many memories a pull would land
+    on this machine — the number the PULL button needs, since a repo that is
+    up to date in git can still be holding memories this machine never got.
 
     It does not decide "newest mtime wins" between local and remote: git does
     not preserve mtimes, so a file arriving through a merge/checkout is stamped
@@ -931,9 +996,11 @@ def import_memory(projects_dir=None, src=None) -> int:
                 else:
                     if mine_file.exists():
                         continue  # deliberate local delete: not resurrected
+                written += 1
+                if dry:
+                    continue
                 tgt.write_text(win_text, encoding="utf-8")
                 os.utime(tgt, (st.st_atime, st.st_mtime))
-                written += 1
     return written
 
 
@@ -1014,8 +1081,13 @@ def _proj_label(slug: str) -> str:
     return "-".join(parts[-3:]) if len(parts) > 3 else slug
 
 
-def memory_graph(src=None) -> dict:
+def memory_graph(src=None, bodies=False) -> dict:
     """The repo's memories as a graph: {nodes, links}.
+
+    `bodies=True` carries each memory's full text on its node. The graph window
+    is a single offline HTML file with no server behind it, so reading a memory
+    there means the text travelled with the JSON — ~120 KB for a repo this
+    size, which is nothing next to being able to actually read what you clicked.
 
     One node per memory and one per project. Edges: every memory hangs off its
     project, and every `[[wikilink]]` is a memory→memory edge. The link resolves
@@ -1035,10 +1107,18 @@ def memory_graph(src=None) -> dict:
                       "n": proj["count"], "machines": proj["machines"]})
         for m in proj["memories"]:
             mid = f"{proj['project']}/{m['slug']}"
-            nodes.append({"id": mid, "label": m["slug"], "kind": "memory",
-                          "type": m["type"], "machine": m["machine"],
-                          "project": proj["project"], "desc": m["description"],
-                          "mtime": m["mtime"]})
+            node = {"id": mid, "label": m["slug"], "kind": "memory",
+                    "type": m["type"], "machine": m["machine"],
+                    "project": proj["project"], "desc": m["description"],
+                    "mtime": m["mtime"]}
+            if bodies:
+                f = root / proj["project"] / m["machine"] / f"{m['slug']}.md"
+                try:
+                    node["body"] = _strip_frontmatter(
+                        f.read_text(encoding="utf-8", errors="replace")).strip()
+                except OSError:
+                    node["body"] = ""
+            nodes.append(node)
             links.append({"source": mid, "target": pid, "kind": "in"})
             per_project.setdefault(proj["project"], {})[m["slug"]] = mid
             global_slug.setdefault(m["slug"], []).append(mid)
@@ -1065,13 +1145,52 @@ def memory_graph(src=None) -> dict:
                        "links": sum(1 for l in links if l["kind"] == "link")}}
 
 
+FETCH_TTL = 60  # seconds: a network round trip per `sto status` is the whole cost
+
+
+def _stale_fetch_ref(ref: str, ttl=FETCH_TTL) -> bool:
+    """Same idea as `_stale_fetch`, per remote: git touches the packed/loose
+    ref file of a remote when it fetches it, so upstream and origin get their
+    own clock instead of shadowing each other through FETCH_HEAD."""
+    try:
+        import time as _t
+        code, out = _git("for-each-ref", "--format=%(refname)", ref)
+        if code != 0 or not out.strip():
+            return True
+        newest = max((REPO_ROOT / ".git" / r.strip()).stat().st_mtime
+                     for r in out.splitlines() if r.strip()
+                     and (REPO_ROOT / ".git" / r.strip()).exists())
+        return _t.time() - newest > ttl
+    except (OSError, ValueError):
+        return True
+
+
+def _stale_fetch(ttl=FETCH_TTL) -> bool:
+    """Has it been long enough since the last `git fetch` to bother again?
+
+    git stamps .git/FETCH_HEAD on every fetch, so the answer is already on
+    disk and survives process boundaries — which is what matters, since each
+    `sto <cmd>` is a new process that used to fetch from scratch.
+
+    ponytail: FETCH_HEAD is shared by every remote, so a fetch of `upstream`
+    also holds origin off for a minute. One stat() beats the `for-each-ref`
+    subprocess `_stale_fetch_ref` needs, and a 60 s window costs nobody
+    anything — press `f` on the home if you want it now.
+    """
+    try:
+        import time as _t
+        return _t.time() - (REPO_ROOT / ".git" / "FETCH_HEAD").stat().st_mtime > ttl
+    except OSError:
+        return True
+
+
 def sync_status(fetch=True) -> dict:
     code, remote = _git("remote", "get-url", "origin")
     if code != 0:
         return {"remote": None, "branch": None, "ahead": 0, "behind": 0,
                 "dirty": False, "machine": LOCAL_MACHINE, "fetchError": None}
     fetch_error = None
-    if fetch:
+    if fetch and _stale_fetch():
         fcode, fout = _git("fetch", "--quiet", "origin")
         if fcode != 0:
             fetch_error = fout or "fetch failed"
@@ -1097,7 +1216,6 @@ def sync_pull(progress=None) -> dict:
         return {"error": "no git remote configured"}
     if st["fetchError"]:
         return {"error": f"fetch failed: {st['fetchError']}"}
-    applied = 0
     if st["behind"] > 0:
         if st["dirty"]:
             return {"error": "working tree has uncommitted changes: commit or stash them first"}
@@ -1106,8 +1224,13 @@ def sync_pull(progress=None) -> dict:
         if code != 0:
             _git("merge", "--abort")
             return {"error": f"merge conflict, aborted: {out[:400]}"}
-        say("s_apply")
-        applied = apply_config(get_sync_prefs())  # bring enabled ~/.claude modules up to date
+    # apply_config runs whether or not there were commits to merge. Having the
+    # latest bytes from GitHub is not the point of a pull: the point is that
+    # this machine ends up with the same skills, plugins and settings actually
+    # installed. A repo that is up to date can still be holding a skill this
+    # machine never activated.
+    say("s_apply")
+    applied = apply_config(get_sync_prefs())
     # import_memory() always runs, even with no new commits to bring down: a
     # project with no local slug only materialises on the first pull after it is
     # opened, and with the repo up to date that pull never reached import_memory().
@@ -1118,6 +1241,8 @@ def sync_pull(progress=None) -> dict:
             rebuild_index(d)
     if st["behind"] == 0:
         msg = "already up to date"
+        if applied:
+            msg += f" · applied {applied} config file(s)"
         if imported:
             msg += f" · {imported} memoria(s)"
         return {"ok": True, "message": msg, "status": st}
@@ -1127,6 +1252,180 @@ def sync_pull(progress=None) -> dict:
     if imported:
         msg += f" · {imported} memoria(s)"
     return {"ok": True, "message": msg, "status": sync_status(fetch=False)}
+
+
+# ── The badge in Claude Code's status line ──────────────────────────────
+# settings.json holds exactly one `statusLine`, so installing ours by
+# overwriting is how somebody loses the badge they already had. Instead the
+# command we install is a wrapper: it runs whatever was there, prints its
+# output, and appends the STO badge. Turning it off puts the old one back.
+
+UI_PREFS = CLAUDE_DIR / "sto-ui.json"
+SETTINGS = CLAUDE_DIR / "settings.json"
+
+
+def _ui_prefs() -> dict:
+    try:
+        return json.loads(UI_PREFS.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def _write_ui_prefs(d: dict) -> None:
+    try:
+        UI_PREFS.write_text(json.dumps(d, indent=1), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def statusline_cmd() -> str:
+    return f'python "{Path(__file__).parent / "statusline.py"}"'
+
+
+def badge_status() -> dict:
+    """{on, other} — is the badge installed, and what it is chained in front of."""
+    try:
+        conf = json.loads(SETTINGS.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        conf = {}
+    current = (conf.get("statusLine") or {}).get("command", "")
+    return {"on": current == statusline_cmd(),
+            "other": _ui_prefs().get("statusline_chain", "") if current == statusline_cmd()
+            else current}
+
+
+def set_badge(on: bool) -> dict:
+    """Install or remove the badge, never losing the status line that was there."""
+    try:
+        conf = json.loads(SETTINGS.read_text(encoding="utf-8"))
+    except OSError:
+        conf = {}
+    except ValueError:
+        return {"error": f"{SETTINGS} is not valid JSON"}
+    mine, prefs = statusline_cmd(), _ui_prefs()
+    current = (conf.get("statusLine") or {}).get("command", "")
+    if on:
+        if current != mine:
+            prefs["statusline_chain"] = current   # "" when there was none
+            _write_ui_prefs(prefs)
+        conf["statusLine"] = {"type": "command", "command": mine}
+    else:
+        old = prefs.pop("statusline_chain", "")
+        _write_ui_prefs(prefs)
+        if old:
+            conf["statusLine"] = {"type": "command", "command": old}
+        else:
+            conf.pop("statusLine", None)
+    try:
+        SETTINGS.parent.mkdir(parents=True, exist_ok=True)
+        SETTINGS.write_text(json.dumps(conf, indent=2), encoding="utf-8")
+    except OSError as e:
+        return {"error": str(e)}
+    return {"ok": True, "on": on}
+
+
+# ── Updates from upstream (the OS itself, not your knowledge) ───────────
+# `origin` is YOUR repo: code plus the knowledge only you have. `upstream` is
+# where the OS is published. Keeping them apart is what makes an update safe:
+# upstream has never held a single file under knowledge/memory, so a merge
+# cannot touch your memories — git has nothing to bring there.
+
+UPSTREAM_URL = os.environ.get(
+    "STO_UPSTREAM", "https://github.com/SimonOcampo1/sto-agentic-os.git")
+UPSTREAM = "upstream"
+
+
+def _upstream_url() -> str:
+    """The configured `upstream`, or the published one if there is none yet."""
+    code, url = _git("remote", "get-url", UPSTREAM)
+    return url.strip() if code == 0 and url.strip() else UPSTREAM_URL
+
+
+def _upstream_branch() -> str:
+    code, out = _git("rev-parse", "--abbrev-ref", f"{UPSTREAM}/HEAD")
+    name = out.strip().split("/")[-1] if code == 0 else ""
+    return name or "main"
+
+
+def update_status(fetch=True) -> dict:
+    """{available, url, linked, log, error} — how far behind the OS you are.
+
+    `linked` is false when your repo and upstream share no commit: that is the
+    case for a repo that was copied instead of forked, and until it is grafted
+    once (`update_link`) no merge can be a normal three-way one.
+    """
+    url = _upstream_url()
+    code, _ = _git("remote", "get-url", UPSTREAM)
+    if code != 0:
+        add, out = _git("remote", "add", UPSTREAM, url)
+        if add != 0:
+            return {"available": 0, "url": url, "linked": False, "log": [],
+                    "error": out[:200]}
+    # 30 min and not the usual 60 s: an OS release is not something you race
+    # to, and this runs on every home repaint.
+    if fetch and _stale_fetch_ref(f"refs/remotes/{UPSTREAM}", ttl=1800):
+        fcode, fout = _git("fetch", "--quiet", UPSTREAM)
+        if fcode != 0:
+            return {"available": 0, "url": url, "linked": False, "log": [],
+                    "error": fout[:200] or "fetch failed"}
+    branch = _upstream_branch()
+    ref = f"{UPSTREAM}/{branch}"
+    linked = _git("merge-base", "HEAD", ref)[0] == 0
+    code, out = _git("log", "--oneline", "--no-decorate", "-20", f"HEAD..{ref}")
+    log = [l for l in out.splitlines() if l.strip()] if code == 0 else []
+    code, n = _git("rev-list", "--count", f"HEAD..{ref}")
+    try:
+        available = int(n.strip())
+    except ValueError:
+        available = len(log)
+    return {"available": available, "url": url, "linked": linked, "log": log,
+            "error": None}
+
+
+def update_link() -> dict:
+    """One-time graft for a repo that was copied instead of forked.
+
+    Records upstream as an ancestor while keeping every local file as it is
+    (`-X ours`), so from here on `update_apply` is an ordinary merge. Without
+    it git refuses: the two histories have no commit in common.
+    """
+    st = update_status()
+    if st["error"]:
+        return {"error": st["error"]}
+    if st["linked"]:
+        return {"ok": True, "message": "already linked to upstream"}
+    if sync_status(fetch=False)["dirty"]:
+        return {"error": "working tree has uncommitted changes: commit or stash them first"}
+    ref = f"{UPSTREAM}/{_upstream_branch()}"
+    code, out = _git("merge", "--allow-unrelated-histories", "-X", "ours",
+                     "--no-edit", "-m", f"chore: link this repo to {UPSTREAM}", ref)
+    if code != 0:
+        _git("merge", "--abort")
+        return {"error": f"link failed, nothing changed: {out[:400]}"}
+    return {"ok": True, "message": "linked to upstream; `sto update` works from now on"}
+
+
+def update_apply(progress=None) -> dict:
+    """Merge the published OS into this repo. Your knowledge is not in its way."""
+    say = progress or (lambda _step: None)
+    say("s_fetch")
+    st = update_status()
+    if st["error"]:
+        return {"error": st["error"]}
+    if not st["linked"]:
+        return {"error": "this repo shares no history with upstream: run `sto update --link` once"}
+    if st["available"] == 0:
+        return {"ok": True, "message": "already on the latest version"}
+    if sync_status(fetch=False)["dirty"]:
+        return {"error": "working tree has uncommitted changes: commit or stash them first"}
+    say("s_merge")
+    ref = f"{UPSTREAM}/{_upstream_branch()}"
+    code, out = _git("merge", "--no-edit", ref)
+    if code != 0:
+        _git("merge", "--abort")
+        return {"error": f"merge conflict, aborted: {out[:400]}"}
+    return {"ok": True, "message": f"updated · {st['available']} commit(s)",
+            "available": st["available"]}
 
 
 def sync_stage(progress=None) -> dict:
@@ -1152,7 +1451,8 @@ def sync_stage(progress=None) -> dict:
     _git("add", "-A", "--", "knowledge", "vault")
     _, staged = _git("diff", "--cached", "--name-only", "--", "knowledge", "vault")
     return {"paths": [p for p in staged.splitlines() if p.strip()],
-            "sessions": exported, "config": cfg, "memory": mem}
+            "sessions": exported, "config": cfg, "memory": mem,
+            "activate": 0, "memories": 0}  # the export already ran: git sees it all
 
 
 def sync_incoming() -> dict:
@@ -1169,7 +1469,9 @@ def sync_incoming() -> dict:
     code, out = _git("diff", "--name-only", f"HEAD...origin/{st['branch']}")
     if code != 0:
         return {"paths": [], "error": out[:200]}
-    return {"paths": [p for p in out.splitlines() if p.strip()], "error": None}
+    return {"paths": [p for p in out.splitlines() if p.strip()], "error": None,
+            "activate": apply_config(get_sync_prefs(), dry=True),
+            "memories": import_memory(dry=True)}
 
 
 def sync_push(progress=None) -> dict:
@@ -1216,7 +1518,10 @@ from datetime import date, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import unquote
 
-USAGE_TTL = 60  # seconds
+USAGE_TTL = 60      # seconds; the OAuth limits are one cheap https call
+DETAIL_TTL = 900    # seconds; `npx -y ccusage` costs ~7s per call, twice
+CACHE_DIR = REPO_ROOT / ".sto-cache"
+USAGE_CACHE = CACHE_DIR / "usage.json"
 _usage_cache: dict = {"ts": 0.0, "data": None}
 _usage_lock = threading.Lock()
 
@@ -1260,22 +1565,56 @@ def _oauth_usage():
     return out or None
 
 
-def usage_snapshot() -> dict:
-    """Real quota limits (OAuth) + consumption detail (ccusage). Cached 60s."""
+def _read_usage_cache() -> dict:
+    """The on-disk half of the cache. In-process caching alone was useless for
+    the CLI: every `sto` is a fresh process, so every `sto status` paid the
+    full ccusage bill again."""
+    try:
+        return json.loads(USAGE_CACHE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def _write_usage_cache(d: dict) -> None:
+    try:
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        USAGE_CACHE.write_text(json.dumps(d), encoding="utf-8")
+    except OSError:
+        pass  # ponytail: without the cache it still works, only slower
+
+
+def usage_snapshot(detail: bool = True) -> dict:
+    """Quota limits (OAuth, one https call) + spend detail (ccusage, ~14s).
+
+    `detail=False` skips ccusage entirely and serves whatever detail the cache
+    still holds. The TUI header and the home only paint `limits`, so they have
+    no business spawning `npx` twice and freezing the loop for fifteen seconds.
+    """
+    now = time.time()
     with _usage_lock:
-        if _usage_cache["data"] is not None and time.time() - _usage_cache["ts"] < USAGE_TTL:
-            return _usage_cache["data"]
-        since = (date.today() - timedelta(days=6)).strftime("%Y%m%d")
-        blocks = _ccusage(["blocks", "--active"])
-        daily = _ccusage(["daily", "--since", since])
-        blk_list = (blocks or {}).get("blocks") or []
-        data = {
-            "block": blk_list[0] if blk_list else None,
-            "daily": (daily or {}).get("daily", []),
-            "limits": _oauth_usage(),
-            "error": None if (blocks is not None or daily is not None) else "ccusage unavailable",
-        }
-        _usage_cache.update(ts=time.time(), data=data)
+        cached = _usage_cache["data"] or _read_usage_cache().get("data")
+        ts = _usage_cache["ts"] or (_read_usage_cache().get("ts") or 0.0)
+        if cached is not None and now - ts < USAGE_TTL:
+            if not detail or now - (cached.get("detailTs") or 0.0) < DETAIL_TTL:
+                _usage_cache.update(ts=ts, data=cached)
+                return cached
+        data = dict(cached or {})
+        data["limits"] = _oauth_usage() or (cached or {}).get("limits")
+        if detail and now - (data.get("detailTs") or 0.0) >= DETAIL_TTL:
+            since = (date.today() - timedelta(days=6)).strftime("%Y%m%d")
+            blocks = _ccusage(["blocks", "--active"])
+            daily = _ccusage(["daily", "--since", since])
+            blk_list = (blocks or {}).get("blocks") or []
+            data["block"] = blk_list[0] if blk_list else None
+            data["daily"] = (daily or {}).get("daily", [])
+            data["error"] = (None if (blocks is not None or daily is not None)
+                             else "ccusage unavailable")
+            data["detailTs"] = now
+        data.setdefault("block", None)
+        data.setdefault("daily", [])
+        data.setdefault("error", None)
+        _usage_cache.update(ts=now, data=data)
+        _write_usage_cache({"ts": now, "data": data})
         return data
 
 

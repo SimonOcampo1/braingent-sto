@@ -1,6 +1,10 @@
 <!doctype html>
-<!-- Memory graph template. `sto graph --memory` swaps __DATA__ for the JSON
-     of srv.memory_graph() and opens the result in a Chromium window (--app).
+<!-- Memory graph template. `sto graph --memory` swaps the placeholder below
+     for the JSON of srv.memory_graph() and opens the result in a Chromium
+     window (--app). The placeholder is deliberately NOT spelled out in this
+     comment: it used to be, the substitution hit both copies, and a memory
+     quoting an HTML comment terminator then closed this one early and spilled
+     the whole graph into the page as text.
      Canvas 2D and hand-rolled physics: with no CDN the file opens offline and
      depends on nothing being installed. -->
 <meta charset="utf-8">
@@ -49,6 +53,45 @@
            font-size:11px; }
   #close:hover { color:var(--fg); }
 
+  #read { margin:2px 0 16px; padding:7px 12px; width:100%; background:transparent;
+          color:var(--accent); border:1px solid var(--accent); border-radius:6px;
+          font:inherit; cursor:pointer; }
+  #read:hover { background:var(--accent); color:var(--bg); }
+
+  /* the reader. Sans for the prose (monospace is for the graph, not for
+     reading a page of it) and a 68ch measure, which is where lines stop
+     needing a finger to track them. */
+  #modal { position:fixed; inset:0; background:#05070aef; display:none; z-index:9;
+           padding:5vh 16px; overflow-y:auto; }
+  #modal.on { display:block; }
+  #sheet { max-width:760px; margin:0 auto; background:var(--panel); border:1px solid var(--line);
+           border-radius:10px; padding:30px 38px 40px; position:relative; }
+  #sheet .top { display:flex; align-items:baseline; gap:10px; flex-wrap:wrap;
+                border-bottom:1px solid var(--line); padding-bottom:14px; margin-bottom:22px; }
+  #sheet .top h2 { margin:0; font-size:19px; }
+  #sheet .top .meta { color:var(--dim); font-size:11.5px; }
+  #doc { font:15px/1.75 ui-sans-serif, "Segoe UI", system-ui, sans-serif;
+         max-width:68ch; word-wrap:break-word; }
+  #doc h3, #doc h4, #doc h5, #doc h6 { margin:26px 0 8px; font-size:15px; letter-spacing:.02em; }
+  #doc h3 { font-size:17px; }
+  #doc p { margin:0 0 15px; }
+  #doc ul { margin:0 0 15px; padding-left:22px; }
+  #doc li { margin:0 0 6px; }
+  #doc b { color:#fff; }
+  #doc code { font:13px ui-monospace, Consolas, monospace; background:#0b0e12;
+              border:1px solid var(--line); border-radius:4px; padding:1px 5px; }
+  #doc pre { font:12.5px/1.6 ui-monospace, Consolas, monospace; background:#0b0e12;
+             border:1px solid var(--line); border-radius:8px; padding:12px 14px;
+             overflow-x:auto; margin:0 0 16px; }
+  #doc pre code { background:none; border:0; padding:0; }
+  #doc a.wiki { color:var(--accent); cursor:pointer; text-decoration:none;
+                border-bottom:1px dashed currentColor; }
+  #doc a.wiki:hover { border-bottom-style:solid; }
+  #doc a.dead { color:var(--dim); cursor:default; border-bottom:1px dotted currentColor; }
+  #sheetClose { position:absolute; top:16px; right:20px; color:var(--dim); cursor:pointer;
+                font-size:12px; }
+  #sheetClose:hover { color:var(--fg); }
+
   #tip { position:fixed; max-width:320px; padding:7px 10px; background:var(--panel);
          border:1px solid var(--line); border-radius:6px; display:none;
          pointer-events:none; line-height:1.45; z-index:5; }
@@ -69,8 +112,12 @@
   <div id="machines"></div>
 </aside>
 <div id="detail"><span id="close">✕ filters</span><div id="detailBody"></div></div>
+<div id="modal"><div id="sheet"><span id="sheetClose">✕ esc</span>
+  <div class="top"><h2 id="sheetTitle"></h2><span class="meta" id="sheetMeta"></span></div>
+  <div id="doc"></div>
+</div></div>
 <div id="tip"></div>
-<div id="hint">drag to pan · wheel to zoom · click a node for detail · Esc clears</div>
+<div id="hint">drag to pan · wheel to zoom · click a node for detail · r reads it · Esc clears</div>
 <script>
 const DATA = __DATA__;
 const esc = s => String(s).replace(/[<>&]/g, ch => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[ch]));
@@ -219,6 +266,90 @@ function draw() {
 function loop() { step(); draw(); requestAnimationFrame(loop); }
 loop();
 
+// ── the reader ──
+// A markdown subset by hand, because this file opens offline with no CDN and
+// pulling in a parser for headings, bold, lists and fences is not worth a
+// dependency. Everything is escaped first, so no memory can inject markup.
+const modal = document.getElementById("modal"), doc = document.getElementById("doc");
+const bySlug = new Map();
+nodes.filter(n => n.kind === "memory").forEach(n => {
+  // last one wins only when the slug is unique; ambiguous slugs point nowhere,
+  // same rule the server uses to resolve [[links]]
+  bySlug.set(n.label, bySlug.has(n.label) ? null : n);
+});
+
+function jump(name, text) {
+  const target = bySlug.get(name);
+  return target
+    ? `<a class="wiki" data-id="${esc(target.id)}">${esc(text)}</a>`
+    : `<a class="dead" title="no memory with that name">${esc(text)}</a>`;
+}
+
+function inline(s) {
+  return s
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
+    .replace(/\[\[([^\]|#]+)[^\]]*\]\]/g, (_, name) => jump(name.trim(), name.trim()))
+    .replace(/\[([^\]]+)\]\(([^)]+)\.md\)/g, (_, label, file) =>
+      jump(file.split(/[\\\/]/).pop(), label))
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, "$1 <em>($2)</em>");
+}
+
+function md(src) {
+  const out = [];
+  let list = false, code = false, buf = [], para = [];
+  const closeList = () => { if (list) { out.push("</ul>"); list = false; } };
+  const closePara = () => {
+    if (para.length) { out.push(`<p>${inline(para.join(" "))}</p>`); para = []; }
+  };
+  for (const line of String(src).split(/\r?\n/).map(esc)) {
+    if (line.trimStart().startsWith("```")) {
+      closePara(); closeList();
+      if (code) { out.push(`<pre><code>${buf.join("\n")}</code></pre>`); buf = []; }
+      code = !code;
+      continue;
+    }
+    if (code) { buf.push(line); continue; }
+    if (!line.trim()) { closePara(); closeList(); continue; }
+    const h = line.match(/^(#{1,6})\s+(.*)$/);
+    if (h) {
+      closePara(); closeList();
+      const lvl = Math.min(6, h[1].length + 2);   // # in a memory is not the page title
+      out.push(`<h${lvl}>${inline(h[2])}</h${lvl}>`);
+      continue;
+    }
+    const li = line.match(/^\s*[-*]\s+(.*)$/);
+    if (li) {
+      closePara();
+      if (!list) { out.push("<ul>"); list = true; }
+      out.push(`<li>${inline(li[1])}</li>`);
+      continue;
+    }
+    closeList();
+    para.push(line.trim());
+  }
+  if (code && buf.length) out.push(`<pre><code>${buf.join("\n")}</code></pre>`);
+  closePara(); closeList();
+  return out.join("");
+}
+
+function readNode(n) {
+  if (!n || n.kind !== "memory") return;
+  document.getElementById("sheetTitle").textContent = n.label;
+  document.getElementById("sheetMeta").textContent =
+    `${n.type} · ${n.machine} · ${day(n.mtime)} · ${n.project}`;
+  doc.innerHTML = n.body ? md(n.body) : `<p class="meta">this memory is empty</p>`;
+  doc.querySelectorAll("a.wiki").forEach(a => a.onclick = () => {
+    const o = byId.get(a.dataset.id);
+    if (o) { centreOn(o); openNode(o); readNode(o); modal.scrollTop = 0; }
+  });
+  modal.classList.add("on");
+  modal.scrollTop = 0;
+}
+function closeReader() { modal.classList.remove("on"); }
+document.getElementById("sheetClose").onclick = closeReader;
+modal.onclick = e => { if (e.target === modal) closeReader(); };  // click outside
+
 // ── detail panel ──
 function openNode(n) {
   sel = n;
@@ -232,11 +363,14 @@ function openNode(n) {
        <div class="meta">${esc(n.type)} · ${esc(n.machine)} · ${day(n.mtime)}</div>
        <p>${esc(n.desc || "—")}</p>`;
   detailBody.innerHTML = body +
+    (n.kind === "memory" ? `<button id="read">read memory</button>` : "") +
     `<div class="head">linked (${vs.length})</div>` +
     (vs.map(v => `<a data-id="${esc(v.other.id)}">${v.kind === "in" ? "▸" : "→"} ${esc(v.other.label)}</a>`).join("")
      || `<span class="meta">nothing links here</span>`);
   detailBody.querySelectorAll("a").forEach(a =>
     a.onclick = () => { const o = byId.get(a.dataset.id); if (o) { centreOn(o); openNode(o); } });
+  const btn = document.getElementById("read");
+  if (btn) btn.onclick = () => readNode(n);
 }
 function centreOn(n) { ox = -n.x * scale; oy = -n.y * scale; }
 document.getElementById("close").onclick = () => { sel = null; detail.classList.remove("on"); };
@@ -251,6 +385,10 @@ function pick(px, py) {
   }
   return best;
 }
+cv.addEventListener("dblclick", e => {
+  const n = pick(e.clientX, e.clientY);
+  if (n) readNode(n);
+});
 cv.addEventListener("mousedown", e => {
   const n = pick(e.clientX, e.clientY);
   if (n) { held = n; openNode(n); }
@@ -283,6 +421,8 @@ cv.addEventListener("wheel", e => {
 }, { passive: false });
 search.addEventListener("input", () => { q = search.value.trim().toLowerCase(); });
 addEventListener("keydown", e => {
+  if (e.key === "Escape" && modal.classList.contains("on")) { closeReader(); return; }
+  if (e.key === "r" && document.activeElement !== search) { readNode(sel); return; }
   if (e.key === "Escape") {
     search.value = ""; q = ""; search.blur();
     fProject = fType = fMachine = sel = null;

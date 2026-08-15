@@ -422,7 +422,7 @@ def _stub_home():
               ui.parity, ui.srv.config_status, ui.last_sync,
               ui.cli.cached_sessions, ui.srv.list_memory, ui._personal_skills,
               ui.sync_preview)
-    ui.srv.usage_snapshot = lambda: {"limits": [{"label": "sesión", "percent": 42,
+    ui.srv.usage_snapshot = lambda detail=True: {"limits": [{"label": "sesión", "percent": 42,
                                                  "resetsAt": "2026-08-14T18:00:00Z"}],
                                      "daily": []}
     ui.srv.sync_status = lambda fetch=True: {"remote": "git@x", "branch": "main",
@@ -1078,11 +1078,28 @@ def test_sync_buttons_are_accented_when_there_is_something_to_do():
     assert f"\033[{ui.cli.DIM}m" in encendido[1]
 
 
-def test_a_dirty_tree_enables_push_even_with_nothing_ahead():
-    solo_dim = ui.sync_buttons({"ahead": 0, "behind": 0, "dirty": False}, 100)[1]
-    con_cambios = ui.sync_buttons({"ahead": 0, "behind": 0, "dirty": True}, 100)[1]
-    assert f"\033[{ui.ACCENT}m" not in solo_dim          # nada que hacer
-    assert f"\033[{ui.ACCENT}m" in con_cambios           # hay cambios sin commitear
+def test_pending_items_enable_the_buttons_with_git_already_in_sync():
+    """The bug this replaces: a repo with nothing ahead/behind painted both
+    buttons dim while the panel above showed `158 local . 149 in repo` in
+    yellow. Being level with GitHub says nothing about whether the config the
+    repo carries is installed on THIS machine."""
+    sy = {"ahead": 0, "behind": 0, "dirty": False}
+    accent = f"\033[{ui.ACCENT}m"
+    assert accent not in ui.sync_buttons(sy, 100, up=0, down=0)[1]
+    assert accent in ui.sync_buttons(sy, 100, up=3, down=0)[1]
+    assert accent in ui.sync_buttons(sy, 100, up=0, down=3)[1]
+
+
+def test_count_items_counts_what_only_a_dry_run_can_see():
+    """Config to activate and memories to land show up in no git diff."""
+    vacio = ui.classify([])
+    assert ui.count_items(vacio) == 0
+    vacio["activate"], vacio["pending_memories"] = 2, 14
+    assert ui.count_items(vacio) == 16
+    # git and the dry import describe the same memories: max(), not a sum
+    con_git = ui.classify(["knowledge/memory/proj/PC/a.md"])
+    con_git["pending_memories"] = 1
+    assert ui.count_items(con_git) == 1
 
 
 def test_the_button_strip_is_pinned_and_does_not_scroll_away():
@@ -1778,8 +1795,9 @@ def test_switching_tabs_closes_the_open_module():
 
 
 def test_sync_preview_classifies_both_directions_without_touching_the_network():
-    llamadas = []
-    reales = (ui.srv._git, ui.srv.sync_status)
+    llamadas, seco = [], []
+    reales = (ui.srv._git, ui.srv.sync_status, ui.srv.export_config,
+              ui.srv.apply_config, ui.srv.export_memory, ui.srv.import_memory)
     try:
         ui.srv.sync_status = lambda fetch=True: {"branch": "main", "ahead": 1,
                                                  "behind": 0, "dirty": True,
@@ -1793,15 +1811,32 @@ def test_sync_preview_classifies_both_directions_without_touching_the_network():
                 return 0, " M knowledge/memory/proj/PC/x.md"
             return 0, ""
         ui.srv._git = git
+
+        def espia(nombre, n):
+            def f(*a, **kw):
+                seco.append((nombre, kw.get("dry")))
+                return n
+            return f
+        ui.srv.export_config = espia("export_config", 0)
+        ui.srv.apply_config = espia("apply_config", 2)
+        ui.srv.export_memory = espia("export_memory", 0)
+        ui.srv.import_memory = espia("import_memory", 5)
+
         subir, bajar = ui.sync_preview()
         assert subir["sessions"] == 1 and subir["vault"] == 1
         assert subir["memories"] == {"proj": 1}
         assert ui.count_items(subir) == 3
-        assert ui.count_items(bajar) == 0
-        # no fetch, no export: only reading what git already knows
+        # git has nothing coming down, and the preview still sees the 5
+        # memories and the 2 config files this machine never took
+        assert ui.count_items(bajar) == 7
+        assert ui.preview_parts(bajar) == ["5 memorias", "2 activar"]
+        # no fetch, and every export/apply asked for a dry run: it reads and
+        # never writes, because this runs on every repaint of the home
         assert all(a[0] in ("diff", "status") for a in llamadas)
+        assert seco and all(dry is True for _, dry in seco)
     finally:
-        ui.srv._git, ui.srv.sync_status = reales
+        (ui.srv._git, ui.srv.sync_status, ui.srv.export_config,
+         ui.srv.apply_config, ui.srv.export_memory, ui.srv.import_memory) = reales
 
 
 def test_preview_parts_names_the_kinds_and_is_empty_when_nothing_travels():

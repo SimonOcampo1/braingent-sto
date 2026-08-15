@@ -5,7 +5,6 @@ do not need the server running.
 """
 import json
 import os
-import pydoc
 import shutil
 import subprocess
 import sys
@@ -168,7 +167,13 @@ def resolve_id(prefix, rows):
 
 
 def page(text):
-    """Stdlib pager: `more` on Windows, $PAGER/less on Unix, plain without a tty."""
+    """Stdlib pager: `more` on Windows, $PAGER/less on Unix, plain without a tty.
+
+    ponytail: `pydoc` is imported here and not at the top — it drags `inspect`
+    behind it and costs ~90 ms of import on every `sto` command, while only
+    `sto show`/`sto skills <id>` ever page anything.
+    """
+    import pydoc
     enc = sys.stdout.encoding or "utf-8"
     pydoc.pager(text.encode(enc, "replace").decode(enc, "replace"))
 
@@ -434,13 +439,34 @@ MEMORY_TEMPLATE = Path(__file__).parent / "memory_graph.html"
 MEMORY_HTML = srv.REPO_ROOT / ".sto-cache" / "memory-graph.html"
 
 
+PLACEHOLDER = "__" + "DATA" + "__"   # split so this file is not a second copy
+
+
+def _embeddable(data: str) -> str:
+    """JSON safe to drop inside a <script> block.
+
+    Every `<` becomes the JSON escape `<`, which JS reads straight back as
+    `<`. Escaping only `</script>` is not enough: an inner `<script` puts the
+    HTML tokenizer into double-escaped state, and then the *real* `</script>`
+    stops closing the tag — a memory that quoted `<script>` took the whole
+    window down with `Unexpected identifier` the moment bodies started
+    travelling. U+2028/2029 are the other classic: legal inside a JSON string,
+    a line break to a JS parser.
+    """
+    return (data.replace("<", r"\u003c")
+                .replace("\u2028", r"\u2028").replace("\u2029", r"\u2029"))
+
+
 def build_memory_graph(dest=None):
     """Fill the template with the graph as of now and return the file."""
     dest = Path(dest) if dest else MEMORY_HTML
-    data = json.dumps(srv.memory_graph(), ensure_ascii=False)
+    data = _embeddable(json.dumps(srv.memory_graph(bodies=True), ensure_ascii=False))
+    tpl = MEMORY_TEMPLATE.read_text(encoding="utf-8")
+    n = tpl.count(PLACEHOLDER)
+    if n != 1:
+        raise OSError(f"the template has {n} copies of the data placeholder, expected 1")
     dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_text(MEMORY_TEMPLATE.read_text(encoding="utf-8").replace("__DATA__", data),
-                    encoding="utf-8")
+    dest.write_text(tpl.replace(PLACEHOLDER, data), encoding="utf-8")
     return dest
 
 
@@ -493,6 +519,49 @@ def cmd_status(*a):
            f"{_pad(behind, 18, YELLOW)}{c(dirty, DIM)}"]
     if st["fetchError"]:
         out.append(c("  " + t("cli_fetch_failed", e=st["fetchError"]), YELLOW))
+    return {"message": "\n".join(out)}
+
+
+def cmd_update(*args):
+    """sto update [--apply|--link] — updates to the OS itself, from upstream."""
+    if args and args[0] in ("--link", "-l"):
+        return srv.update_link()
+    if args and args[0] in ("--apply", "-y", "--yes"):
+        return srv.update_apply()
+    st = srv.update_status()
+    if st["error"]:
+        return {"error": t("cli_update_failed", e=st["error"])}
+    if not st["linked"]:
+        return {"message": "\n".join(
+            ["  " + c(t("cli_update_unlinked"), YELLOW),
+             "  " + c(t("cli_update_link_hint"), DIM)])}
+    if not st["available"]:
+        return {"message": "  " + t("cli_update_none")}
+    out = ["  " + c(t("cli_update_available", n=st["available"]), CYAN)]
+    out += [c("    " + l, DIM) for l in st["log"][:10]]
+    out.append("  " + c(t("cli_update_hint"), DIM))
+    return {"message": "\n".join(out)}
+
+
+def cmd_badge(*args):
+    """sto badge [--install|--off] — the STO badge in Claude Code's status line."""
+    if args and args[0] in ("--install", "--on"):
+        res = srv.set_badge(True)
+        return res if res.get("error") else {"message": "  " + t("cli_badge_installed")}
+    if args and args[0] in ("--off", "--remove"):
+        res = srv.set_badge(False)
+        return res if res.get("error") else {"message": "  " + t("cli_badge_removed")}
+    st = srv.badge_status()
+    import statusline
+    out = ["  " + statusline.badge()]
+    if st["on"]:
+        out.append("  " + c(t("cli_badge_active"), GREEN))
+        if st["other"]:
+            out.append("  " + c(t("cli_badge_chained", cmd=st["other"][:70]), DIM))
+    else:
+        out.append("  " + c(t("cli_badge_hint"), DIM))
+        if st["other"]:
+            out.append("  " + c(t("cli_badge_chained", cmd=st["other"][:70]), DIM))
     return {"message": "\n".join(out)}
 
 
@@ -567,6 +636,8 @@ CLI = {
     "pull": srv.sync_pull,
     "status": cmd_status,
     "config": cmd_config,
+    "update": cmd_update,
+    "badge": cmd_badge,
     "memory": cmd_memory,
     "sessions": cmd_sessions,
     "show": cmd_show,

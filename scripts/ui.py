@@ -185,7 +185,10 @@ def sync_buttons(sy, w=100, up=0, down=0):
     nobody anything. What travels are knowledge/vault files, and the breakdown
     above says what kind they are.
     """
-    push_on = up > 0 or sy["ahead"] > 0 or sy["dirty"]
+    # `up`/`down` already count everything a press would move, config
+    # activation included, so `dirty` is gone: it lit PUSH for an unrelated
+    # edit under scripts/ that the push was never going to commit.
+    push_on = up > 0 or sy["ahead"] > 0
     pull_on = down > 0 or sy["behind"] > 0
     if w < BUTTONS_W:
         return [cli.c(f"  [p] ↑ PUSH {up}", ACCENT if push_on else cli.DIM)
@@ -219,12 +222,45 @@ def sync_preview(sy=None):
     up += [l[3:] for l in paths("status", "--porcelain", "--", "knowledge", "vault")]
     down = paths("diff", "--name-only", f"HEAD...origin/{branch}",
                  "--", "knowledge", "vault")
-    return classify(sorted(set(up))), classify(sorted(set(down)))
+    subir, bajar = classify(sorted(set(up))), classify(sorted(set(down)))
+
+    # The half git cannot see. A memory Claude wrote a minute ago is not dirty
+    # until `export_memory` has run, and a skill sitting in the repo is not
+    # installed on this machine no matter how up to date the branch is. Both
+    # are dry runs: they read and compare, they write nothing.
+    prefs = srv.get_sync_prefs()
+    subir["activate"] = srv.export_config(prefs, dry=True)
+    bajar["activate"] = srv.apply_config(prefs, dry=True)
+    subir["pending_memories"] = srv.export_memory(dry=True)
+    bajar["pending_memories"] = srv.import_memory(dry=True)
+    _write_badge(count_items(subir), count_items(bajar))
+    return subir, bajar
+
+
+def _write_badge(up, down):
+    """Leave the two numbers where `statusline.py` can read them.
+
+    The status line in Claude Code re-renders constantly and cannot afford to
+    compute this itself, so whoever already paid for it drops the answer on
+    disk. A failure here is not worth a line of error: the badge just shows up
+    without counts.
+    """
+    try:
+        path = srv.CACHE_DIR / "badge.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"ts": time.time(), "up": up, "down": down}),
+                        encoding="utf-8")
+    except OSError:
+        pass
 
 
 def count_items(data):
+    # max() and not a sum for the memories: the git diff and the dry import
+    # describe the same files from two angles (commits not merged yet vs repo
+    # files this machine never took), and adding them double-counts.
     return (data["sessions"] + data["vault"] + len(data["skills"])
-            + len(data["config"]) + sum(data["memories"].values()))
+            + len(data["config"]) + data.get("activate", 0)
+            + max(sum(data["memories"].values()), data.get("pending_memories", 0)))
 
 
 def preview_parts(data):
@@ -232,7 +268,7 @@ def preview_parts(data):
     out = []
     if data["sessions"]:
         out.append(f"{data['sessions']} {t('n_sessions')}")
-    memories = sum(data["memories"].values())
+    memories = max(sum(data["memories"].values()), data.get("pending_memories", 0))
     if memories:
         out.append(f"{memories} {t('n_memories')}")
     if data["skills"]:
@@ -241,6 +277,8 @@ def preview_parts(data):
         out.append(f"{len(data['config'])} config")
     if data["vault"]:
         out.append(f"{data['vault']} vault")
+    if data.get("activate"):
+        out.append(f"{data['activate']} {t('n_activate')}")
     return out
 
 
@@ -380,7 +418,7 @@ def home_lines(st):
     # -2: the scrollbar column plus its air. Building the content against the
     # bare width left it clipped right at the edge.
     w = max(24, st.get("w", 100) - 2)
-    u = srv.usage_snapshot()
+    u = srv.usage_snapshot(detail=False)
     sy = srv.sync_status(fetch=st.get("fetch", False))
     p = parity()
     subir, bajar = sync_preview(sy)
@@ -409,6 +447,17 @@ def home_lines(st):
     estado = t("dirty") if sy["dirty"] else t("clean")
     out += [_txt(l) for l in wrap_items(
         [f"↑{sy['ahead']} ↓{sy['behind']}", estado, last_sync()], w, sep=" · ")]
+    up_st = update_state()
+    # wrap_items and not one f-string: this line has to survive a narrow
+    # terminal like every other one on the home
+    if up_st.get("linked") is False:
+        out += [_txt(l) for l in wrap_items(
+            [cli.c(t("unlinked_short"), cli.YELLOW),
+             cli.c(t("unlinked_key"), cli.DIM)], w)]
+    elif up_st.get("available"):
+        out += [_txt(l) for l in wrap_items(
+            [cli.c(f"▲ {t('update_available')}: {up_st['available']}", cli.GREEN),
+             cli.c(t("update_apply_key"), ACCENT)], w)]
     here = f" ({t('this_one')})"
     machines = [n + (here if d["local"] else "")
                 for n, d in sorted(srv.list_machines().items())]
@@ -627,6 +676,7 @@ def load_config(st):
     on = set(srv.get_sync_prefs())
     rows = [{"kind": "head", "text": t("sec_prefs")},
             {"kind": "accent"}, {"kind": "lang"},
+            {"kind": "badge", "on": srv.badge_status()["on"]},
             {"kind": "gap"},
             {"kind": "head", "text": t("sec_always")}]
     rows += [{"kind": "fixed", "id": k, "n": v}
@@ -658,6 +708,10 @@ def fmt_config(r, w=100):
                            for code in LANGS)
         return (f"  {cli._pad(t('language'), 22, cli.BOLD)}"
                 f"{cli._pad(i18n.LANG, 12, ACCENT)}{swatch}")
+    if r["kind"] == "badge":
+        mark = cli.c("[x]", ACCENT) if r["on"] else cli.c("[ ]", cli.DIM)
+        return (f"  {cli._pad(t('badge_row'), 22, cli.BOLD)}{mark}   "
+                + cli.c(t("badge_on") if r["on"] else t("badge_off"), cli.DIM))
     if r["kind"] == "fixed":
         count = t("n_in_repo", n=f"{r['n']:>4}")
         return (f"  {cli.c('●', ACCENT)} {cli._pad(t('n_' + r['id']), 20, cli.BOLD)}"
@@ -688,6 +742,10 @@ def config_activate(st):
     elif row["kind"] == "lang":
         set_lang(LANGS[(LANGS.index(i18n.LANG) + 1) % len(LANGS)])
         st["flash"] = t("flash_language", v=i18n.LANG)
+    elif row["kind"] == "badge":
+        res = srv.set_badge(not row["on"])
+        st["flash"] = res.get("error") or t("flash_badge",
+                                            state=t("badge_off" if row["on"] else "badge_on"))
     elif row["kind"] == "module":
         on = set(srv.get_sync_prefs())
         on.symmetric_difference_update({row["id"]})
@@ -725,6 +783,23 @@ def parity(claude_dir=None, repo_config=None):
             "modules": srv.config_status()}
 
 
+_UPDATE = {"ts": 0.0, "data": {}}
+UPDATE_TTL = 300  # seconds; srv.update_status() dedupes the network fetch itself
+
+
+def update_state():
+    """`srv.update_status()` behind a cache, so the home can ask on every paint.
+    A failure is not worth a line on screen: no upstream, no notice."""
+    if time.monotonic() - _UPDATE["ts"] < UPDATE_TTL and _UPDATE["data"]:
+        return _UPDATE["data"]
+    try:
+        _UPDATE["data"] = srv.update_status()
+    except Exception:
+        _UPDATE["data"] = {"available": 0, "linked": True, "error": "unreachable"}
+    _UPDATE["ts"] = time.monotonic()
+    return _UPDATE["data"]
+
+
 def last_sync():
     """'2 days ago · LaptopA' — the commit says which machine it came from."""
     code, out = srv._git("log", "-1", "--format=%cr|%s", "--", "knowledge")
@@ -738,7 +813,10 @@ def last_sync():
 
 def classify(paths):
     """Git paths → what they mean: {skills, config, memories, sessions, vault}."""
-    out = {"skills": [], "config": [], "memories": {}, "sessions": 0, "vault": 0}
+    out = {"skills": [], "config": [], "memories": {}, "sessions": 0, "vault": 0,
+           # what moves outside git: config files to install/export and
+           # memories to land, filled in by sync_preview/sync_incoming
+           "activate": 0, "pending_memories": 0}
     for raw in paths:
         parts = raw.replace("\\", "/").strip('"').split("/")
         if parts[:4] == ["knowledge", "config", "skills", "skills"] and len(parts) > 4:
@@ -756,6 +834,15 @@ def classify(paths):
     return out
 
 
+def update_manifest(up_st):
+    """What `u` is about to merge: the commit list, and the promise it keeps."""
+    out = [cli.c(" " + t("update_available") + f": {up_st['available']}", cli.BOLD)]
+    out += [cli.c("   " + l, cli.DIM) for l in up_st.get("log", [])[:8]]
+    out.append(cli.c("   " + t("update_safe"), cli.GREEN))
+    out.append(cli.c(" " + t("confirm"), ACCENT) + cli.c("   " + t("cancel"), cli.DIM))
+    return out
+
+
 def manifest_lines(kind, data):
     """The summary of what travels, ready to paint over the frame."""
     out = [cli.c(" " + t("push_to" if kind == "push" else "pull_from"), cli.BOLD)]
@@ -764,10 +851,10 @@ def manifest_lines(kind, data):
         rest = len(data["skills"]) - len(shown)
         text = ", ".join(shown) + (f"  …+{rest}" if rest else "")
         out.append(f"   {cli._pad('skills', 12, ACCENT)}{len(data['skills']):>3}   " + text)
-    if data["memories"]:
+    n_mem = max(sum(data["memories"].values()), data.get("pending_memories", 0))
+    if n_mem:
         detail = " · ".join(f"{p} ({n})" for p, n in sorted(data["memories"].items()))
-        out.append(f"   {cli._pad('memories', 12, ACCENT)}"
-                   f"{sum(data['memories'].values()):>3}   {detail}")
+        out.append(f"   {cli._pad('memories', 12, ACCENT)}{n_mem:>3}   {detail}")
     if data["config"]:
         out.append(f"   {cli._pad('config', 12, ACCENT)}      "
                    + ", ".join(data["config"]))
@@ -775,6 +862,9 @@ def manifest_lines(kind, data):
         out.append(f"   {cli._pad('sessions', 12, ACCENT)}{data['sessions']:>3}")
     if data["vault"]:
         out.append(f"   {cli._pad('vault', 12, ACCENT)}{data['vault']:>3}")
+    if data.get("activate"):
+        out.append(f"   {cli._pad(t('n_activate'), 12, ACCENT)}{data['activate']:>3}"
+                   f"   {cli.c(t('activate_hint'), cli.DIM)}")
     if len(out) == 1:
         out.append(cli.c("   " + t("nothing_to_sync"), cli.DIM))
     out.append(cli.c(" " + t("confirm"), ACCENT) + cli.c("   " + t("cancel"), cli.DIM))
@@ -943,7 +1033,7 @@ def status_summary():
     if time.monotonic() - _SUMMARY["ts"] < SUMMARY_TTL and _SUMMARY["text"]:
         return _SUMMARY["text"]
     try:
-        lims = srv.usage_snapshot().get("limits") or []
+        lims = srv.usage_snapshot(detail=False).get("limits") or []
         pct = max((l.get("percent") or 0) for l in lims) if lims else 0
         sy = srv.sync_status(fetch=False)
         _SUMMARY["text"] = f"{t('usage_pct', p=pct)}  ↑{sy['ahead']} ↓{sy['behind']}"
@@ -1173,6 +1263,15 @@ def handle(st, key):
         st["fetch"] = True
         st["loaded_at"] = 0.0
         st["flash"] = t("fetching")
+    elif key == "u" and st["tab"] == HOME and not st["mod"]:
+        up_st = update_state()
+        if up_st.get("linked") is False:
+            st["flash"] = t("cli_update_link_hint")
+        elif not up_st.get("available"):
+            st["flash"] = t("cli_update_none")
+        else:
+            st["confirm"] = {"kind": "update"}
+            st["manifest"] = update_manifest(up_st)
     elif key in ("p", "l"):
         kind = "push" if key == "p" else "pull"
         try:
@@ -1183,8 +1282,11 @@ def handle(st, key):
             if data.get("error"):
                 st["flash"] = data["error"]
             else:
+                info = classify(data["paths"])
+                info["activate"] = data.get("activate", 0)
+                info["pending_memories"] = data.get("memories", 0)
                 st["confirm"] = {"kind": kind}
-                st["manifest"] = manifest_lines(kind, classify(data["paths"]))
+                st["manifest"] = manifest_lines(kind, info)
     elif key == "\r":
         return _handle_enter(st)
     st["sel"] = max(0, min(st["sel"], max(0, len(st["rows"]) - 1)))
@@ -1283,7 +1385,8 @@ def start_job(st, kind):
     is enough, no lock needed.
     """
     job = {"kind": kind, "steps": [], "res": None}
-    fn = srv.sync_push if kind == "push" else srv.sync_pull
+    fn = {"push": srv.sync_push, "pull": srv.sync_pull,
+          "update": srv.update_apply}[kind]
 
     def work():
         try:
@@ -1293,14 +1396,16 @@ def start_job(st, kind):
 
     threading.Thread(target=work, daemon=True).start()
     st["job"] = job
-    st["flash"] = t("pushing" if kind == "push" else "pulling")
+    st["flash"] = t({"push": "pushing", "pull": "pulling",
+                     "update": "updating"}[kind])
     return st
 
 
 def job_lines(st):
     """The panel: one step per line, ✓ the closed ones, spinner the running one."""
     job = st["job"]
-    out = [cli.c(" " + t("push_to" if job["kind"] == "push" else "pull_from"), cli.BOLD)]
+    out = [cli.c(" " + t({"push": "push_to", "pull": "pull_from",
+                          "update": "update_available"}[job["kind"]]), cli.BOLD)]
     steps = list(job["steps"])          # the thread can append while we draw
     for i, step in enumerate(steps):
         running = i == len(steps) - 1 and job["res"] is None
@@ -1316,8 +1421,10 @@ def job_tick(st):
     res = st["job"]["res"]
     if res is None:
         return st
-    st["job"] = None
+    kind, st["job"] = st["job"]["kind"], None
     st["flash"] = res.get("error") or res.get("message") or t("done")
+    if kind == "update":
+        _UPDATE["ts"] = 0.0
     st["loaded_at"] = 0.0
     return st
 
@@ -1401,12 +1508,55 @@ def drain(st, keys):
     return st
 
 
+_BG = {"thread": None, "box": None}
+
+
+def bg_reload(st):
+    """Refresh the rows off the main loop, keeping the old ones on screen.
+
+    The periodic refresh used to run inline: `cached_sessions()` every 3 s on
+    the list tabs, and on the home a git + parity + dry-run sweep every 30 s.
+    The whole loop stopped for as long as that took, keystrokes included —
+    which is the freeze you feel mid-scroll. The loader only reads the state
+    (`home_lines` writes `pinned`, and it writes it into the copy), so a
+    snapshot is all the thread needs.
+    """
+    if _BG["thread"] and _BG["thread"].is_alive():
+        return st                       # one at a time; the cadence can wait
+    if _BG["box"] is not None:
+        rows, pinned, err = _BG["box"]
+        _BG["box"] = None
+        st["rows"], st["pinned"] = rows, pinned
+        if err:
+            st["flash"] = err
+        st["sel"] = min(st["sel"], max(0, len(st["rows"]) - 1))
+        st["loaded_at"] = time.monotonic()
+        st["fetch"] = False
+        return st
+    snap, loader = dict(st), TABS[st["tab"]][1]
+    snap["pinned"] = []
+
+    def work():
+        try:
+            rows, err = loader(snap), ""
+        except Exception as e:  # ponytail: same contract as reload_tab
+            rows, err = [], f"error: {e}"
+        _BG["box"] = (rows, snap["pinned"], err)
+
+    _BG["thread"] = threading.Thread(target=work, daemon=True)
+    _BG["thread"].start()
+    return st
+
+
 def tick(st):
     """Reload the active tab if its cadence expired, or advance the push/pull."""
     if st.get("job"):
         return job_tick(st)
     if st["mode"] == "list" and time.monotonic() - st["loaded_at"] >= CADENCE[st["tab"]]:
-        reload_tab(st)
+        # empty rows means the view just changed (tab switch, filter): there is
+        # nothing to keep showing, so pay for it now instead of painting a
+        # blank tab for a second.
+        bg_reload(st) if st["rows"] else reload_tab(st)
     return st
 
 
@@ -1441,7 +1591,12 @@ def run():
         return {"error": "sto ui only runs on Windows for now"}
     if not sys.stdout.isatty():
         return {"error": "sto ui needs a terminal"}
-    st = reload_tab(new_state())
+    # The screen goes up BEFORE the first load: that load is ~1 s of git,
+    # skills and dry runs, and paying for it with the shell still on screen is
+    # what made `sto ui` feel like it did not start. The frame with the tabs
+    # appears at once and `tick()` fills the body in.
+    st = new_state()
+    st["flash"] = t("loading")
     sys.stdout.write(ENTER_TUI)
     # `dirty` is what makes building the frame (~1 ms) worth paying for only
     # when there is something new to show, instead of 100 times a second
