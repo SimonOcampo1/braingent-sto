@@ -1367,6 +1367,15 @@ def sync_status(fetch=True, force=False) -> dict:
             "dirty": bool(porcelain), "machine": LOCAL_MACHINE, "fetchError": fetch_error}
 
 
+def _conflict_msg(out: str) -> str:
+    """`git merge` prints one `Auto-merging <file>` line per file it touched and
+    the CONFLICT lines last, so a truncated head of the output names everything
+    except what actually broke. Keep the CONFLICT lines."""
+    bad = [l.split(" in ", 1)[-1] for l in out.splitlines() if l.startswith("CONFLICT")]
+    detail = ", ".join(bad) if bad else out[:400]
+    return f"merge conflict, aborted: {detail}"
+
+
 def sync_pull(progress=None) -> dict:
     """Same `progress` contract as `sync_push`."""
     say = progress or (lambda _step: None)
@@ -1383,7 +1392,7 @@ def sync_pull(progress=None) -> dict:
         code, out = _git("merge", "--no-edit", f"origin/{st['branch']}")
         if code != 0:
             _git("merge", "--abort")
-            return {"error": f"merge conflict, aborted: {out[:400]}"}
+            return {"error": _conflict_msg(out)}
     # apply_config runs whether or not there were commits to merge. Having the
     # latest bytes from GitHub is not the point of a pull: the point is that
     # this machine ends up with the same skills, plugins and settings actually
@@ -1583,7 +1592,7 @@ def update_apply(progress=None) -> dict:
     code, out = _git("merge", "--no-edit", ref)
     if code != 0:
         _git("merge", "--abort")
-        return {"error": f"merge conflict, aborted: {out[:400]}"}
+        return {"error": _conflict_msg(out)}
     return {"ok": True, "message": f"updated · {st['available']} commit(s)",
             "available": st["available"]}
 

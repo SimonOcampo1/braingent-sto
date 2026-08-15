@@ -296,6 +296,17 @@ def test_the_skills_row_counts_skills_and_not_the_files_inside_them():
         assert st["claude-md"]["localFiles"] == 1, st["claude-md"]
 
 
+def test_the_conflict_error_names_the_files_that_conflicted():
+    """The bug: `sto update` reported "Auto-merging scripts/i18n.py" — the head
+    of git's output — and never said which file actually conflicted."""
+    out = ("Auto-merging scripts/i18n.py\n"
+           "Auto-merging scripts/ui.py\n"
+           "CONFLICT (content): Merge conflict in scripts/test_ui.py\n"
+           "Automatic merge failed; fix conflicts and then commit the result.")
+    assert srv._conflict_msg(out) == "merge conflict, aborted: scripts/test_ui.py"
+    assert "no pude" in srv._conflict_msg("no pude")   # no CONFLICT line: the raw output
+
+
 def test_a_pulled_settings_json_still_parses():
     """The bug: export tokenized the JSON-escaped `C:\\\\Users\\\\Alice`, apply
     pasted back the raw `C:\\Users\\Bob`, and `\\U` is not a legal JSON escape —
