@@ -1066,13 +1066,39 @@ def test_sync_incoming_asks_git_for_the_remote_side_only():
 
 
 
+def test_an_explicit_update_check_fetches_even_with_a_fresh_ref():
+    """The bug: `u` five minutes after a release answered "already on the latest
+    version". `update_status` skips the fetch while the upstream ref is younger
+    than 30 min, and nothing could make it look — so a repo published minutes
+    ago was invisible until the TTL ran out."""
+    real_git, real_stale = srv._git, srv._stale_fetch_ref
+    llamadas = []
+    try:
+        srv._stale_fetch_ref = lambda *a, **k: False      # ref recien fetcheado
+        def fake(*args):
+            llamadas.append(args)
+            if args[0] == "remote":
+                return 0, "https://x/y.git"
+            if args[0] == "rev-list":
+                return 0, "0"
+            return 0, ""
+        srv._git = fake
+        srv.update_status()
+        assert not any(a[0] == "fetch" for a in llamadas), llamadas
+        llamadas.clear()
+        srv.update_status(force=True)
+        assert any(a[0] == "fetch" for a in llamadas), llamadas
+    finally:
+        srv._git, srv._stale_fetch_ref = real_git, real_stale
+
+
 def test_update_apply_refuses_an_unrelated_repo_instead_of_forcing_a_merge():
     """A repo copied instead of forked shares no commit with upstream. Merging
     that with --allow-unrelated-histories behind the user's back is how you
     lose a working tree; `update_link` is the explicit, one-time door."""
     reales = (srv._git, srv.update_status, srv.sync_status)
     try:
-        srv.update_status = lambda fetch=True: {"available": 8, "url": "u",
+        srv.update_status = lambda fetch=True, force=False: {"available": 8, "url": "u",
                                                 "linked": False, "log": [], "error": None}
         srv._git = lambda *a, **k: (_ for _ in ()).throw(AssertionError("no git"))
         out = srv.update_apply()
@@ -1084,7 +1110,7 @@ def test_update_apply_refuses_an_unrelated_repo_instead_of_forcing_a_merge():
 def test_update_apply_never_merges_over_uncommitted_work():
     reales = (srv._git, srv.update_status, srv.sync_status)
     try:
-        srv.update_status = lambda fetch=True: {"available": 2, "url": "u",
+        srv.update_status = lambda fetch=True, force=False: {"available": 2, "url": "u",
                                                 "linked": True, "log": [], "error": None}
         srv.sync_status = lambda fetch=True: {"remote": "x", "branch": "main", "ahead": 0,
                                               "behind": 0, "dirty": True, "machine": "PC",
@@ -1098,7 +1124,7 @@ def test_update_apply_never_merges_over_uncommitted_work():
 def test_update_apply_merges_upstream_and_says_how_much():
     vistos, reales = [], (srv._git, srv.update_status, srv.sync_status)
     try:
-        srv.update_status = lambda fetch=True: {"available": 3, "url": "u",
+        srv.update_status = lambda fetch=True, force=False: {"available": 3, "url": "u",
                                                 "linked": True, "log": [], "error": None}
         srv.sync_status = lambda fetch=True: {"remote": "x", "branch": "main", "ahead": 0,
                                               "behind": 0, "dirty": False, "machine": "PC",
@@ -1313,6 +1339,7 @@ if __name__ == "__main__":
     test_sync_stage_exports_and_returns_staged_paths()
     test_sync_incoming_lists_paths_and_reports_fetch_error()
     test_sync_incoming_asks_git_for_the_remote_side_only()
+    test_an_explicit_update_check_fetches_even_with_a_fresh_ref()
     test_update_apply_refuses_an_unrelated_repo_instead_of_forcing_a_merge()
     test_update_apply_never_merges_over_uncommitted_work()
     test_update_apply_merges_upstream_and_says_how_much()

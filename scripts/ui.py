@@ -479,7 +479,7 @@ def home_lines(st):
     out += [_txt(l) for l in wrap_items(
         [last_sync()], w, sep=" · ",
         indent="  " + cli.c(cli._pad(t("last_sync"), 14, cli.BOLD), ""))]
-    up_st = update_state()
+    up_st = update_state(pedido)      # `f` asks upstream too, not only origin
     # wrap_items and not one f-string: this line has to survive a narrow
     # terminal like every other one on the home
     if up_st.get("linked") is False:
@@ -899,9 +899,11 @@ def config_activate(st):
         codes = [c for _, c in ACCENTS]
         set_accent(codes[(codes.index(ACCENT) + 1) % len(codes)])
         st["flash"] = t("flash_accent", v=accent_name())
+        _repaint(st)
     elif row["kind"] == "lang":
         set_lang(LANGS[(LANGS.index(i18n.LANG) + 1) % len(LANGS)])
         st["flash"] = t("flash_language", v=i18n.LANG)
+        _repaint(st)
     elif row["kind"] == "badge":
         res = srv.set_badge(not row["on"])
         st["flash"] = res.get("error") or t("flash_badge",
@@ -955,13 +957,17 @@ _UPDATE = {"ts": 0.0, "data": {}}
 UPDATE_TTL = 300  # seconds; srv.update_status() dedupes the network fetch itself
 
 
-def update_state():
+def update_state(force=False):
     """`srv.update_status()` behind a cache, so the home can ask on every paint.
-    A failure is not worth a line on screen: no upstream, no notice."""
-    if time.monotonic() - _UPDATE["ts"] < UPDATE_TTL and _UPDATE["data"]:
+    A failure is not worth a line on screen: no upstream, no notice.
+
+    `force` goes through both caches, this one and the fetch TTL in the server.
+    Pressing `u` five minutes after a release was published used to answer
+    "already on the latest version" off a ref nobody had refreshed."""
+    if not force and time.monotonic() - _UPDATE["ts"] < UPDATE_TTL and _UPDATE["data"]:
         return _UPDATE["data"]
     try:
-        _UPDATE["data"] = srv.update_status()
+        _UPDATE["data"] = srv.update_status(force=force)
     except Exception:
         _UPDATE["data"] = {"available": 0, "linked": True, "error": "unreachable"}
     _UPDATE["ts"] = time.monotonic()
@@ -1189,6 +1195,19 @@ def _plain_view(st):
 
 def _keep(st):
     st["cache"][st["tab"]] = (st["rows"], st["pinned"], st["loaded_at"])
+
+
+def _repaint(st):
+    """Throw away every cached tab: colour and language are baked into it.
+
+    The home rows and the button strip are *rendered* strings, ANSI included,
+    so after changing the accent the cache kept painting the logo, the buttons
+    and the bars in the old colour until each tab happened to expire. Same for
+    the language. The cost of being wrong here is a screen that lies; the cost
+    of clearing is one reload."""
+    st["cache"].clear()
+    _BG["box"] = None          # a load in flight was rendered in the old colour
+    st["loaded_at"] = 0.0      # and repaint the tab that is up right now
 
 
 def _recall(st):
@@ -1544,7 +1563,7 @@ def handle(st, key):
         st["loaded_at"] = 0.0
         st["flash"] = t("fetching")
     elif key == "u" and st["tab"] == HOME and not st["mod"]:
-        up_st = update_state()
+        up_st = update_state(force=True)   # an explicit press always asks
         if up_st.get("linked") is False:
             st["flash"] = t("cli_update_link_hint")
         elif not up_st.get("available"):
@@ -1803,6 +1822,17 @@ def busy():
     return bool(_BG["thread"] and _BG["thread"].is_alive())
 
 
+def _view_key(st):
+    """What the rows on screen are a list OF.
+
+    A background load started on one screen can land after you moved to
+    another, and the rows of one tab painted by another tab's formatter is a
+    crash: `KeyError: 'type'` in `fmt_memory` with a session row in hand. The
+    key is compared on arrival and a stale answer is dropped."""
+    return (st["tab"], st["proj"], st["mod"], st["q"].strip(),
+            st["flat"], st["agents"])
+
+
 def bg_reload(st):
     """Refresh the rows off the main loop, keeping the old ones on screen.
 
@@ -1815,8 +1845,10 @@ def bg_reload(st):
     """
     if busy():
         return st                       # one at a time; the cadence can wait
+    if _BG["box"] is not None and _BG["box"][3] != _view_key(st):
+        _BG["box"] = None               # answers the screen you already left
     if _BG["box"] is not None:
-        rows, pinned, err = _BG["box"]
+        rows, pinned, err, _ = _BG["box"]
         _BG["box"] = None
         st["rows"], st["pinned"] = rows, pinned
         # unconditionally, same contract as reload_tab: the message that was up
@@ -1830,7 +1862,7 @@ def bg_reload(st):
         if _plain_view(st):
             _keep(st)
         return st
-    snap, loader = dict(st), TABS[st["tab"]][1]
+    snap, loader, key = dict(st), TABS[st["tab"]][1], _view_key(st)
     snap["pinned"] = []
 
     def work():
@@ -1838,7 +1870,7 @@ def bg_reload(st):
             rows, err = loader(snap), ""
         except Exception as e:  # ponytail: same contract as reload_tab
             rows, err = [], f"error: {e}"
-        _BG["box"] = (rows, snap["pinned"], err)
+        _BG["box"] = (rows, snap["pinned"], err, key)
 
     _BG["thread"] = threading.Thread(target=work, daemon=True)
     _BG["thread"].start()

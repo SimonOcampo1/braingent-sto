@@ -1095,16 +1095,63 @@ def test_a_background_reload_clears_the_message_it_put_up():
     st["tab"], st["rows"] = SES, _rows(2)
     st["flash"], st["fetch"] = ui.t("fetching"), True
     try:
-        ui._BG["thread"], ui._BG["box"] = None, (_rows(3), [], "")
+        ui._BG["thread"], ui._BG["box"] = None, (_rows(3), [], "", ui._view_key(st))
         st = ui.bg_reload(st)
         assert st["flash"] == ""
         assert len(st["rows"]) == 3 and st["fetch"] is False
         # an error still gets said
-        ui._BG["box"] = ([], [], "error: git no responde")
+        ui._BG["box"] = ([], [], "error: git no responde", ui._view_key(st))
         st = ui.bg_reload(st)
         assert st["flash"] == "error: git no responde"
     finally:
         ui._BG["thread"], ui._BG["box"] = None, None
+
+
+def test_a_reload_that_lands_on_another_tab_is_dropped():
+    """The crash: load the sessions tab, switch to memory before it comes back,
+    and the session rows landed in the memory tab -> `KeyError: 'type'` in
+    fmt_memory. The rows of a screen you already left are worth nothing."""
+    st = ui.new_state()
+    st["tab"], st["rows"] = MEM, _rows(2)
+    viejas = ui.new_state()
+    viejas["tab"] = SES
+    try:
+        ui._BG["thread"] = None
+        ui._BG["box"] = (_rows(9), [], "", ui._view_key(viejas))   # from the other tab
+        st = ui.bg_reload(st)
+        assert len(st["rows"]) == 2, "the memory tab keeps its own rows"
+        # entering a project is another view of the same tab
+        dentro = dict(st, proj="algo")
+        ui._BG["box"] = (_rows(9), [], "", ui._view_key(dentro))
+        st = ui.bg_reload(st)
+        assert len(st["rows"]) == 2, st["rows"]
+        # and the answer to the screen that IS up does land
+        ui._BG["thread"] = None
+        ui._BG["box"] = (_rows(9), [], "", ui._view_key(st))
+        st = ui.bg_reload(st)
+        assert len(st["rows"]) == 9
+    finally:
+        ui._BG["thread"], ui._BG["box"] = None, None
+
+
+def test_changing_the_accent_repaints_what_was_cached():
+    """The bug: the home rows and the button strip are rendered strings with the
+    ANSI inside, so after picking another accent the logo, the buttons and the
+    bars kept the old colour until each tab expired on its own."""
+    real = ui.ACCENT
+    try:
+        ui.set_accent("36")
+        st = ui.new_state()
+        st["tab"], st["w"] = CFG, 100
+        st["cache"][ui.HOME] = ([ui.cli.c("logo", "36")], [ui.cli.c("[p]", "36")], 1.0)
+        st["rows"] = ui.load_config(st)
+        st["sel"] = next(i for i, r in enumerate(st["rows"]) if r["kind"] == "accent")
+        st = ui.config_activate(st)
+        assert ui.ACCENT != "36", "the key cycles the accent"
+        assert st["cache"] == {}, st["cache"]
+        assert st["loaded_at"] == 0.0
+    finally:
+        ui.set_accent(real)
 
 
 def test_the_message_spins_while_the_work_is_really_running():
@@ -1156,6 +1203,29 @@ def test_a_finished_update_asks_for_a_restart_and_keeps_asking():
         assert any("reabrí" in l for l in _home_txt(st))
     finally:
         _unstub_home(reales)
+
+
+def test_the_update_key_asks_again_instead_of_trusting_the_cache():
+    """Same bug from the other end: the home caches the update check for five
+    minutes, so pressing `u` right after a release said "already on the latest
+    version" without asking anyone."""
+    real, pedidos = ui.srv.update_status, []
+    try:
+        ui._UPDATE["ts"], ui._UPDATE["data"] = ui.time.monotonic(), {
+            "available": 0, "linked": True, "log": [], "error": None}
+
+        def fake(fetch=True, force=False):
+            pedidos.append(force)
+            return {"available": 2 if force else 0, "linked": True,
+                    "log": ["aaa nuevo", "bbb nuevo"], "error": None}
+        ui.srv.update_status = fake
+        st = ui.new_state()
+        st = ui.handle(st, "u")
+        assert pedidos == [True], pedidos
+        assert st["confirm"] == {"kind": "update"}, st
+    finally:
+        ui.srv.update_status = real
+        ui._UPDATE["ts"], ui._UPDATE["data"] = 0.0, {}
 
 
 def test_a_failed_update_has_nothing_to_restart_for():

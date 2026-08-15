@@ -1,5 +1,6 @@
 import json
 import os
+import pathlib
 import tempfile
 from pathlib import Path
 
@@ -604,6 +605,32 @@ def test_timeline_lines_is_what_show_prints():
 
 
 
+def test_the_graph_window_is_painted_in_the_accent_you_picked():
+    """The window is the one surface outside the TUI that carries the accent,
+    and it was hardcoded turquoise however the config was set."""
+    assert cli.MEMORY_TEMPLATE.read_text(encoding="utf-8").count(
+        cli.TEMPLATE_ACCENT) == 1, "the template stopped declaring the accent"
+    root = pathlib.Path(tempfile.mkdtemp()) / "memory" / "proj" / "PC"
+    root.mkdir(parents=True)
+    (root / "n.md").write_text("cuerpo", encoding="utf-8")
+    real_mem, real_prefs = cli.srv.KNOWLEDGE_MEMORY, cli.i18n.get_prefs
+    try:
+        cli.srv.KNOWLEDGE_MEMORY = root.parent.parent
+        cli.i18n.get_prefs = lambda: {"accent": "35"}
+        html = cli.build_memory_graph(
+            dest=pathlib.Path(tempfile.mkdtemp()) / "g.html").read_text(encoding="utf-8")
+        assert f'--accent:{cli.ACCENT_HEX["35"]}' in html, "the window ignored the accent"
+        assert cli.TEMPLATE_ACCENT not in html
+        # the node palette is a legend, not chrome: it does not follow the accent
+        assert 'project:"#2bd6c4"' in html
+        cli.i18n.get_prefs = lambda: {}          # never configured → default
+        html = cli.build_memory_graph(
+            dest=pathlib.Path(tempfile.mkdtemp()) / "g.html").read_text(encoding="utf-8")
+        assert f'--accent:{cli.ACCENT_HEX["36"]}' in html
+    finally:
+        cli.srv.KNOWLEDGE_MEMORY, cli.i18n.get_prefs = real_mem, real_prefs
+
+
 def test_memory_graph_carries_the_body_so_the_window_can_read_it():
     """The graph window is one offline HTML file with no server behind it, so
     `read memory` only works if the text travelled inside the JSON."""
@@ -727,6 +754,7 @@ if __name__ == "__main__":
     test_graph_open_without_the_html()
     test_cached_sessions_hides_subagent_sessions_by_default()
     test_timeline_lines_is_what_show_prints()
+    test_the_graph_window_is_painted_in_the_accent_you_picked()
     test_memory_graph_carries_the_body_so_the_window_can_read_it()
     test_the_graph_template_renders_markdown_and_escapes_it()
     test_the_graph_html_survives_a_memory_that_quotes_markup()

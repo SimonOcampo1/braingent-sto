@@ -1533,12 +1533,16 @@ def _upstream_branch() -> str:
     return name or "main"
 
 
-def update_status(fetch=True) -> dict:
+def update_status(fetch=True, force=False) -> dict:
     """{available, url, linked, log, error} — how far behind the OS you are.
 
     `linked` is false when your repo and upstream share no commit: that is the
     case for a repo that was copied instead of forked, and until it is grafted
     once (`update_link`) no merge can be a normal three-way one.
+
+    `force` skips the fetch TTL. Every explicit ask passes it: with a release
+    published five minutes after the last fetch, `u` answered "already on the
+    latest version" off a stale ref and there was no way to make it look.
     """
     url = _upstream_url()
     code, _ = _git("remote", "get-url", UPSTREAM)
@@ -1549,7 +1553,7 @@ def update_status(fetch=True) -> dict:
                     "error": out[:200]}
     # 30 min and not the usual 60 s: an OS release is not something you race
     # to, and this runs on every home repaint.
-    if fetch and _stale_fetch_ref(f"refs/remotes/{UPSTREAM}", ttl=1800):
+    if fetch and (force or _stale_fetch_ref(f"refs/remotes/{UPSTREAM}", ttl=1800)):
         fcode, fout = _git("fetch", "--quiet", UPSTREAM)
         if fcode != 0:
             return {"available": 0, "url": url, "linked": False, "log": [],
@@ -1575,7 +1579,7 @@ def update_link() -> dict:
     (`-X ours`), so from here on `update_apply` is an ordinary merge. Without
     it git refuses: the two histories have no commit in common.
     """
-    st = update_status()
+    st = update_status(force=True)
     if st["error"]:
         return {"error": st["error"]}
     if st["linked"]:
@@ -1595,7 +1599,7 @@ def update_apply(progress=None) -> dict:
     """Merge the published OS into this repo. Your knowledge is not in its way."""
     say = progress or (lambda _step: None)
     say("s_fetch")
-    st = update_status()
+    st = update_status(force=True)
     if st["error"]:
         return {"error": st["error"]}
     if not st["linked"]:

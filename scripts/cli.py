@@ -457,11 +457,24 @@ def _embeddable(data: str) -> str:
                 .replace("\u2028", r"\u2028").replace("\u2029", r"\u2029"))
 
 
+# The window is the one surface outside the TUI painted in the accent, and it
+# is HTML: the six terminal colours need a hex each. Same order as ui.ACCENTS.
+ACCENT_HEX = {"36": "#2bd6c4", "32": "#4cd964", "35": "#c08cf5",
+              "34": "#5aa9f8", "33": "#e3c05a", "31": "#f2705f"}
+TEMPLATE_ACCENT = "--accent:#2bd6c4"
+
+
+def _accent_hex():
+    """The accent picked in `sto ui`, as a hex. Unknown value → the default."""
+    return ACCENT_HEX.get(i18n.get_prefs().get("accent"), ACCENT_HEX["36"])
+
+
 def build_memory_graph(dest=None):
     """Fill the template with the graph as of now and return the file."""
     dest = Path(dest) if dest else MEMORY_HTML
     data = _embeddable(json.dumps(srv.memory_graph(bodies=True), ensure_ascii=False))
     tpl = MEMORY_TEMPLATE.read_text(encoding="utf-8")
+    tpl = tpl.replace(TEMPLATE_ACCENT, f"--accent:{_accent_hex()}")
     n = tpl.count(PLACEHOLDER)
     if n != 1:
         raise OSError(f"the template has {n} copies of the data placeholder, expected 1")
@@ -528,7 +541,7 @@ def cmd_update(*args):
         return srv.update_link()
     if args and args[0] in ("--apply", "-y", "--yes"):
         return srv.update_apply()
-    st = srv.update_status()
+    st = srv.update_status(force=True)
     if st["error"]:
         return {"error": t("cli_update_failed", e=st["error"])}
     if not st["linked"]:
