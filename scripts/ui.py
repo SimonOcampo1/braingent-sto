@@ -165,13 +165,17 @@ def _reset_at(iso):
 
 # ── sync buttons ──
 
-BUTTONS_W = 52   # below this the two boxes do not fit side by side
+BUTTONS_W = 52    # below this the two boxes do not fit side by side
+BUTTONS3_W = 70   # and below this FETCH does not fit next to them
 
 
 def button(key, label, n, on):
     """A 3-line box. Accent when enabled, dim when there is nothing to do —
-    the colour is what says whether pressing the key does anything."""
-    inner = f"  [{key}]  {label} {n:>3}  "
+    the colour is what says whether pressing the key does anything.
+
+    `n=None` for a button that does not count anything: FETCH moves no files,
+    it goes and asks."""
+    inner = f"  [{key}]  {label}  " if n is None else f"  [{key}]  {label} {n:>3}  "
     code = ACCENT if on else cli.DIM
     return [cli.c("┌" + "─" * len(inner) + "┐", code),
             cli.c("│" + inner + "│", code),
@@ -179,11 +183,18 @@ def button(key, label, n, on):
 
 
 def sync_buttons(sy, w=100, up=0, down=0):
-    """The PUSH/PULL strip.
+    """The PUSH/PULL/FETCH strip.
 
     The number is **files**, not commits: "↑ PUSH 19" with 19 = commits told
     nobody anything. What travels are knowledge/vault files, and the breakdown
     above says what kind they are.
+
+    FETCH earns its box because ↑↓ is the one number on this screen that goes
+    stale on its own: the home repaints every 30 s but asks
+    `sync_status(fetch=False)`, so what it shows is however old the last
+    `git fetch` is. It is always lit — asking is always something you can do —
+    and it drops off first when the terminal narrows, since the footer legend
+    carries the key anyway.
     """
     # `up`/`down` already count everything a press would move, config
     # activation included, so `dirty` is gone: it lit PUSH for an unrelated
@@ -193,9 +204,10 @@ def sync_buttons(sy, w=100, up=0, down=0):
     if w < BUTTONS_W:
         return [cli.c(f"  [p] ↑ PUSH {up}", ACCENT if push_on else cli.DIM)
                 + cli.c(f"   [l] ↓ PULL {down}", ACCENT if pull_on else cli.DIM)]
-    return ["  " + a + "   " + b
-            for a, b in zip(button("p", "↑ PUSH", up, push_on),
-                            button("l", "↓ PULL", down, pull_on))]
+    boxes = [button("p", "↑ PUSH", up, push_on), button("l", "↓ PULL", down, pull_on)]
+    if w >= BUTTONS3_W:
+        boxes.append(button("f", "⟳ FETCH", None, True))
+    return ["  " + "   ".join(fila) for fila in zip(*boxes)]
 
 
 def sync_preview(sy=None):
@@ -420,7 +432,10 @@ def home_lines(st):
     # bare width left it clipped right at the edge.
     w = max(24, st.get("w", 100) - 2)
     u = srv.usage_snapshot(detail=False)
-    sy = srv.sync_status(fetch=st.get("fetch", False))
+    # the home never fetches on its own; `st["fetch"]` is only ever set by `f`,
+    # so if it is on somebody asked for it and the TTL does not get a vote
+    pedido = st.get("fetch", False)
+    sy = srv.sync_status(fetch=pedido, force=pedido)
     p = parity()
     subir, bajar = sync_preview(sy)
     st["pinned"] = sync_buttons(sy, w, count_items(subir), count_items(bajar))
@@ -446,8 +461,16 @@ def home_lines(st):
     out.append(_txt(""))
     out.append(_txt(section(t("sec_sync"), w)))
     estado = t("dirty") if sy["dirty"] else t("clean")
+    # two lines and not one: ahead/behind carries the age of the last fetch,
+    # the sync line carries the age of the last commit. Sharing a line, one
+    # relative time had to stand for both and stood for neither — pressing
+    # FETCH visibly moved nothing.
     out += [_txt(l) for l in wrap_items(
-        [f"↑{sy['ahead']} ↓{sy['behind']}", estado, last_sync()], w, sep=" · ")]
+        [f"↑{sy['ahead']} ↓{sy['behind']}", estado,
+         cli.c(t("checked", ago=checked_ago()), cli.DIM)], w, sep=" · ")]
+    out += [_txt(l) for l in wrap_items(
+        [last_sync()], w, sep=" · ",
+        indent="  " + cli.c(cli._pad(t("last_sync"), 14, cli.BOLD), ""))]
     up_st = update_state()
     # wrap_items and not one f-string: this line has to survive a narrow
     # terminal like every other one on the home
@@ -513,6 +536,47 @@ def fmt_project(r):
             + "\n" + cli.c("  " + t("last_activity", d=cli._day(r["mtime"])), cli.DIM))
 
 
+MACHINE_W = 13   # fits a hostname; past that the name is cut, not the row
+
+
+def list_row(title, sub, machine=None, w=100, code=cli.BOLD):
+    """The two-line row that sessions and memories share.
+
+    Title on top in full colour, everything you would only read *after*
+    deciding on the row dim underneath, and the machine it came from in a
+    column of its own against the right edge.
+
+    The order matters more than it looks. These lists came out sorted by date
+    with the date bold on top and the title dim below it, which is backwards:
+    the dates are already in order, so scanning them tells you nothing, and the
+    one thing that identifies the row was the faintest thing on it. Now the
+    eye goes down a column of titles.
+
+    `w` is the frame's full width; the row gets `w - 4` of it — `draw()` puts a
+    2-column cursor in front and keeps 2 for the scrollbar and its air.
+    """
+    inner = max(20, w - 4)
+    tag = machine[:MACHINE_W] if machine and w >= NARROW else ""
+    title = _clip(title, inner - (len(tag) + 2 if tag else 0))
+    head = cli.c(title, code)
+    if tag:
+        head += " " * max(1, inner - len(title) - len(tag)) + cli.c(tag, cli.DIM)
+    # the sub line carries its own 2 spaces: draw() only indents it past the
+    # cursor, and the extra step is what makes it read as subordinate
+    return head + "\n" + cli.c("  " + _clip(sub, inner - 2), cli.DIM)
+
+
+def _clip(text, room):
+    """One flat line of at most `room` columns, ellipsised if it did not fit.
+
+    Flattening is not cosmetic: a session title is the first prompt verbatim
+    and can carry newlines, and a row that returns more lines than ROW_H pushes
+    every row under it out from where the cursor thinks it is.
+    """
+    text = " ".join(str(text).split()) or "—"
+    return text if len(text) <= room else text[:max(1, room - 1)] + "…"
+
+
 def _drill(st, rows, noun):
     """Flat when there is a filter, when `flat` is on, or when you already
     entered a project; otherwise, the list of projects."""
@@ -533,16 +597,29 @@ def load_sessions(st):
     return _drill(st, [dict(r, kind="session") for r in rows], "n_sessions")
 
 
+def _plural(n, one, many):
+    return t(one) if n == 1 else t(many, n=n)
+
+
 def fmt_session(r, w=100):
-    """Two lines: the data row on top, the full title below."""
+    """A session inside a project: what was asked, then how big it got.
+
+    `12p 47t 7fd22e7e` was three unlabelled numbers in a row and the id was the
+    only one you could even guess at. Spelled out and separated they take the
+    same line and read without a legend; the id keeps its place at the end
+    because it is what `sto show` wants.
+
+    The title comes from the first prompt and can carry newlines inside —
+    `list_row` flattens it, or the row would take more than ROW_H lines and the
+    scrollbar would start lying.
+    """
     if r["kind"] == "project":
         return fmt_project(r)
-    head = (f"{cli._pad(cli._day(r['mtime']), 14, cli.BOLD)}"
-            f"{r['n_prompts']:>4}p {r['n_tools']:>5}t   "
-            f"{cli.c(r['id'][:8], cli.DIM)}")
-    # the title comes from the first prompt and can carry newlines inside:
-    # unflattened, the row would take more than ROW_H lines and the scroll would lie
-    return head + "\n" + cli.c("  " + " ".join(r["title"].split()), cli.DIM)
+    sub = " · ".join([cli._day(r["mtime"]),
+                      _plural(r["n_prompts"], "row_prompt", "row_prompts"),
+                      _plural(r["n_tools"], "row_tool", "row_tools"),
+                      r["id"][:8]])
+    return list_row(r["title"], sub, r["machine"] or srv.LOCAL_MACHINE, w)
 
 
 def detail_session(row):
@@ -567,11 +644,17 @@ def load_memory(st):
 
 
 def fmt_memory(r, w=100):
+    """Same shape as a session row, so the two tabs read as one thing.
+
+    The machine used to sit in the middle of the head, between the type and the
+    date, where it split the row in two and lined up with nothing on the tab
+    next door. It is the same question a session answers, so it gets the same
+    column.
+    """
     if r["kind"] == "project":
         return fmt_project(r)
-    head = (f"{cli._pad(r['slug'], 32, cli.BOLD)}{cli._pad(r['type'], 10, ACCENT)}"
-            f"{cli._pad(r['machine'], 16, cli.DIM)}{cli._day(r['mtime'])}")
-    return head + "\n" + cli.c("  " + " ".join(r["description"].split()), cli.DIM)
+    sub = " · ".join([r["type"], cli._day(r["mtime"]), r["description"]])
+    return list_row(r["slug"], sub, r["machine"], w)
 
 
 def wrap_ansi(line, w, indent=""):
@@ -842,14 +925,58 @@ def update_state():
     return _UPDATE["data"]
 
 
+def ago(ts):
+    """A unix timestamp → 'hace 3 min', in the language the TUI is set to.
+
+    git's own `%cr` did this and it prints in English whatever the UI is set
+    to: `69 minutes ago` sitting in the middle of a Spanish home. It also
+    rounds in git's own way ("2 hours ago" for anything from 1h30 to 2h29),
+    which is fine for a log and vague for a line that is meant to tell you how
+    stale a number is.
+    """
+    if not ts:
+        return t("ago_never")
+    secs = max(0, int(time.time() - ts))
+    if secs < 60:
+        return t("ago_now")
+    if secs < 3600:
+        return t("ago_min", n=secs // 60)
+    if secs < 86400:
+        return t("ago_hour", n=secs // 3600)
+    return t("ago_day", n=secs // 86400)
+
+
+def checked_ago():
+    """How old the `↑x ↓y` above it is — which is not how old the last sync is.
+
+    These were the same number on screen and they are not the same fact. The
+    home never fetches on its own, so ahead/behind is only as fresh as the last
+    `git fetch`; the sync line under it is the last commit that touched
+    `knowledge/`. Pressing FETCH moves this one and cannot move that one — a
+    fetch writes no commits — and that is exactly what made one number
+    pretending to be both confusing.
+
+    git stamps `.git/FETCH_HEAD` on every fetch, so the answer is on disk and
+    survives the process ending.
+    """
+    try:
+        return ago((srv.REPO_ROOT / ".git" / "FETCH_HEAD").stat().st_mtime)
+    except OSError:
+        return t("ago_never")
+
+
 def last_sync():
-    """'2 days ago · LaptopA' — the commit says which machine it came from."""
-    code, out = srv._git("log", "-1", "--format=%cr|%s", "--", "knowledge")
+    """'hace 2 días · LaptopA' — the commit says which machine it came from."""
+    code, out = srv._git("log", "-1", "--format=%ct|%s", "--", "knowledge")
     if code != 0 or "|" not in out:
         return t("never_synced")
     when, _, subject = out.partition("|")
     sep = "sync from "
     machine = subject.split(sep)[-1] if sep in subject else "?"
+    try:
+        when = ago(float(when))
+    except ValueError:
+        return t("never_synced")
     return f"{when} · {machine}"
 
 

@@ -72,8 +72,8 @@ def test_draw_returns_exact_geometry_and_marks_active_tab():
     assert all(len(ui.strip_ansi(l)) == 60 for l in lines)
     assert "Sesiones" in ui.strip_ansi(lines[0])
     assert ui.strip_ansi(lines[2]).startswith(">")     # the cursor is on row 0
-    assert DIA in ui.strip_ansi(lines[2])              # la fila es fecha+contadores
-    assert "sesión 0" in ui.strip_ansi(lines[3])       # the title goes on the 2nd line
+    assert "sesión 0" in ui.strip_ansi(lines[2])       # the title leads the row
+    assert DIA in ui.strip_ansi(lines[3])              # date + counters underneath
     assert "salir" in ui.strip_ansi(lines[-1])
 
 
@@ -82,15 +82,38 @@ def test_two_line_rows_halve_the_visible_window_and_scroll_by_row():
     st = _st(n=50)
     assert ui.visible_rows(st, 12) == 4
     body = [ui.strip_ansi(l) for l in ui.draw(st, 60, 12)[2:10]]
-    assert sum(1 for l in body if l[2:].startswith(DIA)) == 4   # 4 cabeceras
-    assert sum(1 for l in body if "sesión" in l) == 4              # 4 titles
+    assert sum(1 for l in body if "sesión" in l) == 4               # 4 cabeceras
+    assert sum(1 for l in body if l[4:].startswith(DIA)) == 4       # 4 sub-lines
     # the window advances one session at a time (two lines), never splitting one
     for _ in range(4):
         st = ui.handle(st, "down")
     body = [ui.strip_ansi(l) for l in ui.draw(st, 60, 12)[2:10]]
     assert st["top"] == 1                       # draw() es quien corre _clamp()
-    assert body[0].startswith("  " + DIA) and "sesión 1" in body[1]
+    assert "sesión 1" in body[0] and body[1][4:].startswith(DIA)
     assert "sesión 0" not in "\n".join(body)
+
+
+def test_a_row_says_which_machine_it_came_from_without_losing_its_title():
+    """Both lists answer "where is this from" in the same column, and a local
+    session says so by name instead of leaving the column blank."""
+    r = dict(_rows(1)[0], title="arreglar el escapado de settings.json",
+             n_prompts=1, n_tools=12)
+    head, sub = ui.strip_ansi(ui.fmt_session(r, 100)).split("\n")
+    assert head.startswith("arreglar el escapado")
+    assert head.rstrip().endswith(ui.srv.LOCAL_MACHINE[:ui.MACHINE_W])
+    assert "1 prompt " in sub + " " and "12 tools" in sub   # singular is not "1 prompts"
+    assert r["id"][:8] in sub
+
+    # a session pulled from another machine names that one, not this one
+    otra = ui.strip_ansi(ui.fmt_session(dict(r, machine="NotebookX"), 100))
+    assert otra.split("\n")[0].rstrip().endswith("NotebookX")
+
+    # the row never overruns the space draw() leaves it, at any width
+    for w in (40, 60, 80, 120):
+        for linea in ui.strip_ansi(ui.fmt_session(r, w)).split("\n"):
+            assert len(linea) <= w - 4, (w, linea)
+    # and on a narrow terminal the machine column is what gives way
+    assert ui.srv.LOCAL_MACHINE not in ui.strip_ansi(ui.fmt_session(r, 40))
 
 
 def test_a_title_with_newlines_still_occupies_exactly_two_lines():
@@ -99,9 +122,9 @@ def test_a_title_with_newlines_still_occupies_exactly_two_lines():
     st = _st(n=3)
     st["rows"][0]["title"] = "primera línea\nsegunda\ntercera"
     body = [ui.strip_ansi(l) for l in ui.draw(st, 60, 12)[2:10]]
-    assert body[1].strip() == "primera línea segunda tercera"
-    assert body[2][2:].startswith(DIA)       # la fila 1 arranca donde debe
-    assert sum(1 for l in body if l[2:].startswith(DIA)) == 3
+    assert body[0][2:].strip().startswith("primera línea segunda tercera")
+    assert body[1][4:].startswith(DIA)        # its sub-line, not the next row
+    assert sum(1 for l in body if l[4:].startswith(DIA)) == 3
 
 
 def test_draw_clamps_a_formatter_that_returns_more_lines_than_row_h():
@@ -337,8 +360,11 @@ def test_memory_rows_flatten_projects_and_filter_by_text():
         rows = ui.load_memory(st)
         assert [r["slug"] for r in rows] == ["estado", "caveman"]     # mtime desc
         fila = ui.strip_ansi(ui.fmt_memory(rows[0])).split("\n")
-        assert "estado" in fila[0] and "PC" in fila[0]
-        assert fila[1].strip() == "arquitectura del OS"
+        # the slug leads, the machine gets the right-hand column, and what the
+        # memory is about rides underneath with its type and date
+        assert "estado" in fila[0] and fila[0].rstrip().endswith("PC")
+        assert fila[1].strip().endswith("arquitectura del OS")
+        assert rows[0]["type"] in fila[1]
 
         # `a` flattens: every project together
         st["proj"], st["flat"] = None, True
@@ -425,9 +451,9 @@ def _stub_home():
     ui.srv.usage_snapshot = lambda detail=True: {"limits": [{"label": "sesión", "percent": 42,
                                                  "resetsAt": "2026-08-14T18:00:00Z"}],
                                      "daily": []}
-    ui.srv.sync_status = lambda fetch=True: {"remote": "git@x", "branch": "main",
-                                             "ahead": 3, "behind": 0, "dirty": False,
-                                             "machine": "PC", "fetchError": None}
+    ui.srv.sync_status = lambda fetch=True, **k: {"remote": "git@x", "branch": "main",
+                                                  "ahead": 3, "behind": 0, "dirty": False,
+                                                  "machine": "PC", "fetchError": None}
     ui.srv.list_machines = lambda: {"PC": {"type": "desktop", "local": True},
                                     "NB": {"type": "laptop", "local": False}}
     ui.srv.config_status = lambda: [{"id": "skills", "localFiles": 38,
@@ -981,10 +1007,39 @@ def test_last_sync_falls_back_to_question_mark_without_separator():
     real = ui.srv._git
     try:
         # a commit that did not come from sync_push (no "sync from <machine>")
-        ui.srv._git = lambda *a, **k: (0, "hace 3 días|fix: ajuste manual en knowledge")
-        assert ui.last_sync() == "hace 3 días · ?"
+        hace_3_dias = time.time() - 3 * 86400
+        ui.srv._git = lambda *a, **k: (0, f"{hace_3_dias}|fix: ajuste manual en knowledge")
+        assert ui.last_sync() == "hace 3 d · ?"
+        # git's %cr printed in English no matter the language: now we format it
+        ui.srv._git = lambda *a, **k: (0, "no-es-un-timestamp|sync from NB")
+        assert ui.last_sync() == ui.t("never_synced")
     finally:
         ui.srv._git = real
+
+
+def test_the_relative_time_is_translated_and_rounds_down():
+    assert ui.ago(time.time()) == "recién"
+    assert ui.ago(time.time() - 90) == "hace 1 min"
+    assert ui.ago(time.time() - 3 * 3600 - 59 * 60) == "hace 3 h"   # no redondea para arriba
+    assert ui.ago(time.time() - 2 * 86400) == "hace 2 d"
+    assert ui.ago(None) == "nunca"
+    assert ui.ago(time.time() + 500) == "recién"       # un reloj adelantado no da negativo
+
+
+def test_fetch_moves_the_checked_age_and_the_sync_line_does_not():
+    """The confusion this replaces: one relative time stood for both the age of
+    ↑↓ and the age of the last sync, so pressing FETCH — which writes no commit
+    — appeared to do nothing at all."""
+    real = ui.srv.REPO_ROOT
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            ui.srv.REPO_ROOT = Path(d)
+            assert ui.checked_ago() == "nunca"          # sin FETCH_HEAD todavía
+            (Path(d) / ".git").mkdir()
+            (Path(d) / ".git" / "FETCH_HEAD").write_text("", encoding="utf-8")
+            assert ui.checked_ago() == "recién"         # lo que hace un fetch recién corrido
+    finally:
+        ui.srv.REPO_ROOT = real
 
 
 def test_classify_groups_paths_by_meaning():
@@ -1217,9 +1272,34 @@ def test_pending_items_enable_the_buttons_with_git_already_in_sync():
     repo carries is installed on THIS machine."""
     sy = {"ahead": 0, "behind": 0, "dirty": False}
     accent = f"\033[{ui.ACCENT}m"
-    assert accent not in ui.sync_buttons(sy, 100, up=0, down=0)[1]
-    assert accent in ui.sync_buttons(sy, 100, up=3, down=0)[1]
-    assert accent in ui.sync_buttons(sy, 100, up=0, down=3)[1]
+    # BUTTONS_W and not 100: this asks about the colour of PUSH/PULL, and at a
+    # wide width the always-lit FETCH box shares the line with them
+    w = ui.BUTTONS_W
+    assert accent not in ui.sync_buttons(sy, w, up=0, down=0)[1]
+    assert accent in ui.sync_buttons(sy, w, up=3, down=0)[1]
+    assert accent in ui.sync_buttons(sy, w, up=0, down=3)[1]
+
+
+def test_fetch_gets_a_button_when_there_is_room_and_the_legend_always():
+    """↑↓ is read off the last `git fetch`, not off the network, so the way to
+    refresh it had better be visible. `f` existed and nothing said so."""
+    sy = {"ahead": 0, "behind": 0, "dirty": False}
+    ancho = ui.sync_buttons(sy, 100)
+    assert len(ancho) == 3                        # sigue siendo una tira de 3
+    txt = "\n".join(ui.strip_ansi(l) for l in ancho)
+    assert "[f]" in txt and "FETCH" in txt
+    assert f"\033[{ui.ACCENT}m" in ancho[1]       # fetch is always something to do
+    # and it is the first thing to go when the terminal narrows
+    medio = ui.sync_buttons(sy, ui.BUTTONS_W)
+    assert "[f]" not in "\n".join(ui.strip_ansi(l) for l in medio)
+    assert all(len(ui.strip_ansi(l)) <= ui.BUTTONS_W for l in medio)
+    for lang in ui.LANGS:
+        real = ui.i18n.LANG
+        try:
+            ui.i18n.LANG = lang
+            assert "f fetch" in ui.t("k_home")
+        finally:
+            ui.i18n.LANG = real
 
 
 def test_count_items_counts_what_only_a_dry_run_can_see():
@@ -1947,9 +2027,9 @@ def test_sync_preview_classifies_both_directions_without_touching_the_network():
     reales = (ui.srv._git, ui.srv.sync_status, ui.srv.export_config,
               ui.srv.apply_config, ui.srv.export_memory, ui.srv.import_memory)
     try:
-        ui.srv.sync_status = lambda fetch=True: {"branch": "main", "ahead": 1,
-                                                 "behind": 0, "dirty": True,
-                                                 "remote": "x", "fetchError": None}
+        ui.srv.sync_status = lambda fetch=True, **k: {"branch": "main", "ahead": 1,
+                                                      "behind": 0, "dirty": True,
+                                                      "remote": "x", "fetchError": None}
 
         def git(*args, **kw):
             llamadas.append(args)

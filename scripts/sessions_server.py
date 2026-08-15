@@ -485,7 +485,27 @@ def _tokenize(text: str, home: str) -> str:
 
 
 def _detokenize(text: str, home: str) -> str:
-    return text.replace("{{HOME}}", home)
+    """`{{HOME}}` → this machine's home, written the way the file writes paths.
+
+    The asymmetry with `_tokenize` is what corrupted settings.json on every
+    pull: the export matches the JSON-escaped `C:\\\\Users\\\\x` form first (it is
+    the longest variant), but the import pasted back the raw `C:\\Users\\x` —
+    and `\\U` is not a legal JSON escape, so the file stopped parsing and
+    Claude Code silently fell back to its defaults.
+
+    The character right after the token says which form the file is in: a
+    doubled backslash means the surrounding text is escaped (JSON, or a JSON
+    block inside a .md), so the home has to be escaped too. Anything else —
+    `\\` on its own in a .ps1, `/` anywhere — takes the path verbatim.
+    """
+    token, esc = "{{HOME}}", home.replace("\\", "\\\\")
+    out, i = [], 0
+    while (j := text.find(token, i)) != -1:
+        out.append(text[i:j])
+        i = j + len(token)
+        out.append(esc if text.startswith("\\\\", i) else home)
+    out.append(text[i:])
+    return "".join(out)
 
 
 def _module_files(base: Path, module: str):
@@ -1305,13 +1325,16 @@ def _stale_fetch(ttl=FETCH_TTL) -> bool:
         return True
 
 
-def sync_status(fetch=True) -> dict:
+def sync_status(fetch=True, force=False) -> dict:
+    """`force` skips the FETCH_TTL window: a fetch nobody asked for can wait a
+    minute, but one somebody pressed a key for cannot — it would flash
+    "fetching…" and show the same numbers back."""
     code, remote = _git("remote", "get-url", "origin")
     if code != 0:
         return {"remote": None, "branch": None, "ahead": 0, "behind": 0,
                 "dirty": False, "machine": LOCAL_MACHINE, "fetchError": None}
     fetch_error = None
-    if fetch and _stale_fetch():
+    if fetch and (force or _stale_fetch()):
         fcode, fout = _git("fetch", "--quiet", "origin")
         if fcode != 0:
             fetch_error = fout or "fetch failed"

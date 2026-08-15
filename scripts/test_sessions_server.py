@@ -267,6 +267,35 @@ def test_search_sessions_accepts_precomputed_rows():
     assert [h["id"] for h in hits] == ["s1"]
 
 
+def test_a_pulled_settings_json_still_parses():
+    """The bug: export tokenized the JSON-escaped `C:\\\\Users\\\\Alice`, apply
+    pasted back the raw `C:\\Users\\Bob`, and `\\U` is not a legal JSON escape —
+    so every pull left ~/.claude/settings.json unparseable and Claude Code fell
+    back to its defaults without saying a word."""
+    with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as repo, \
+         tempfile.TemporaryDirectory() as b:
+        src, cfg, dst = Path(a), Path(repo) / "config", Path(b)
+        home_a, home_b = "C:\\Users\\Alice", "C:\\Users\\Bob"
+        ps1 = home_a + "\\.claude\\hooks\\statusline.ps1"
+        (src / "settings.json").write_text(
+            json.dumps({"statusLine": {"command": f'powershell -File "{ps1}"'}}),
+            encoding="utf-8")
+        export_config(["settings"], claude_dir=src, repo_config=cfg, home=home_a)
+        assert "{{HOME}}" in (cfg / "settings" / "settings.json").read_text(encoding="utf-8")
+
+        apply_config(["settings"], claude_dir=dst, repo_config=cfg, home=home_b)
+        out = (dst / "settings.json").read_text(encoding="utf-8")
+        assert json.loads(out)["statusLine"]["command"] == \
+            f'powershell -File "{home_b}\\.claude\\hooks\\statusline.ps1"', out
+
+        # and a file that writes the path raw keeps getting it raw
+        (src / "CLAUDE.md").write_text(f"run {ps1} nightly\n", encoding="utf-8")
+        export_config(["claude-md"], claude_dir=src, repo_config=cfg, home=home_a)
+        apply_config(["claude-md"], claude_dir=dst, repo_config=cfg, home=home_b)
+        md = (dst / "CLAUDE.md").read_text(encoding="utf-8")
+        assert md == f"run {home_b}\\.claude\\hooks\\statusline.ps1 nightly\n", md
+
+
 def test_config_sync_roundtrip():
     with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as repo, \
          tempfile.TemporaryDirectory() as b:
