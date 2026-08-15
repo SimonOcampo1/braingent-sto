@@ -392,7 +392,8 @@ def fmt_home(r, w=100):
     if not isinstance(r, dict):
         return r                     # old panel: a line already painted
     if r["kind"] == "module":
-        tail = "" if r["enabled"] else cli.c("   " + t("module_off"), cli.DIM)
+        tail = ("" if r["enabled"] or w < NARROW
+                else cli.c("   " + t("module_off"), cli.DIM))
         return (f" {cli.c('›', ACCENT)} {cli._pad(r['id'], 14, ACCENT)}"
                 f"{_diff_pair(r['local'], r['repo'])}{tail}")
     if r["kind"] == "item":
@@ -655,6 +656,23 @@ def _origin():
     return url.strip() if code == 0 and url.strip() else ""
 
 
+def _upstream():
+    code, url = srv._git("remote", "get-url", srv.UPSTREAM)
+    return url.strip() if code == 0 and url.strip() else ""
+
+
+def _short_remote(url, w):
+    """The remote as wide as there is room for. A URL has no spaces to wrap on,
+    so what gives is the part you already know: the scheme, the host and the
+    `.git`. `owner/repo` is the bit that tells you *which* repo it is."""
+    if not url or len(url) <= w:
+        return url
+    short = url.removesuffix(".git")
+    for prefix in ("https://github.com/", "git@github.com:", "https://", "git@"):
+        short = short.removeprefix(prefix)
+    return short if len(short) <= w else "…" + short[-(w - 1):]
+
+
 def _count(root, glob):
     try:
         return sum(1 for _ in root.rglob(glob))
@@ -683,44 +701,63 @@ def load_config(st):
              for k, v in knowledge_counts().items()]
     rows += [{"kind": "gap"}, {"kind": "head", "text": t("sec_modules")}]
     rows += [{"kind": "module", "id": m, "on": m in on} for m in srv.CONFIG_MODULES]
-    rows += [{"kind": "gap"}, {"kind": "head", "text": t("sec_remote")},
-             {"kind": "text", "text": f"origin   {_origin() or t('no_remote')}"},
-             {"kind": "text", "text": ""},
-             {"kind": "sub", "text": t("sub_first_time")}]
-    rows += [{"kind": "text", "text": t(k)} for k in ("step1", "step2", "step3")]
-    rows += [{"kind": "text", "text": ""}, {"kind": "sub", "text": t("sub_each_machine")}]
-    rows += [{"kind": "text", "text": t(k)} for k in ("step4", "step5", "step6")]
+    # -6: the two-space indent `fmt_config` adds plus the scrollbar and its air
+    w = max(30, st.get("w", 100) - 6)
+    rows += [{"kind": "gap"}, {"kind": "head", "text": t("sec_remote")}]
+    for name, url, note in (("origin", _origin(), t("r_origin")),
+                            ("upstream", _upstream(), t("r_upstream"))):
+        head = wrap_text(note, w, indent=f"{name:<9}", hang=9)
+        rows += [{"kind": "text", "text": l} for l in head]
+        rows.append({"kind": "text",
+                     "text": f"{'':<9}{_short_remote(url, w - 9) or t('no_remote')}"})
+    for sub, steps in ((t("sub_first_time"), ("step1", "step2", "step3", "step3b")),
+                       (t("sub_each_machine"), ("step4", "step5", "step6")),
+                       (t("sub_updates"), ("step7", "step8", "step9"))):
+        rows += [{"kind": "text", "text": ""}, {"kind": "sub", "text": sub}]
+        for k in steps:
+            # wrapped here and not in `fmt_config`: the rows are the unit the
+            # cursor and the scrollbar count, so a line that grows at paint time
+            # would push the ones below out of the window
+            rows += [{"kind": "text", "text": l}
+                     for l in wrap_text(t(k), w, indent="  ", hang=3)]
     return rows
 
 
 def fmt_config(r, w=100):
+    # the label column, and after it the value: fixed at 22/12 the three
+    # preference rows ran off the edge of a narrow terminal
+    lab, val = (22, 12) if w >= NARROW else (max(10, w - 24), 10)
     if r["kind"] == "gap":
         return ""
     if r["kind"] == "head":
         return section(r["text"], w)
     if r["kind"] == "accent":
-        swatch = " ".join(cli.c("██", c) if c == ACCENT else cli.c("░░", cli.DIM)
-                          for _, c in ACCENTS)
-        return (f"  {cli._pad(t('accent_color'), 22, cli.BOLD)}"
-                f"{cli._pad(accent_name(), 12, ACCENT)}{swatch}")
+        # 36 = the two labels; below that the swatch does not fit and the row
+        # spilled past the edge. The colour name still says which one is on.
+        swatch = ("" if w < 54 else
+                  " ".join(cli.c("██", c) if c == ACCENT else cli.c("░░", cli.DIM)
+                           for _, c in ACCENTS))
+        return (f"  {cli._pad(t('accent_color'), lab, cli.BOLD)}"
+                f"{cli._pad(accent_name(), val, ACCENT)}{swatch}").rstrip()
     if r["kind"] == "lang":
         swatch = "  ".join(cli.c(code, ACCENT) if code == i18n.LANG else cli.c(code, cli.DIM)
                            for code in LANGS)
-        return (f"  {cli._pad(t('language'), 22, cli.BOLD)}"
-                f"{cli._pad(i18n.LANG, 12, ACCENT)}{swatch}")
+        return (f"  {cli._pad(t('language'), lab, cli.BOLD)}"
+                f"{cli._pad(i18n.LANG, val, ACCENT)}{swatch}")
     if r["kind"] == "badge":
         mark = cli.c("[x]", ACCENT) if r["on"] else cli.c("[ ]", cli.DIM)
-        return (f"  {cli._pad(t('badge_row'), 22, cli.BOLD)}{mark}   "
+        return (f"  {cli._pad(t('badge_row'), lab, cli.BOLD)}{mark}   "
                 + cli.c(t("badge_on") if r["on"] else t("badge_off"), cli.DIM))
     if r["kind"] == "fixed":
         count = t("n_in_repo", n=f"{r['n']:>4}")
-        return (f"  {cli.c('●', ACCENT)} {cli._pad(t('n_' + r['id']), 20, cli.BOLD)}"
-                f"{count}   " + cli.c(t("always_syncing"), cli.DIM))
+        tail = "   " + cli.c(t("always_syncing"), cli.DIM) if w >= NARROW else ""
+        return (f"  {cli.c('●', ACCENT)} {cli._pad(t('n_' + r['id']), lab - 2, cli.BOLD)}"
+                f"{count}{tail}")
     if r["kind"] == "sub":
         return "  " + cli.c(r["text"], cli.BOLD)
     if r["kind"] == "module":
         mark = cli.c("[x]", ACCENT) if r["on"] else cli.c("[ ]", cli.DIM)
-        return (f"  {mark} {cli._pad(r['id'], 20, cli.BOLD)}"
+        return (f"  {mark} {cli._pad(r['id'], lab - 2, cli.BOLD)}"
                 + cli.c(t("syncing") if r["on"] else t("not_syncing"), cli.DIM))
     return cli.c("  " + r["text"], cli.DIM) if r["text"] else ""
 
@@ -873,8 +910,6 @@ def manifest_lines(kind, data):
 
 # ── help tab ──
 
-USAGE_CAP = 26   # any longer and it eats the description's column
-
 
 def commands():
     """(usage, what it does) for every `sto` command.
@@ -897,23 +932,50 @@ def commands():
         what = t(key)
         if what == key:                        # no translation: whatever there is
             what = from_doc.strip().rstrip(".")
-        if len(usage) > USAGE_CAP:
-            usage = usage[:USAGE_CAP - 1] + "…"
         out.append((usage, what))
     return out
 
 
+def wrap_text(text, w, indent="", hang=0):
+    """A sentence over as many `w`-wide lines as it takes. `wrap_items` packs a
+    list; this packs prose, which is the same job with a space for a separator,
+    continuation indent and ANSI-aware widths already included.
+
+    `hang` pushes the continuation lines further in, so a wrapped `2. git…`
+    does not read as a step of its own.
+    """
+    lines = wrap_items(text.split(), w - hang, indent=indent, sep=" ")
+    return lines[:1] + [" " * hang + l for l in lines[1:]]
+
+
 def help_lines(st):
     """The `sto` commands, with what each one does.
+
+    The syntax used to be cut at 26 columns with an ellipsis, which is the one
+    thing on this screen you cannot guess: `sto memory [<project> | s…` tells
+    you nothing. Now nothing is truncated — when the full form does not fit the
+    column, the arguments drop to their own wrapped line under the command, and
+    both the column and the wrapping follow the terminal's width.
 
     Keyboard shortcuts do not go here: the bottom bar already shows the ones for
     the level you are on, and repeating them was a list that went stale on its
     own every time a key moved.
     """
     w = max(24, st.get("w", 100) - 2)
+    col = min(30, max(12, w // 3))       # the command column, never past a third
     out = [_txt(""), _txt(section(t("sec_commands"), w)), _txt("")]
     for usage, what in commands():
-        out.append(_txt(f"    {cli._pad(usage, 28, ACCENT)}{cli.c(what, cli.DIM)}"))
+        head, _, args = usage.partition(" ")
+        name, _, args = args.partition(" ")   # "sto memory" | "[<project> | …]"
+        cmd = f"{head} {name}".strip()
+        one_line = usage if len(usage) <= col - 2 else cmd
+        first = f"    {cli._pad(one_line, col, ACCENT)}"
+        desc = wrap_text(what, w, indent=" " * (col + 4))
+        out.append(_txt(first + cli.c(desc[0].strip(), cli.DIM)))
+        out += [_txt(cli.c(l, cli.DIM)) for l in desc[1:]]
+        if one_line != usage:            # the arguments could not ride along
+            out += [_txt(cli.c(l, cli.DIM))
+                    for l in wrap_text(args, w, indent=" " * 8)]
     return out
 
 
@@ -939,7 +1001,28 @@ def new_state():
             "loaded_at": 0.0, "flash": "", "confirm": None, "quit": False,
             "fetch": False, "manifest": [], "pinned": [],
             "proj": None, "flat": False, "mod": None, "w": 100,
-            "dwrap": [], "dwrap_w": None, "job": None, "frame": 0}
+            "dwrap": [], "dwrap_w": None, "job": None, "frame": 0,
+            "cache": {}}
+
+
+def _plain_view(st):
+    """Is this the tab's default view? Only that one is worth caching: a
+    filtered or drilled-in list belongs to the keystrokes that built it."""
+    return not (st["proj"] or st["mod"] or st["q"].strip() or st["flat"])
+
+
+def _keep(st):
+    st["cache"][st["tab"]] = (st["rows"], st["pinned"], st["loaded_at"])
+
+
+def _recall(st):
+    """Put the tab's last rows back on screen. Coming back to the home used to
+    paint 'no data' and then block the loop for 1.3 s rebuilding it; the rows
+    from a minute ago are a far better answer than an empty screen, and
+    `tick()` refreshes them in the background from there."""
+    rows, pinned, at = st["cache"].get(st["tab"], ([], [], 0.0))
+    st["rows"], st["pinned"], st["loaded_at"] = rows, pinned, at
+    return bool(rows)
 
 
 def reload_tab(st):
@@ -955,6 +1038,8 @@ def reload_tab(st):
     st["loaded_at"] = time.monotonic()
     st["fetch"] = False
     st["sel"] = min(st["sel"], max(0, len(st["rows"]) - 1))
+    if _plain_view(st):
+        _keep(st)
     if st["tab"] == HOME and not st["mod"]:
         return st      # home opens showing the panel, not pinned to a module
     return _snap(st, 1)
@@ -1106,8 +1191,11 @@ def draw(st, w, h):
         body = wrapped[st["dscroll"]:st["dscroll"] + room]
         total, vis, from_ = len(wrapped), room, st["dscroll"]
     elif not st["rows"]:
-        body = [cli.c("  " + t("no_results" if st["q"].strip() else "no_data"),
-                      cli.DIM)]
+        if st["loaded_at"] == 0.0:          # never loaded: it is coming, not absent
+            body = [cli.c(f"  {SPIN[st['frame'] % len(SPIN)]} {t('loading')}", ACCENT)]
+        else:
+            body = [cli.c("  " + t("no_results" if st["q"].strip() else "no_data"),
+                          cli.DIM)]
     else:
         fmt = TABS[st["tab"]][2]
         nvis = visible_rows(st, h)
@@ -1150,7 +1238,10 @@ def draw(st, w, h):
     return [fit(l, w) for l in lines[:h]]
 
 
-SELECTABLE = ("accent", "lang", "module", "fixed", "item")
+# every kind `config_activate`/`_handle_enter` knows how to act on. A row
+# missing here is invisible to the cursor: `_snap` walks straight past it and
+# `↵` can never reach it — which is exactly how the badge toggle shipped dead.
+SELECTABLE = ("accent", "lang", "badge", "module", "fixed", "item")
 
 
 def _snap(st, step):
@@ -1197,8 +1288,8 @@ def _reset_view(st, reload=True):
     st["sel"] = st["top"] = 0
     if reload:
         return _snap(reload_tab(st), 1)
-    st["rows"] = []
-    st["loaded_at"] = 0.0
+    if not _recall(st):
+        st["rows"], st["loaded_at"] = [], 0.0
     return st
 
 
@@ -1532,6 +1623,8 @@ def bg_reload(st):
         st["sel"] = min(st["sel"], max(0, len(st["rows"]) - 1))
         st["loaded_at"] = time.monotonic()
         st["fetch"] = False
+        if _plain_view(st):
+            _keep(st)
         return st
     snap, loader = dict(st), TABS[st["tab"]][1]
     snap["pinned"] = []
@@ -1552,6 +1645,8 @@ def tick(st):
     """Reload the active tab if its cadence expired, or advance the push/pull."""
     if st.get("job"):
         return job_tick(st)
+    if not st["rows"] and st["loaded_at"] == 0.0:
+        st["frame"] = int(time.monotonic() * 8)   # spin while the first load runs
     if st["mode"] == "list" and time.monotonic() - st["loaded_at"] >= CADENCE[st["tab"]]:
         # empty rows means the view just changed (tab switch, filter): there is
         # nothing to keep showing, so pay for it now instead of painting a

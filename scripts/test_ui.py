@@ -712,16 +712,39 @@ def test_config_rows_list_the_modules_and_the_remote_guide():
 
 
 def test_config_says_when_there_is_no_remote_yet():
-    reales = (ui.srv.get_sync_prefs, ui.srv.CONFIG_MODULES, ui._origin)
+    reales = (ui.srv.get_sync_prefs, ui.srv.CONFIG_MODULES, ui._origin, ui._upstream)
     try:
         ui.srv.get_sync_prefs = lambda: []
         ui.srv.CONFIG_MODULES = {}
-        ui._origin = lambda: ""
+        ui._origin = ui._upstream = lambda: ""
         txt = "\n".join(ui.strip_ansi(ui.fmt_config(r, 100))
                         for r in ui.load_config(ui.new_state()))
-        assert "origin   todavía no configurado" in txt
+        assert txt.count("todavía no configurado") == 2   # origin and upstream
     finally:
-        ui.srv.get_sync_prefs, ui.srv.CONFIG_MODULES, ui._origin = reales
+        (ui.srv.get_sync_prefs, ui.srv.CONFIG_MODULES,
+         ui._origin, ui._upstream) = reales
+
+
+def test_config_teaches_the_two_remotes_and_how_to_update():
+    """The setup used to say `git remote add origin` on a clone that already
+    has one, and said nothing about updates. Both live here, next to the two
+    remotes they are about."""
+    reales = (ui.srv.get_sync_prefs, ui.srv.CONFIG_MODULES, ui._origin, ui._upstream)
+    try:
+        ui.srv.get_sync_prefs = lambda: []
+        ui.srv.CONFIG_MODULES = {}
+        ui._origin = lambda: "git@github.com:yo/mio.git"
+        ui._upstream = lambda: "https://github.com/quien/sto-agentic-os.git"
+        txt = "\n".join(ui.strip_ansi(ui.fmt_config(r, 100))
+                        for r in ui.load_config(ui.new_state()))
+        assert "git remote rename origin upstream" in txt
+        assert "git remote add origin" in txt
+        assert txt.index("rename origin upstream") < txt.index("remote add origin")
+        assert "sto update --apply" in txt and "sto update --link" in txt
+        assert "yo/mio" in txt and "quien/sto-agentic-os" in txt
+    finally:
+        (ui.srv.get_sync_prefs, ui.srv.CONFIG_MODULES,
+         ui._origin, ui._upstream) = reales
 
 
 def test_the_memory_tab_pins_a_graph_button_and_g_opens_it():
@@ -778,15 +801,115 @@ def test_whitespace_only_query_does_not_filter_memory():
         ui.srv.list_memory = real
 
 
-def test_empty_state_shows_message_and_differs_when_filtered():
+def test_empty_state_tells_loading_apart_from_nothing_there():
+    """`sin datos` on a tab that has not run yet is a lie, and it is the first
+    thing you saw every time you came back to the home."""
     st = _st()
-    st["rows"] = []
+    st["rows"], st["loaded_at"] = [], 0.0
+    txt = "\n".join(ui.strip_ansi(l) for l in ui.draw(st, 60, 12))
+    assert "cargando" in txt and "sin datos" not in txt
+
+    st["loaded_at"] = 1.0                      # it ran, and there was nothing
     txt = "\n".join(ui.strip_ansi(l) for l in ui.draw(st, 60, 12))
     assert "sin datos" in txt
 
     st["q"] = "algo"
     txt2 = "\n".join(ui.strip_ansi(l) for l in ui.draw(st, 60, 12))
     assert "sin resultados" in txt2
+
+
+def test_coming_back_to_a_tab_shows_its_last_rows_at_once():
+    """Switching tabs used to blank the rows, so returning to the home paid
+    1.3 s of git and dry runs with an empty screen up. Driven through the keys,
+    because that is the path that was broken."""
+    real = ui.TABS
+    try:
+        # a loader that counts how often it actually has to run
+        corridas = []
+        ui.TABS = list(ui.TABS)
+        ui.TABS[MEM] = (ui.TABS[MEM][0],
+                        lambda st: (corridas.append(1), ["a", "b", "c"])[1],
+                        ui.TABS[MEM][2], ui.TABS[MEM][3])
+        st = ui.new_state()
+        st["tab"] = MEM
+        st = ui.reload_tab(st)
+        assert st["rows"] == ["a", "b", "c"] and len(corridas) == 1
+
+        st = ui.handle(st, "5")                 # off to help
+        assert st["tab"] != MEM
+        st = ui.handle(st, "3")                 # and back
+        assert st["tab"] == MEM
+        # the rows are already there, on the keystroke, without re-running it
+        assert st["rows"] == ["a", "b", "c"]
+        assert len(corridas) == 1
+    finally:
+        ui.TABS = real
+
+
+def test_a_tab_never_visited_comes_back_empty_not_stale():
+    st = ui.new_state()
+    st["tab"] = MEM
+    assert ui._recall(st) is False
+    assert st["rows"] == [] and st["loaded_at"] == 0.0
+
+
+def test_the_badge_row_can_be_reached_and_toggled_with_the_keys():
+    """It shipped dead: `badge` was missing from SELECTABLE, so `_snap` walked
+    straight past the row and `↵` could never land on it."""
+    reales = (ui.srv.badge_status, ui.srv.set_badge,
+              ui.srv.get_sync_prefs, ui.srv.CONFIG_MODULES)
+    puesto = []
+    try:
+        estado = {"on": False}
+        ui.srv.badge_status = lambda: {"on": estado["on"], "other": "otro.ps1"}
+        ui.srv.set_badge = lambda on: (puesto.append(on),
+                                       estado.__setitem__("on", on), {"ok": True})[2]
+        ui.srv.get_sync_prefs = lambda: []
+        ui.srv.CONFIG_MODULES = {}
+        st = ui.new_state()
+        st["tab"] = CFG
+        st = ui.reload_tab(st)
+        for _ in range(12):                     # walk down like a user does
+            if st["rows"][st["sel"]].get("kind") == "badge":
+                break
+            st = ui.handle(st, "down")
+        else:
+            raise AssertionError("the cursor never lands on the badge row")
+        st = ui.handle(st, "\r")
+        assert puesto == [True] and estado["on"] is True
+        assert "badge" in st["flash"]
+    finally:
+        (ui.srv.badge_status, ui.srv.set_badge,
+         ui.srv.get_sync_prefs, ui.srv.CONFIG_MODULES) = reales
+
+
+def test_only_the_plain_view_is_cached():
+    """A drilled-in or filtered list belongs to the keys that built it: handing
+    it back on a later visit would show a filter the user never re-typed."""
+    st = _st()
+    st["tab"], st["rows"] = MEM, ["x"]
+    st["proj"] = "algo"
+    assert ui._plain_view(st) is False
+    st["proj"], st["q"] = None, "  "           # blanks are not a filter
+    assert ui._plain_view(st) is True
+
+
+def test_no_frame_line_ever_runs_past_the_terminal_edge():
+    """`draw` closes with a `fit(l, w)` over the whole frame, and that is the
+    only thing standing between a row the loaders got wrong and a line that
+    overwrites the edge (autowrap off) or wraps and pushes the frame down one
+    (autowrap on). Nothing else pinned it."""
+    st = ui.new_state()
+    st["tab"] = ui.HELP
+    st["loaded_at"] = 1.0
+    st["rows"] = [ui._txt("x" * 400), ui._txt("corta")]
+    for w, h in ((80, 12), (44, 20), (30, 8)):
+        lineas = ui.draw(st, w, h)
+        assert len(lineas) == h
+        assert all(len(ui.strip_ansi(l)) <= w for l in lineas), w
+    # and with a scrollbar up, which takes the other branch
+    st["rows"] = [ui._txt("y" * 400)] * 60
+    assert all(len(ui.strip_ansi(l)) <= 80 for l in ui.draw(st, 80, 12))
 
 
 def test_manifest_lines_marks_truncated_skills_list():
@@ -1528,14 +1651,30 @@ def test_the_help_tab_reads_the_commands_off_the_cli_registry():
     assert not any(que.startswith("cmd_") or not que for _, que in ui.commands())
 
 
-def test_the_command_column_stays_aligned_even_with_a_long_usage():
-    columnas = {ui.strip_ansi(ui.fmt_home(r, 100)).index(que)
-                for r, (_, que) in zip(
-                    [ui._txt(f"    {ui.cli._pad(u, 28, ui.ACCENT)}"
-                             f"{ui.cli.c(q, ui.cli.DIM)}") for u, q in ui.commands()],
-                    ui.commands())}
-    assert len(columnas) == 1                  # todas las descripciones alineadas
-    assert all(len(uso) <= ui.USAGE_CAP for uso, _ in ui.commands())
+def test_no_command_syntax_is_ever_truncated_at_any_width():
+    """The bug: the usage was cut at 26 columns with an ellipsis, so the help
+    read `sto memory [<project> | s…` — the one thing on that screen you cannot
+    guess. Nothing is cut now; what does not fit drops to its own line."""
+    for w in (120, 100, 80, 64, 46):
+        st = ui.new_state()
+        st["w"] = w
+        lineas = [ui.strip_ansi(ui.fmt_home(r, w)) for r in ui.help_lines(st)]
+        txt = "\n".join(lineas)
+        for uso, _ in ui.commands():
+            for palabra in uso.split():
+                assert palabra in txt, (w, uso, palabra)
+        assert "…" not in txt
+        # and it reflows instead of running off the edge
+        assert all(len(l) <= w - 1 for l in lineas), w
+
+
+def test_the_description_column_is_aligned_when_the_usage_fits():
+    st = ui.new_state()
+    st["w"] = 100
+    lineas = [ui.strip_ansi(ui.fmt_home(r, 100)) for r in ui.help_lines(st)]
+    cortas = {l.index(q) for l in lineas for u, q in ui.commands()
+              if l.startswith(f"    {u} ") and q in l}
+    assert len(cortas) == 1                    # one column for every one-liner
 
 
 def test_the_commands_are_translated_too():
