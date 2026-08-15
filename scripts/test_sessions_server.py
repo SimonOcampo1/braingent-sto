@@ -1066,6 +1066,32 @@ def test_sync_incoming_asks_git_for_the_remote_side_only():
 
 
 
+def test_the_fetch_clock_survives_a_git_gc():
+    """`git gc` runs on its own and packs the loose refs away. Reading only
+    `.git/refs/remotes/...` then answered "never fetched" forever, and the
+    30 min TTL became a `git fetch` on every home repaint."""
+    real_git, real_root = srv._git, srv.REPO_ROOT
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            srv.REPO_ROOT = Path(d)
+            (Path(d) / ".git").mkdir()
+            srv._git = lambda *a: (0, "refs/remotes/upstream/main\n")
+            # packed: no loose file anywhere
+            assert srv._stale_fetch_ref("refs/remotes/upstream") is True   # nor packed-refs
+            packed = Path(d) / ".git" / "packed-refs"
+            packed.write_text("# pack-refs with: peeled\n", encoding="utf-8")
+            assert srv._stale_fetch_ref("refs/remotes/upstream", ttl=600) is False
+            os.utime(packed, (1000, 1000))
+            assert srv._stale_fetch_ref("refs/remotes/upstream", ttl=600) is True
+            # loose wins when it is there
+            loose = Path(d) / ".git" / "refs" / "remotes" / "upstream"
+            loose.mkdir(parents=True)
+            (loose / "main").write_text("deadbeef", encoding="utf-8")
+            assert srv._stale_fetch_ref("refs/remotes/upstream", ttl=600) is False
+    finally:
+        srv._git, srv.REPO_ROOT = real_git, real_root
+
+
 def test_an_explicit_update_check_fetches_even_with_a_fresh_ref():
     """The bug: `u` five minutes after a release answered "already on the latest
     version". `update_status` skips the fetch while the upstream ref is younger
@@ -1339,6 +1365,7 @@ if __name__ == "__main__":
     test_sync_stage_exports_and_returns_staged_paths()
     test_sync_incoming_lists_paths_and_reports_fetch_error()
     test_sync_incoming_asks_git_for_the_remote_side_only()
+    test_the_fetch_clock_survives_a_git_gc()
     test_an_explicit_update_check_fetches_even_with_a_fresh_ref()
     test_update_apply_refuses_an_unrelated_repo_instead_of_forcing_a_merge()
     test_update_apply_never_merges_over_uncommitted_work()

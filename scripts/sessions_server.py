@@ -1331,10 +1331,16 @@ def _stale_fetch_ref(ref: str, ttl=FETCH_TTL) -> bool:
         code, out = _git("for-each-ref", "--format=%(refname)", ref)
         if code != 0 or not out.strip():
             return True
-        newest = max((REPO_ROOT / ".git" / r.strip()).stat().st_mtime
-                     for r in out.splitlines() if r.strip()
-                     and (REPO_ROOT / ".git" / r.strip()).exists())
-        return _t.time() - newest > ttl
+        stamps = [p.stat().st_mtime for p in
+                  ((REPO_ROOT / ".git" / r.strip()) for r in out.splitlines() if r.strip())
+                  if p.exists()]
+        if not stamps:
+            # `git gc` packs the loose refs away and runs on its own: without
+            # this the answer was "stale" forever and the 30 min TTL turned
+            # into a fetch on every home repaint.
+            packed = REPO_ROOT / ".git" / "packed-refs"
+            stamps = [packed.stat().st_mtime] if packed.exists() else []
+        return not stamps or _t.time() - max(stamps) > ttl
     except (OSError, ValueError):
         return True
 
