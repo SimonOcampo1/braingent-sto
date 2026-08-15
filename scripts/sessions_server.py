@@ -206,14 +206,21 @@ def list_machines(knowledge_dir=None) -> dict:
 
 
 def _knowledge_sessions(knowledge_dir=None) -> list[tuple[str, Path]]:
-    """(machine, path) for sessions synced from OTHER machines via the repo."""
+    """(machine, path) for every session in the repo, this machine's own included.
+
+    Our own folder used to be skipped as "already listed from ~/.claude/projects",
+    and that is why the same repo showed fewer sessions on the machine that
+    recorded them than on the other one: Claude Code prunes its transcripts, the
+    exports in the repo are never pruned. The live file still wins when both
+    exist — `list_sessions` puts the local ones first and dedupes by id.
+    """
     kd = knowledge_dir if knowledge_dir is not None else KNOWLEDGE_SESSIONS
     if not kd.is_dir():
         return []
     out = []
     for machine_dir in sorted(kd.iterdir()):
-        if not machine_dir.is_dir() or machine_dir.name == LOCAL_MACHINE:
-            continue  # own exports are already listed from ~/.claude/projects
+        if not machine_dir.is_dir():
+            continue
         out.extend((machine_dir.name, p) for p in machine_dir.rglob("*.jsonl"))
     return out
 

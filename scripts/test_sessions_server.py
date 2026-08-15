@@ -140,21 +140,28 @@ def test_list_and_find_by_id():
         other = Path(k) / "OtherPC" / "projZ"
         other.mkdir(parents=True)
         p2 = _write_session(other, name="22222222-2222-3333-4444-555555555555.jsonl")
-        # own machine's exports in knowledge → skipped (already listed locally)
+        # own machine's export of a session Claude Code already pruned locally:
+        # it is still ours (machine → null) and still listed
         own = Path(k) / (platform.node() or "local") / "projX"
         own.mkdir(parents=True)
-        _write_session(own, name="33333333-2222-3333-4444-555555555555.jsonl")
+        pruned = _write_session(own, name="33333333-2222-3333-4444-555555555555.jsonl")
+        # and an export whose local copy is alive: the live file wins
+        _write_session(own, name=p.name)
 
         rows = list_sessions(projects_dir=Path(d), knowledge_dir=Path(k))
         ids = {r["id"] for r in rows}
         assert p.stem in ids and p2.stem in ids, ids
         assert empty.stem not in ids, ids           # no-prompt filtered
-        assert "33333333-2222-3333-4444-555555555555" not in ids, ids
+        assert pruned.stem in ids, ids
+        assert len([r for r in rows if r["id"] == p.stem]) == 1, rows
         by_id = {r["id"]: r for r in rows}
         assert by_id[p2.stem]["machine"] == "OtherPC", by_id[p2.stem]
         assert by_id[p.stem]["machine"] is None, by_id[p.stem]  # local → null
         assert by_id[p2.stem]["project"] == "projZ", by_id[p2.stem]
+        assert by_id[pruned.stem]["machine"] is None, by_id[pruned.stem]
         assert find_path_by_id(p.stem, projects_dir=Path(d), knowledge_dir=Path(k)) == p
+        assert find_path_by_id(pruned.stem, projects_dir=Path(d),
+                               knowledge_dir=Path(k)) == pruned
         assert find_path_by_id(p2.stem, projects_dir=Path(d), knowledge_dir=Path(k)) == p2
         assert find_path_by_id("nope", projects_dir=Path(d), knowledge_dir=Path(k)) is None
 
