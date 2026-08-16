@@ -1883,7 +1883,13 @@ def tick(st):
         return job_tick(st)
     if busy() or (not st["rows"] and st["loaded_at"] == 0.0):
         st["frame"] = int(time.monotonic() * 8)   # spin while a load runs
-    if st["mode"] == "list" and time.monotonic() - st["loaded_at"] >= CADENCE[st["tab"]]:
+    # `loaded_at == 0.0` means "never loaded", not "loaded at second zero": on
+    # Windows `monotonic()` counts from boot, so with less than an hour of
+    # uptime the subtraction never reached the help tab's 3600 s cadence and it
+    # spun on `loading…` forever (config did the same for the first minute).
+    stale = (st["loaded_at"] == 0.0
+             or time.monotonic() - st["loaded_at"] >= CADENCE[st["tab"]])
+    if st["mode"] == "list" and stale:
         # empty rows means the view just changed (tab switch, filter): there is
         # nothing to keep showing, so pay for it now instead of painting a
         # blank tab for a second.

@@ -2041,6 +2041,19 @@ def test_the_help_tab_never_reloads_on_a_tick():
     assert len(ui.CADENCE) == len(ui.ROW_H) == len(ui.TABS) == len(ui.TAB_IDS)
 
 
+def test_the_help_tab_loads_even_with_the_machine_just_booted():
+    # monotonic() cuenta desde el arranque en Windows: con 10 s de uptime,
+    # `monotonic() - 0.0 >= 3600` es falso y ayuda se quedaba en `loading…`
+    real = ui.time.monotonic
+    try:
+        ui.time.monotonic = lambda: 10.0
+        st = ui.new_state()
+        st["tab"] = AYU
+        assert ui.tick(st)["rows"]
+    finally:
+        ui.time.monotonic = real
+
+
 def test_there_is_no_rule_under_the_tabs_only_air():
     st = ui.new_state()
     st["rows"] = ["contenido"]
