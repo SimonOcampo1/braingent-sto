@@ -1,8 +1,24 @@
-# STO agenticOS
+<p align="center">
+  <img src="docs/banner.png" alt="braingent-sto" width="100%">
+</p>
 
-**Your Claude Code brain — config, memory and sessions — living in one git repo you own.**
+<p align="center">
+  <img alt="Python" src="https://img.shields.io/badge/Python-3776AB?style=flat-square&logo=python&logoColor=white">
+  <img alt="React" src="https://img.shields.io/badge/React-61DAFB?style=flat-square&logo=react&logoColor=black">
+  <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white">
+  <img alt="MCP" src="https://img.shields.io/badge/MCP-E38742?style=flat-square&logo=anthropic&logoColor=white">
+</p>
 
-STO agenticOS turns a private git repository into the substrate that Claude Code is missing: your `~/.claude` config, your skills and plugins, the memories your agent writes, and the transcripts of every session, all synced between machines with two keystrokes. No daemon, no API key, no third-party service — a Python stdlib backend, `git`, and a terminal UI.
+<p align="center">
+  <a href="#why-it-exists"><b>Why it exists</b></a> &nbsp;•&nbsp;
+  <a href="#features">Features</a> &nbsp;•&nbsp;
+  <a href="#stack">Stack</a> &nbsp;•&nbsp;
+  <a href="#structure">Structure</a> &nbsp;•&nbsp;
+  <a href="#setup">Setup</a> &nbsp;•&nbsp;
+  <a href="#commands">Commands</a>
+</p>
+
+braingent-sto turns a private git repository into the substrate that Claude Code is missing: your `~/.claude` config, your skills and plugins, the memories your agent writes, and the transcripts of every session, all synced between machines with two keystrokes. No daemon, no API key, no third-party service — a Python stdlib backend, `git`, and a terminal UI.
 
 ---
 
@@ -22,7 +38,7 @@ STO is the union of the three, on one substrate. Every artifact is **plain text 
 
 ---
 
-## 🚀 Features
+## Features
 
 - **Built on the native memory, not beside it.** No second memory store, no protocol to paste into `CLAUDE.md`, nothing new to teach the model: Claude Code writes its auto memory as markdown, and STO mirrors those exact files between machines.
 - **One repo, everything in it.** `sto push` exports sessions, memories, `~/.claude` modules and your vault, commits and pushes. `sto pull` applies them on the other machine — including installing missing plugins and marketplaces.
@@ -38,10 +54,10 @@ STO is the union of the three, on one substrate. Every artifact is **plain text 
 
 ---
 
-## 📂 Structure
+## Structure
 
 ```
-sto-agentic-os/
+braingent-sto/
 ├── scripts/
 │   ├── sessions_server.py   # engine: sessions, memory, config sync, git — stdlib only
 │   ├── cli.py               # `sto` — presentation over the engine
@@ -59,7 +75,7 @@ sto-agentic-os/
 
 ---
 
-## 🛠️ Stack
+## Stack
 
 - **Backend** — Python 3.11+, standard library only. No `pip install`, no virtualenv, no server to keep alive for the CLI: `cli.py` imports the engine directly.
 - **Sync** — plain `git`. Your repo, your remote, your history. Conflicts are git conflicts, and you already know how to resolve those.
@@ -69,17 +85,17 @@ sto-agentic-os/
 
 ---
 
-## 💻 Setup
+## Setup
 
 ```bash
-git clone https://github.com/SimonOcampo1/sto-agentic-os.git
-cd sto-agentic-os
+git clone https://github.com/SimonOcampo1/braingent-sto.git
+cd braingent-sto
 powershell -ExecutionPolicy Bypass -File scripts/install_sto_cli.ps1
 ```
 
 Open a new terminal and you have `sto`. Now make the clone yours.
 
-> **Every command below runs inside the `sto-agentic-os/` folder you just
+> **Every command below runs inside the `braingent-sto/` folder you just
 > cloned.** The new GitHub repo is never cloned — you only need its URL.
 
 1. Go to **github.com/new** and create an empty **private** repo, no README.

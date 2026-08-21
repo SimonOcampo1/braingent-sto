@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>banner</title>
+
+<!-- ══ CONFIG ═══════════════════════════════════════════════════════════
+     Editar SOLO este bloque. Los valores salen del sitio real del
+     proyecto (sus @font-face / :root), no de la imaginación.
+     ═════════════════════════════════════════════════════════════════ -->
+
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;700&family=JetBrains+Mono:wght@400;700&display=swap">
+
+<style>
+:root{
+  /* paleta — copiar del :root del proyecto */
+  --bg:        #0b0907;
+  --bg-deep:   #120f0c;
+  --ink:       #eae7e3;
+  --muted:     #99948f;
+  --accent:    #e38742;
+
+  /* tipografía — las mismas familias que usa el sitio */
+  --font-display: "Archivo", system-ui, sans-serif;
+  --font-body:    "JetBrains Mono", ui-monospace, monospace;
+
+  /* ajuste fino del título */
+  --title-weight: 700;
+  --title-track:  -.025em;
+  --title-size:   min(5.9vw, 23vh);
+
+  /* motivo de fondo del proyecto: gridlines | none */
+  --motif: gridlines;
+
+  /* imagen de fondo opcional: url('hero.jpg') o none */
+  --hero: none;
+  --hero-opacity: .18;
+}
+</style>
+
+<!-- Textos: si alguno sobra, borrar el elemento entero, no dejarlo vacío. -->
+<script>
+  const EYEBROW  = "";                                   /* opcional, ej. "Web · 14 secciones" */
+  const TITLE    = "braingent-sto";
+  const TAGLINE  = "config, memory and sessions for your agents, in a repo you own";
+  const FOOTNOTE = "";                                   /* opcional, ej. dominio del deploy */
+</script>
+
+<!-- ══ /CONFIG ══════════════════════════════════════════════════════ -->
+
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden}
+
+body{
+  background:var(--bg);
+  color:var(--ink);
+  display:flex;align-items:center;justify-content:center;
+  position:relative;
+  -webkit-font-smoothing:antialiased;
+}
+
+/* hero opcional */
+body::before{
+  content:"";position:absolute;inset:0;
+  background-image:var(--hero);
+  background-size:cover;background-position:center;
+  opacity:var(--hero-opacity);
+  filter:grayscale(.4);
+}
+
+/* motivo estructural + viñeta: hunde los bordes para que el texto respire */
+body::after{
+  content:"";position:absolute;inset:0;pointer-events:none;
+  background:
+    repeating-linear-gradient(90deg,
+      rgba(255,255,255,.045) 0 1px, transparent 1px 8.3333%),
+    radial-gradient(100% 78% at 50% 44%,
+      color-mix(in srgb, var(--accent) 7%, transparent) 0%, transparent 62%),
+    radial-gradient(120% 92% at 50% 45%,
+      transparent 34%, color-mix(in srgb, var(--bg-deep) 92%, black) 100%);
+}
+:root[style*="--motif: none"] body::after{background:radial-gradient(120% 90% at 50% 45%,transparent 30%,var(--bg-deep) 100%)}
+
+.plate{position:relative;z-index:1;text-align:center;padding:0 6vw;max-width:88%}
+
+.eyebrow{
+  font-family:var(--font-body);
+  font-size:min(1.15vw,2.6vh);
+  letter-spacing:.34em;text-transform:uppercase;
+  color:var(--muted);
+  margin-bottom:min(2.6vw,5vh);
+}
+
+h1{
+  font-family:var(--font-display);
+  font-weight:var(--title-weight);
+  font-size:var(--title-size);
+  letter-spacing:var(--title-track);
+  line-height:1.02;
+  text-indent:var(--title-track);          /* compensa el tracking del último glifo */
+  white-space:nowrap;
+}
+
+/* filete: la marca de agua del sistema, no un separador cualquiera */
+.rule{
+  width:min(7vw,18vh);height:1px;
+  background:linear-gradient(90deg,transparent,var(--accent) 22%,var(--accent) 78%,transparent);
+  margin:min(3.4vw,7vh) auto;
+  position:relative;
+}
+.rule::before,.rule::after{
+  content:"";position:absolute;top:50%;
+  width:3px;height:3px;border-radius:50%;
+  background:var(--accent);transform:translateY(-50%) rotate(45deg);
+}
+.rule::before{left:-9px}
+.rule::after{right:-9px}
+
+.tagline{
+  font-family:var(--font-body);
+  font-style:italic;
+  font-size:min(1.55vw,5.2vh);
+  letter-spacing:.085em;
+  color:var(--muted);
+}
+
+.footnote{
+  position:absolute;z-index:1;
+  bottom:min(3vw,5vh);left:0;right:0;
+  text-align:center;
+  font-family:var(--font-body);
+  font-size:min(1vw,2.2vh);
+  letter-spacing:.26em;text-transform:uppercase;
+  color:color-mix(in srgb, var(--muted) 62%, transparent);
+}
+
+/* El social preview (2:1) se recorta en las tarjetas: GitHub pide ~80px de zona
+   segura. El banner del README (3:1) no se recorta y conserva su composicion. */
+@media (max-aspect-ratio: 5/2){ .footnote{bottom:15%} }
+</style>
+</head>
+<body>
+  <div class="plate">
+    <p class="eyebrow"></p>
+    <h1></h1>
+    <div class="rule"></div>
+    <p class="tagline"></p>
+  </div>
+  <p class="footnote"></p>
+
+<script>
+  const set = (sel, txt) => {
+    const el = document.querySelector(sel);
+    txt ? el.textContent = txt : el.remove();
+  };
+  set(".eyebrow",  EYEBROW);
+  set("h1",        TITLE);
+  set(".tagline",  TAGLINE);
+  set(".footnote", FOOTNOTE);
+
+  /* Un título largo no debe partirse ni desbordar: se encoge hasta entrar. */
+  const h1 = document.querySelector("h1");
+  if (h1) {
+    const room = () => h1.scrollWidth <= h1.parentElement.clientWidth;
+    let size = parseFloat(getComputedStyle(h1).fontSize);
+    while (!room() && size > 12) h1.style.fontSize = (size -= 2) + "px";
+  }
+</script>
+</body>
+</html>
