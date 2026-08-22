@@ -2338,6 +2338,70 @@ def test_the_state_legend_only_shows_up_when_something_is_out_of_parity():
         ui.module_items, ui.srv.dropped_skills = real_items, real_drop
 
 
+def test_a_brings_a_repo_only_row_here_and_esc_cancels():
+    """Cierra la simetría: `a` trae, `d` saca de acá, `R` saca del repo.
+    Antes, a una fila `[R]` solo se le podía hacer una cosa: borrarla."""
+    llamadas = []
+    real = ui.srv.bring
+
+    def falso(target, apply=False):
+        llamadas.append((target, apply))
+        return (["knowledge/config/skills/skills/traida/SKILL.md"], None)
+
+    try:
+        ui.srv.bring = falso
+        st = ui.new_state()
+        st["mod"] = "skills"
+        st["rows"] = [{"kind": "item", "what": "skill", "id": "personal:traida",
+                       "label": "traida", "desc": "", "where": "repo"}]
+        st = ui.handle(st, "a")
+        assert st["confirm"]["kind"] == "bring"
+        assert llamadas == [("skill:traida", False)], llamadas
+        txt = "\n".join(ui.strip_ansi(l) for l in st["manifest"])
+        assert "traida" in txt and "SKILL.md" in txt
+        assert "sto-backup" in txt              # dice dónde queda lo que pisa
+
+        st = ui.handle(st, "\x1b")
+        assert st["confirm"] is None
+        assert all(not a for _, a in llamadas)
+
+        st = ui.handle(st, "a")
+        st = ui.handle(st, "\r")
+        assert ("skill:traida", True) in llamadas
+        assert "traida" in st["flash"]
+    finally:
+        ui.srv.bring = real
+
+
+def test_a_says_why_when_there_is_nothing_to_bring():
+    real = ui.srv.bring
+    try:
+        ui.srv.bring = lambda target, apply=False: ([], "already installed here")
+        st = ui.new_state()
+        st["mod"] = "skills"
+        st["rows"] = [{"kind": "item", "what": "skill", "id": "personal:ya",
+                       "label": "ya", "desc": "", "where": "both"}]
+        st = ui.handle(st, "a")
+        assert st["confirm"] is None
+        assert st["flash"] == "already installed here"
+    finally:
+        ui.srv.bring = real
+
+
+def test_the_three_verbs_are_all_reachable_from_a_module_and_named_in_the_legend():
+    """Los tres que existen, y ninguno más: no hay tecla para 'subir esta',
+    porque el push ya lleva todo lo local."""
+    for lang in ui.LANGS:
+        real = ui.i18n.LANG
+        try:
+            ui.i18n.LANG = lang
+            legend = ui.t("k_module")
+            assert " a " in legend and " d " in legend and " R " in legend, legend
+            assert " u " not in legend, legend
+        finally:
+            ui.i18n.LANG = real
+
+
 def test_d_uninstalls_a_plugin_through_the_claude_cli():
     llamadas = []
     real = ui.srv.plugin_cmd

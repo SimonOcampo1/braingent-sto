@@ -13,7 +13,7 @@ from sessions_server import (
     export_plugins, plugins_to_apply, apply_plugins, list_machines, machine_type,
     _memory_meta, _memory_dirs, _newest, export_memory, LOCAL_MACHINE,
     import_memory, rebuild_index, list_memory, _slug_project,
-    memory_graph, forget,
+    memory_graph, forget, bring,
 )
 
 SAMPLE = [
@@ -417,6 +417,60 @@ def test_an_unknown_agent_falls_back_instead_of_exploding():
     finally:
         os.environ.pop(agents.AGENT_ENV, None) if real is None else \
             os.environ.update({agents.AGENT_ENV: real})
+
+
+def test_bring_installs_one_skill_the_repo_carries_and_resolves_home():
+    """El espejo de `forget`. Sin este verbo, a una fila que el repo tiene y
+    esta maquina no solo se le podia hacer una cosa: borrarla del repo."""
+    with tempfile.TemporaryDirectory() as d:
+        claude = _make_claude_dir(d)
+        cfg = Path(d) / "knowledge" / "config"
+        (cfg / "skills" / "skills" / "traida").mkdir(parents=True)
+        (cfg / "skills" / "skills" / "traida" / "SKILL.md").write_text(
+            "---\nname: traida\ndescription: del repo\n---\ncuerpo", encoding="utf-8")
+        (cfg / "skills" / "skills" / "traida" / "ref.md").write_text(
+            "vive en {{HOME}}/algo", encoding="utf-8")
+
+        paths, err = bring("skill:traida", claude_dir=claude, repo_config=cfg)
+        assert err is None, err
+        assert len(paths) == 2, paths                       # el seco lista, no copia
+        assert not (claude / "skills" / "traida").exists()
+
+        assert bring("skill:nope", claude_dir=claude, repo_config=cfg)[1] is not None
+        assert bring("skill:../secret", claude_dir=claude, repo_config=cfg)[1] is not None
+        # ya instalada: no hay nada que traer, y decirlo es mejor que copiar encima
+        assert bring("skill:my-skill", claude_dir=claude, repo_config=cfg)[1] is not None
+
+        _, err = bring("skill:traida", apply=True, claude_dir=claude,
+                       repo_config=cfg, home="C:/casa")
+        assert err is None, err
+        assert (claude / "skills" / "traida" / "SKILL.md").is_file()
+        # pasa por el mismo _apply_tree que el pull, asi que {{HOME}} se resuelve
+        ref = (claude / "skills" / "traida" / "ref.md").read_text(encoding="utf-8")
+        assert ref == "vive en C:/casa/algo", ref
+
+
+def test_apply_config_and_bring_share_one_copy_loop():
+    """Si `_apply_tree` se rompe, las dos se rompen juntas — que es el punto
+    de haberlo sacado afuera en vez de copiar el loop."""
+    with tempfile.TemporaryDirectory() as d:
+        claude = Path(d) / "claude"
+        cfg = Path(d) / "cfg"
+        # knowledge/config/<modulo>/<ruta relativa al home del agente>: por eso
+        # las skills viven en skills/skills/<nombre> y esto en agents/agents/
+        (cfg / "agents" / "agents").mkdir(parents=True)
+        (cfg / "agents" / "agents" / "uno.md").write_text("raiz {{HOME}}", encoding="utf-8")
+
+        n = apply_config(["agents"], claude_dir=claude, repo_config=cfg,
+                         home="C:/casa", dry=True)
+        assert n == 1 and not (claude / "agents").exists()
+
+        n = apply_config(["agents"], claude_dir=claude, repo_config=cfg, home="C:/casa")
+        assert n == 1
+        assert (claude / "agents" / "uno.md").read_text(encoding="utf-8") == "raiz C:/casa"
+        # segunda pasada: identico, no se reescribe (la mtime es el detector de cambios)
+        assert apply_config(["agents"], claude_dir=claude, repo_config=cfg,
+                            home="C:/casa") == 0
 
 
 def test_search_sessions():
@@ -1555,4 +1609,6 @@ if __name__ == "__main__":
     test_the_dropped_lookup_survives_a_repo_git_never_saw()
     test_a_second_agent_is_a_table_entry_and_not_a_patch_across_the_engine()
     test_an_unknown_agent_falls_back_instead_of_exploding()
+    test_bring_installs_one_skill_the_repo_carries_and_resolves_home()
+    test_apply_config_and_bring_share_one_copy_loop()
     print("OK")

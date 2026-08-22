@@ -597,7 +597,6 @@ def apply_config(modules, claude_dir=None, repo_config=None, home=None,
     button: `git` being up to date says nothing about whether the skills and
     plugins the repo carries are installed *here*.
     """
-    import shutil as sh
     from datetime import datetime
     cd = claude_dir or CLAUDE_DIR
     cfg = repo_config if repo_config is not None else KNOWLEDGE_CONFIG
@@ -611,31 +610,88 @@ def apply_config(modules, claude_dir=None, repo_config=None, home=None,
         src_root = cfg / m
         if m not in CONFIG_MODULES or not src_root.is_dir():
             continue
-        for f in sorted(src_root.rglob("*")):
-            if not f.is_file():
-                continue
-            rel = f.relative_to(src_root)
-            target = cd / rel
-            text = blob = None
-            if f.suffix.lower() in _TEXT_EXT:
-                text = _detokenize(f.read_text(encoding="utf-8", errors="replace"), home)
-            else:
-                blob = f.read_bytes()
-            if _same(target, text, blob):
-                continue
-            applied += 1
-            if dry:
-                continue
-            if target.exists():
-                bpath = backup / rel
-                bpath.parent.mkdir(parents=True, exist_ok=True)
-                sh.copy2(target, bpath)
-            target.parent.mkdir(parents=True, exist_ok=True)
-            if text is not None:
-                target.write_text(text, encoding="utf-8")
-            else:
-                target.write_bytes(blob)
+        applied += _apply_tree(src_root, cd, home, backup, dry)
     return applied
+
+
+def _apply_tree(src_root: Path, dest_root: Path, home: str, backup: Path, dry: bool) -> int:
+    """Copy a repo subtree onto this machine, detokenized and backed up.
+
+    Pulled out of `apply_config` so `bring` can install a single skill through
+    exactly the same path: same `{{HOME}}` resolution, same skip-if-identical,
+    same backup. A second copy of this loop is how the two would drift.
+    """
+    import shutil as sh
+    applied = 0
+    for f in sorted(src_root.rglob("*")):
+        if not f.is_file():
+            continue
+        rel = f.relative_to(src_root)
+        target = dest_root / rel
+        text = blob = None
+        if f.suffix.lower() in _TEXT_EXT:
+            text = _detokenize(f.read_text(encoding="utf-8", errors="replace"), home)
+        else:
+            blob = f.read_bytes()
+        if _same(target, text, blob):
+            continue
+        applied += 1
+        if dry:
+            continue
+        if target.exists():
+            bpath = backup / rel
+            bpath.parent.mkdir(parents=True, exist_ok=True)
+            sh.copy2(target, bpath)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if text is not None:
+            target.write_text(text, encoding="utf-8")
+        else:
+            target.write_bytes(blob)
+    return applied
+
+
+def bring(target, apply=False, claude_dir=None, repo_config=None, home=None):
+    """Install one thing the repo carries onto this machine.
+
+    The mirror of `forget`, and the verb that makes a repo-only row actionable
+    in the useful direction: without it the only thing you could do to a skill
+    the repo has and you do not was drop it.
+
+    `sto pull` already installs everything at once; this is the same operation
+    scoped to one item, for when you want that skill and not the other forty.
+
+    Returns `(paths, error)`. `apply=False` is a dry run, same contract as
+    `forget`, so the confirmation card shows the real file list.
+    """
+    from datetime import datetime
+    cd = claude_dir or CLAUDE_DIR
+    cfg = repo_config if repo_config is not None else KNOWLEDGE_CONFIG
+    kind, _, name = target.partition(":")
+    if kind not in ("skill", "plugin") or not name:
+        return [], "expected skill:<name> or plugin:<id>"
+
+    if kind == "plugin":
+        if name in set(_local_plugins(cd)[1]):
+            return [], f"{name} is already installed here"
+        if name not in set(_repo_plugins(cfg)[1]):
+            return [], f"plugin not in repo: {name}"
+        if not apply:
+            return [name], None
+        res = plugin_cmd("install", name)
+        return ([name], None) if not res.get("error") else ([], res["error"])
+
+    root = (cfg / "skills" / "skills").resolve()
+    src = (root / name).resolve()
+    if src.parent != root or not (src / "SKILL.md").is_file():
+        return [], f"skill not in repo: {name}"
+    dest = cd / agents.active()["skills"] / name
+    if (dest / "SKILL.md").is_file():
+        return [], f"{name} is already installed here"
+    rel = [_forget_rel(f) for f in sorted(src.rglob("*")) if f.is_file()]
+    if apply:
+        backup = cd / ".sto-backup" / datetime.now().strftime("%Y%m%d-%H%M%S")
+        _apply_tree(src, dest, home or str(Path.home()), backup, dry=False)
+    return rel, None
 
 
 def count_skills(base: Path) -> int:

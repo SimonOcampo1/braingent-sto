@@ -1599,6 +1599,8 @@ def handle(st, key):
         return _handle_delete(st)
     elif key == "R" and st["tab"] == HOME and st["mod"]:
         return _handle_forget(st)
+    elif key == "a" and st["tab"] == HOME and st["mod"]:
+        return _handle_bring(st)
     elif key == "f" and st["tab"] == HOME:
         st["fetch"] = True
         st["loaded_at"] = 0.0
@@ -1699,6 +1701,54 @@ def delete_lines(row):
             + "  " + cli.c(row["label"], cli.YELLOW),
             cli.c("   " + t("delete_warning"), cli.DIM),
             cli.c(" " + t("confirm"), ACCENT) + cli.c("   " + t("cancel"), cli.DIM)]
+
+
+def _handle_bring(st):
+    """`a` inside a module: install here what the repo carries.
+
+    The third verb of the set, and the one that makes a `[R]` row useful. `d`
+    removes it from this machine and `R` from the repo; without `a` the only
+    thing you could do to a skill the repo has and you do not was drop it.
+
+    There is no fourth key for "push this one": `export_config` already carries
+    everything local on the next push, so a per-item upload would be a second
+    way to do what `p` does anyway.
+    """
+    if not st["rows"]:
+        return st
+    row = st["rows"][st["sel"]]
+    if not (isinstance(row, dict) and row.get("what") in ("skill", "plugin")):
+        st["flash"] = t("not_deletable", id=st["mod"])
+        return st
+    name = row["label"] if row["what"] == "skill" else row["id"]
+    paths, err = srv.bring(f"{row['what']}:{name}")
+    if err:
+        st["flash"] = err
+        return st
+    st["confirm"] = {"kind": "bring", "what": row["what"],
+                     "id": name, "label": row["label"]}
+    st["manifest"] = bring_lines(row, paths)
+    return st
+
+
+def bring_lines(row, paths):
+    """The confirmation card for a bring. Same contract as `manifest_lines`:
+    the last line is the one painted on the bottom bar."""
+    out = [cli.c(" " + t("bring_title", what=row["what"]), cli.BOLD)
+           + "  " + cli.c(row["label"], cli.GREEN)]
+    out += [cli.c("   " + p, cli.DIM) for p in paths[:8]]
+    if len(paths) > 8:
+        out.append(cli.c(f"   … +{len(paths) - 8}", cli.DIM))
+    out.append(cli.c("   " + t("bring_backup"), cli.DIM))
+    out.append(cli.c(" " + t("confirm"), ACCENT) + cli.c("   " + t("cancel"), cli.DIM))
+    return out
+
+
+def _do_bring(st, c):
+    _, err = srv.bring(f"{c['what']}:{c['id']}", apply=True)
+    st["flash"] = err or t("brought", id=c["label"])
+    st["loaded_at"] = 0.0
+    return st
 
 
 def _handle_forget(st):
@@ -1826,6 +1876,8 @@ def _handle_confirm(st, key):
         return _do_delete(st, c)
     if c["kind"] == "forget":
         return _do_forget(st, c)
+    if c["kind"] == "bring":
+        return _do_bring(st, c)
     return start_job(st, c["kind"])
 
 
