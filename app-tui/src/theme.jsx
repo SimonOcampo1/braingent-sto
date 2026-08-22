@@ -237,19 +237,6 @@ export function Cell({ w, children, align = "flex-start" }) {
   return <Box width={w} justifyContent={align} flexShrink={0}>{children}</Box>;
 }
 
-/** A row of cells against a column spec: `[width, align, header]`. */
-export function Row({ cols, cells, header = false }) {
-  return (
-    <Box>
-      {cols.map(([w, align], i) => (
-        <Cell key={i} w={w} align={align}>
-          {header ? <Text dimColor>{cols[i][2]}</Text> : cells[i]}
-        </Cell>
-      ))}
-    </Box>
-  );
-}
-
 /** A key cap. `on={false}` says the key is there and would do nothing. */
 export function Key({ k, label, on = true, accent }) {
   return (

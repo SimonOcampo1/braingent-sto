@@ -86,9 +86,8 @@ export default function Home({ d, t, accent, width }) {
   const tableW = cols.reduce((a, c) => a + c[0], 0);
 
   return (
-    <Box flexDirection="column">
-      <Box flexDirection={wide ? "row" : "column"} gap={1}
-           alignItems={wide ? "stretch" : undefined}>
+    <Box flexDirection={wide ? "row" : "column"} gap={1} alignItems="flex-start">
+      <Box flexDirection="column" gap={1}>
         <Panel title={t("sec_sync")} accent={accent} width={rail}>
           <Traffic arrow="▲" n={sync.toPush} parts={sync.pushParts} width={inner(rail)}
                    label={t("to_push")} accent={accent} t={t} />
@@ -115,6 +114,26 @@ export default function Home({ d, t, accent, width }) {
           </Box>
         </Panel>
 
+        <Panel title={t("sec_usage")} accent={accent} width={rail}>
+          {(d.usage.limits || []).map((l, i) => (
+            <Box key={i} flexDirection="column" marginTop={i ? 1 : 0}>
+              <Box>
+                <BigNum value={l.percent ?? 0} unit="%" accent={accent} />
+                <Box flexDirection="column" marginLeft={2} justifyContent="center">
+                  <Text bold>{clip((l.label || l.kind || "?").replace(/_/g, " "), 16)}</Text>
+                  <Text dimColor>{l.resets}</Text>
+                </Box>
+              </Box>
+              {/* 80 is where a limit stops being information and starts being a
+                  warning, and the bar turns red on its own there */}
+              <Bar pct={l.percent} accent={accent} width={inner(rail)} warn={80} />
+            </Box>
+          ))}
+          {!(d.usage.limits || []).length && <Text dimColor>{t("no_usage")}</Text>}
+        </Panel>
+      </Box>
+
+      <Box flexDirection="column" gap={1}>
         <Panel title={t("sec_parity")} accent={accent} width={main}>
           <Box>
             {cols.map(([w, align, label], i) => (
@@ -155,27 +174,6 @@ export default function Home({ d, t, accent, width }) {
                               ["◑", "blue", t("st_repo")], ["✕", "red", t("st_gone")]]} />
             </Box>
           )}
-        </Panel>
-      </Box>
-
-      <Box marginTop={1} flexDirection={wide ? "row" : "column"} gap={1}
-           alignItems={wide ? "stretch" : undefined}>
-        <Panel title={t("sec_usage")} accent={accent} width={rail}>
-          {(d.usage.limits || []).map((l, i) => (
-            <Box key={i} flexDirection="column" marginTop={i ? 1 : 0}>
-              <Box>
-                <BigNum value={l.percent ?? 0} unit="%" accent={accent} />
-                <Box flexDirection="column" marginLeft={2} justifyContent="center">
-                  <Text bold>{clip((l.label || l.kind || "?").replace(/_/g, " "), 16)}</Text>
-                  <Text dimColor>{l.resets}</Text>
-                </Box>
-              </Box>
-              {/* 80 is where a limit stops being information and starts being a
-                  warning, and the bar turns red on its own there */}
-              <Bar pct={l.percent} accent={accent} width={inner(rail)} warn={80} />
-            </Box>
-          ))}
-          {!(d.usage.limits || []).length && <Text dimColor>{t("no_usage")}</Text>}
         </Panel>
 
         <Panel title={t("sec_general")} accent={accent} width={main}>

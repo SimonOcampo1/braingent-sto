@@ -17,7 +17,7 @@ import { fileURLToPath } from "node:url";
 import { Box, Text, render, useApp, useInput } from "ink";
 
 import { ACCENTS, Key, Rule, Wordmark } from "./theme.jsx";
-import Home, { WIDE } from "./home.jsx";
+import Home from "./home.jsx";
 import { Memories, Sessions } from "./lists.jsx";
 
 const PORT = process.env.STO_SESSIONS_PORT || "8765";
@@ -82,7 +82,7 @@ function Tabs({ tab, t, accent, busy }) {
   );
 }
 
-function Actions({ d, t, accent, flash }) {
+function Actions({ d, t, accent, flash, tab }) {
   const s = d.sync;
   if (flash) return <Box paddingX={1}><Text color="yellow">{flash}</Text></Box>;
   return (
@@ -91,6 +91,10 @@ function Actions({ d, t, accent, flash }) {
       <Key k="l" label={`PULL ${s.toPull}`} on={s.toPull > 0 || s.behind > 0} accent={accent} />
       <Key k="f" label="FETCH" accent={accent} />
       <Key k="g" label={t("graph_button")} accent={accent} />
+      {/* the navigation keys only where there is something to navigate: on the
+          home they would be two more caps that do nothing */}
+      {tab > 0 && <Key k="↑↓" label={t("col_when")} on={false} accent={accent} />}
+      {tab === 2 && <Key k="Tab" label={t("col_project")} accent={accent} />}
       <Key k="r" label={t("k_reload")} accent={accent} />
       <Key k="q" label={t("k_quit")} accent={accent} />
     </Box>
@@ -127,6 +131,8 @@ function App() {
   const [d, setD] = useState(null);
   const [err, setErr] = useState(null);
   const [busy, setBusy] = useState(true);
+  // STO_TUI_TAB is how a screen other than the home gets captured: piped into
+  // a file there is no keyboard to press `2` with. Same reason as COLUMNS.
   const [tab, setTab] = useState(Number(process.env.STO_TUI_TAB) || 0);
   const [rows, setRows] = useState({});          // per-tab payloads, fetched lazily
   const [sel, setSel] = useState([0, 0, 0]);     // one cursor per tab
@@ -289,7 +295,7 @@ function App() {
       <Box marginTop={1}><Rule n={size.w} /></Box>
       {confirm
         ? <Confirm what={confirm} d={d} t={t} accent={accent} />
-        : <Actions d={d} t={t} accent={accent} flash={flash} />}
+        : <Actions d={d} t={t} accent={accent} flash={flash} tab={tab} />}
     </Box>
   );
 }
