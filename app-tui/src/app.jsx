@@ -262,7 +262,11 @@ function Home({ d, t, accent, width, busy }) {
           })}
           {/* the legend only when something is out of parity: on a tidy repo it
               would be four states none of which are on screen */}
-          {d.localOnly.length + d.repoOnly.length + d.gone.length > 0 && (
+          {/* the legend only when a row on this table is out of parity. `gone`
+              is deliberately not part of the test: it counts skills git saw
+              deleted at some point, and none of them is a row here — it would
+              light up four states on a screen showing none of them. */}
+          {d.modules.some((m) => deltas(m, d).some(Boolean)) && (
             <Box marginTop={1}>
               {/* one Text and not a wrapping row of them: `gap` between flex
                   children of a bordered box costs a blank line per wrap */}
