@@ -565,7 +565,7 @@ def test_home_shows_the_banner_the_usage_bar_and_the_counters():
     try:
         lines = _home_txt(st)
         txt = "\n".join(lines)
-        assert any("████" in l for l in lines[:6])    # wordmark STO OS
+        assert any("████" in l for l in lines[:6])    # el bloque del wordmark
         assert lines[0] == ""                        # margen contra las tabs
         assert "resetea " in txt
         # the bar: 42% of 18 cells → 8 full, 10 empty
@@ -580,10 +580,11 @@ def test_banner_rows_all_have_the_same_visible_width():
     # if one wordmark row measures differently, the letters below start in
     # another column and the block comes out crooked
     assert len({len(w) for w in ui.WORDMARK}) == 1
-    # banner() starts with an empty margin line; the rest measure the same
+    # banner(): margen, la etiqueta en letra normal, y las 5 filas del bloque
     lineas = ui.banner(100)
     assert lineas[0] == ""
-    assert len({len(ui.strip_ansi(l)) for l in lineas[1:]}) == 1
+    assert ui.strip_ansi(lineas[1]).strip() == ui.LABEL
+    assert len({len(ui.strip_ansi(l)) for l in lineas[2:]}) == 1
 
 
 def test_bar_clamps_out_of_range_percentages():
@@ -1713,9 +1714,14 @@ def test_drain_of_nothing_leaves_the_state_alone():
 
 def test_the_wordmark_collapses_to_one_line_on_a_narrow_terminal():
     ancho = ui.banner(100)
-    angosto = ui.banner(30)
-    assert len(ancho) == 6 and len(angosto) == 2   # la 1ra es el margen
-    assert "STO OS" in ui.strip_ansi(angosto[1])
+    angosto = ui.banner(20)
+    # margen + etiqueta + 5 filas de bloque
+    assert len(ancho) == 7 and len(angosto) == 2   # la 1ra es el margen
+    assert "braingent STO" in ui.strip_ansi(angosto[1])
+    assert "braingent" == ui.strip_ansi(ancho[1]).strip()
+    # sacar OS del bloque lo bajo de 41 a 20 columnas: la version grande
+    # sobrevive una terminal de la mitad del ancho que necesitaba antes
+    assert ui.WORDMARK_W <= 24, ui.WORDMARK_W
     # and no version overflows its width
     assert all(len(ui.strip_ansi(l)) <= 100 for l in ancho)
     assert len(ui.strip_ansi(angosto[1])) <= 30

@@ -136,15 +136,25 @@ _GLYPHS = {"S": ("▄████▄", "██  ▀▀", "▀████▄", "
            "T": ("██████", "  ██  ", "  ██  ", "  ██  ", "  ██  "),
            "O": ("▄████▄", "██  ██", "██  ██", "██  ██", "▀████▀"),
            " ": ("  ",) * 5}
-WORDMARK = [" ".join(_GLYPHS[ch][r] for ch in "STO OS") for r in range(5)]
+# Only S, T and O are drawn, so the block spells `STO` and the rest of the name
+# rides above it in ordinary letters. Drawing b-r-a-i-n-g-e-n-t as Block
+# Elements would be nine new glyphs by hand for a line nobody reads twice — and
+# at six columns each, `braingent STO` would be ~84 columns of banner.
+WORDMARK = [" ".join(_GLYPHS[ch][r] for ch in "STO") for r in range(5)]
 WORDMARK_W = len(WORDMARK[0]) + 2
+LABEL = "braingent"
 
 
 def banner(w):
-    """The big wordmark, or a single line when the terminal is too narrow."""
+    """The wordmark, or a single line when the terminal is too narrow.
+
+    Dropping `OS` from the block made it 20 columns instead of 41, so the big
+    version now survives a terminal half the width it used to need.
+    """
     if w < WORDMARK_W + 2:
-        return ["", cli.c("  ███ STO OS ███", ACCENT)]
-    return [""] + [cli.c("  " + line, ACCENT) for line in WORDMARK]
+        return ["", cli.c(f"  ███ {LABEL} STO ███", ACCENT)]
+    return ["", cli.c("  " + LABEL, cli.BOLD)] + [
+        cli.c("  " + line, ACCENT) for line in WORDMARK]
 
 
 def bar(pct, width=18):
