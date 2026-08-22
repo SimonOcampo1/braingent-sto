@@ -589,6 +589,29 @@ def cmd_config(*a):
     return {"message": "\n".join(lines)}
 
 
+def cmd_forget(*args):
+    """sto forget <skill|config|plugin|memory>:<name> [--apply]
+
+    The repo half of a deletion. chezmoi deprecated its single `remove` in
+    favour of `forget` (source state) and `destroy` (source state + disk); one
+    verb called "delete" never says which of the two it did.
+    """
+    target = next((a for a in args if not a.startswith("--")), "")
+    if not target:
+        return {"error": t("cli_forget_usage")}
+    seco = "--apply" not in args
+    paths, err = srv.forget(target, apply=not seco)
+    if err:
+        return {"error": err}
+    out = ["  " + c(p, DIM) for p in paths[:20]]
+    if len(paths) > 20:
+        out.append("  " + c(f"… +{len(paths) - 20}", DIM))
+    out.append("  " + c(t("cli_forget_hint") if seco
+                        else t("cli_forget_done", n=len(paths)), CYAN))
+    out.append("  " + c(t("cli_forget_keeps_local"), DIM))
+    return {"message": "\n".join(out)}
+
+
 def cmd_memory(*args):
     """sto memory [<project> | show <project>/<slug> | search <text> | sync | repair]"""
     sub = args[0] if args else ""
@@ -662,6 +685,7 @@ CLI = {
     "update": cmd_update,
     "badge": cmd_badge,
     "memory": cmd_memory,
+    "forget": cmd_forget,
     "sessions": cmd_sessions,
     "show": cmd_show,
     "search": cmd_search,

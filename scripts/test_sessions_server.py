@@ -11,7 +11,7 @@ from sessions_server import (
     export_plugins, plugins_to_apply, apply_plugins, list_machines, machine_type,
     _memory_meta, _memory_dirs, _newest, export_memory, LOCAL_MACHINE,
     import_memory, rebuild_index, list_memory, _slug_project,
-    memory_graph,
+    memory_graph, forget,
 )
 
 SAMPLE = [
@@ -245,6 +245,78 @@ def test_delete_and_export_skill():
         assert delete_skill("personal:nope", claude_dir=claude) is not None
         assert delete_skill("personal:my-skill", claude_dir=claude) is None
         assert not (claude / "skills" / "my-skill").exists()
+
+
+def test_forget_removes_from_the_repo_and_never_from_the_machine():
+    """`forget` is the repo half of a deletion: chezmoi's split between
+    `forget` (source state) and `destroy` (source state + disk)."""
+    with tempfile.TemporaryDirectory() as d:
+        claude = _make_claude_dir(d)
+        cfg = Path(d) / "knowledge" / "config"
+        (cfg / "skills" / "skills" / "gone").mkdir(parents=True)
+        (cfg / "skills" / "skills" / "gone" / "SKILL.md").write_text(SKILL_MD, encoding="utf-8")
+        (cfg / "skills" / "skills" / "gone" / "ref.md").write_text("x", encoding="utf-8")
+        # a skill this machine still has: forgetting it would be undone by the
+        # export inside the very next push, so it is refused instead
+        (cfg / "skills" / "skills" / "my-skill").mkdir(parents=True)
+        (cfg / "skills" / "skills" / "my-skill" / "SKILL.md").write_text(SKILL_MD, encoding="utf-8")
+
+        paths, err = forget("skill:gone", claude_dir=claude, repo_config=cfg)
+        assert err is None, err
+        assert len(paths) == 2, paths                      # dry run lists the insides
+        assert (cfg / "skills" / "skills" / "gone").is_dir()  # and removes nothing
+
+        assert forget("skill:my-skill", claude_dir=claude, repo_config=cfg)[1] is not None
+        assert forget("skill:../secret", claude_dir=claude, repo_config=cfg)[1] is not None
+        assert forget("skill:nope", claude_dir=claude, repo_config=cfg)[1] is not None
+        assert forget("garbage", claude_dir=claude, repo_config=cfg)[1] is not None
+
+        _, err = forget("skill:gone", apply=True, claude_dir=claude, repo_config=cfg)
+        assert err is None, err
+        assert not (cfg / "skills" / "skills" / "gone").exists()
+        assert (claude / "skills" / "my-skill" / "SKILL.md").is_file()  # local untouched
+
+
+def test_forget_drops_a_plugin_from_the_manifest_without_touching_the_others():
+    with tempfile.TemporaryDirectory() as d:
+        claude = _make_claude_dir(d)
+        cfg = Path(d) / "knowledge" / "config"
+        (cfg / "plugins").mkdir(parents=True)
+        (cfg / "plugins" / "plugins.json").write_text(json.dumps({
+            "marketplaces": {"market": "someone/repo"},
+            "plugins": ["myplugin@market", "stale@market"],
+        }), encoding="utf-8")
+
+        # still installed here → refused, the export would list it again
+        assert forget("plugin:myplugin@market", claude_dir=claude, repo_config=cfg)[1] is not None
+        assert forget("plugin:absent@market", claude_dir=claude, repo_config=cfg)[1] is not None
+
+        _, err = forget("plugin:stale@market", apply=True, claude_dir=claude, repo_config=cfg)
+        assert err is None, err
+        left = json.loads((cfg / "plugins" / "plugins.json").read_text(encoding="utf-8"))
+        assert left["plugins"] == ["myplugin@market"], left
+        assert left["marketplaces"] == {"market": "someone/repo"}, left
+
+
+def test_forget_takes_another_machines_memory_which_no_export_of_ours_reaches():
+    """The documented ceiling in the wiki: deleting a memory that belongs to
+    another machine never propagated, because `export_memory` only mirrors this
+    machine's folder. This is the supported way to do it."""
+    with tempfile.TemporaryDirectory() as d:
+        claude = _make_claude_dir(d)
+        mem = Path(d) / "knowledge" / "memory"
+        other = mem / "proj" / "OtherBox"
+        other.mkdir(parents=True)
+        (other / "old-lesson.md").write_text("---\nname: old\n---\nbody", encoding="utf-8")
+
+        assert forget("memory:proj/OtherBox", claude_dir=claude, repo_memory=mem)[1] is not None
+        assert forget("memory:proj/OtherBox/nope", claude_dir=claude, repo_memory=mem)[1] is not None
+
+        paths, err = forget("memory:proj/OtherBox/old-lesson", apply=True,
+                            claude_dir=claude, repo_memory=mem)
+        assert err is None, err
+        assert len(paths) == 1, paths
+        assert not (other / "old-lesson.md").exists()
 
 
 def test_search_sessions():
@@ -1376,4 +1448,7 @@ if __name__ == "__main__":
     test_decode_slug_walks_the_disk_back_to_the_real_path()
     test_slug_project_survives_claude_code_pruning_the_transcripts()
     test_repair_memory_refiles_slug_folders_and_never_clobbers()
+    test_forget_removes_from_the_repo_and_never_from_the_machine()
+    test_forget_drops_a_plugin_from_the_manifest_without_touching_the_others()
+    test_forget_takes_another_machines_memory_which_no_export_of_ours_reaches()
     print("OK")

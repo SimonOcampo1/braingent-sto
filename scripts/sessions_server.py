@@ -1238,6 +1238,136 @@ def list_memory(src=None) -> list[dict]:
     return out
 
 
+# ── forget: stop carrying something in the repo ─────────────────────────
+# chezmoi ships four removal verbs and deprecated its ambiguous `remove` in
+# favour of `forget` (repo only) and `destroy` (repo + disk). We take the same
+# split: `forget` never touches ~/.claude, so a slip on the wrong row costs a
+# push, not your work. The local half already exists as `delete_skill`.
+
+FORGET_KINDS = ("skill", "config", "plugin", "memory")
+
+
+def _forget_rel(p: Path) -> str:
+    """Repo-relative when it is inside the repo, absolute otherwise (tests
+    point the domains at temp dirs, and a manifest is for reading anyway)."""
+    try:
+        return str(p.relative_to(REPO_ROOT)).replace("\\", "/")
+    except ValueError:
+        return str(p)
+
+
+def _forget_paths(kind, name, cfg, mem):
+    """Repo paths a target owns, or (None, error)."""
+    if kind == "skill":
+        root = (cfg / "skills" / "skills").resolve()
+        target = (root / name).resolve()
+        if target.parent != root or not (target / "SKILL.md").is_file():
+            return None, f"skill not in repo: {name}"
+        return [target], None
+    if kind == "config":
+        if name not in CONFIG_MODULES:
+            return None, f"unknown config module: {name}"
+        target = cfg / name
+        if not target.is_dir():
+            return None, f"module not in repo: {name}"
+        return [target], None
+    if kind == "memory":
+        root = mem.resolve()
+        target = (root / name).resolve()
+        # name is <project>/<machine>/<slug>; anything shorter or climbing out
+        # of the tree is a caller bug, not a memory
+        if len(Path(name).parts) != 3 or root not in target.parents:
+            return None, f"expected <project>/<machine>/<slug>: {name}"
+        target = target.with_suffix(".md")
+        if not target.is_file():
+            return None, f"memory not in repo: {name}"
+        return [target], None
+    return None, f"unknown kind: {kind}"
+
+
+def _forget_guard(kind, name, cd, mem):
+    """Refuse when the export would just put it back on the next push.
+
+    `sync_stage` runs `export_config`/`export_memory` *before* it stages, so
+    forgetting something this machine still has locally is undone within the
+    same push — silently, which is the worst way to fail.
+    """
+    if kind == "skill" and (cd / "skills" / name / "SKILL.md").is_file():
+        return (f"{name} is still installed here, and the next push would "
+                f"export it again — uninstall it locally first")
+    if kind == "config" and any(True for _ in _module_files(cd, name)):
+        return (f"module {name} still has local files, and the next push would "
+                f"export them again — untick it in the config tab first")
+    if kind == "plugin":
+        if name in set(_local_plugins(cd)[1]):
+            return (f"{name} is still installed here, and the next push would "
+                    f"export it again — uninstall the plugin first")
+    if kind == "memory":
+        project, machine, slug = Path(name).parts
+        dirs = _memory_dirs().get(project, [])
+        if machine == LOCAL_MACHINE and dirs and f"{slug}.md" in _newest(dirs):
+            # export_memory already mirrors deletions for THIS machine's folder,
+            # so the supported move is to delete it locally and push. Forget is
+            # for the other machines' folders, which no export of ours touches.
+            return (f"{slug} still exists in this machine's memory — delete it "
+                    f"there and push, which already removes it from the repo")
+    return None
+
+
+def forget(target, apply=False, claude_dir=None, repo_config=None, repo_memory=None):
+    """Stop carrying `target` in the repo. The local copy is never touched.
+
+    `target` is `<kind>:<name>` over the four synced domains — `skill:code-review`,
+    `config:agents`, `plugin:caveman@marketplace`,
+    `memory:<project>/<machine>/<slug>`.
+
+    Returns `(paths, error)` with repo-relative paths as strings. `apply=False`
+    is a dry run so the caller can show the manifest before asking: nothing in
+    this repo deletes without the user seeing the list first.
+
+    The deletion reaches the remote on the next `sto push` — `sync_stage`
+    already runs `git add -A`, which stages removals. The other machine keeps
+    its copy and decides for itself; git history says which of the two happened
+    (`git log --diff-filter=D`), so no tombstone file has to be invented.
+    """
+    import shutil as sh
+    cd = claude_dir or CLAUDE_DIR
+    cfg = repo_config if repo_config is not None else KNOWLEDGE_CONFIG
+    mem = repo_memory if repo_memory is not None else KNOWLEDGE_MEMORY
+    kind, _, name = target.partition(":")
+    if kind not in FORGET_KINDS or not name:
+        return [], f"expected <kind>:<name> with kind in {'/'.join(FORGET_KINDS)}"
+
+    if kind == "plugin":
+        manifest = cfg / "plugins" / "plugins.json"
+        marketplaces, plugins = _repo_plugins(cfg)
+        if name not in plugins:
+            return [], f"plugin not in repo: {name}"
+        if err := _forget_guard(kind, name, cd, mem):
+            return [], err
+        rel = [_forget_rel(manifest) + f" ({name})"]
+        if apply:
+            plugins = [p for p in plugins if p != name]
+            manifest.write_text(
+                json.dumps({"marketplaces": marketplaces, "plugins": plugins},
+                           indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        return rel, None
+
+    targets, err = _forget_paths(kind, name, cfg, mem)
+    if err:
+        return [], err
+    if err := _forget_guard(kind, name, cd, mem):
+        return [], err
+    rel = []
+    for t in targets:
+        for f in ([t] if t.is_file() else sorted(x for x in t.rglob("*") if x.is_file())):
+            rel.append(_forget_rel(f))
+    if apply:
+        for t in targets:
+            sh.rmtree(t) if t.is_dir() else t.unlink()
+    return rel, None
+
+
 WIKILINK = re.compile(r"\[\[([^\]|#]+)")
 
 
