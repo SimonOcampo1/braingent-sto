@@ -384,11 +384,18 @@ def module_items(mod, claude_dir=None, repo_config=None):
         # what the repo carries and this machine does not is listed too, and it
         # is the only reason `R` has anything to act on: the guard in
         # `srv.forget` refuses everything that is still installed here
-        return [{"kind": "item", "what": "skill",
-                 "id": (local.get(name) or repo[name])["id"], "label": name,
-                 "where": _where(name, local, repo),
-                 "desc": (local.get(name) or repo[name]).get("description", "")}
-                for name in sorted(set(local) | set(repo))]
+        # the fourth state is not on disk anywhere: `local` can mean "new here,
+        # never pushed" or "another machine dropped it and you pulled that".
+        # git kept the answer, so no tombstone file has to exist
+        gone = srv.dropped_skills()
+        rows = []
+        for name in sorted(set(local) | set(repo)):
+            row = local.get(name) or repo[name]
+            where = _where(name, local, repo)
+            rows.append({"kind": "item", "what": "skill", "id": row["id"],
+                         "label": name, "desc": row.get("description", ""),
+                         "where": "gone" if where == "local" and name in gone else where})
+        return rows
     if mod == "plugins":
         _, installed = srv._local_plugins(claude_dir)
         _, in_repo = srv._repo_plugins(cfg)
@@ -417,6 +424,15 @@ def module_lines(st):
     out = [_txt(""), _txt(section(t("sec_contents", mod=mod, n=len(items)), w))]
     if mod not in MODULE_LISTABLE:
         out.append(_txt(cli.c("  " + t("not_deletable", id=mod), cli.DIM)))
+    elif any(i.get("where") and i["where"] != "both" for i in items):
+        # only when something is actually out of parity: on a tidy module the
+        # legend would be four states none of which are on screen
+        out.append(_txt("  " + "  ".join(
+            cli.c(m, col) + cli.c(" " + t(k), cli.DIM)
+            for m, col, k in (("[=]", cli.DIM, "st_both"),
+                              ("[L]", cli.YELLOW, "st_local"),
+                              ("[R]", cli.GREEN, "st_repo"),
+                              ("[x]", cli.RED, "st_gone")))))
     out.append(_txt(""))
     if not items:
         out.append(_txt(cli.c("  " + t("empty"), cli.DIM)))
@@ -438,8 +454,8 @@ def fmt_home(r, w=100):
         desc = cli.c("   " + " ".join(r["desc"].split())[:cut], cli.DIM) if r["desc"] else ""
         # `[L]`/`[R]`/`[=]` instead of the coloured legend the wide prototype
         # drew: same three states, and they survive a narrow terminal
-        mark, colour = {"local": ("[L]", cli.YELLOW), "repo": ("[R]", cli.GREEN)}.get(
-            r.get("where"), ("[=]", cli.DIM))
+        mark, colour = {"local": ("[L]", cli.YELLOW), "repo": ("[R]", cli.GREEN),
+                        "gone": ("[x]", cli.RED)}.get(r.get("where"), ("[=]", cli.DIM))
         return f" {cli.c(mark, colour)} {cli._pad(r['label'], 30, cli.BOLD)}{desc}"
     return r["text"]
 

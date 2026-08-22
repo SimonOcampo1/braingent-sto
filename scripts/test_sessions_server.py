@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import tempfile
 from pathlib import Path
 
@@ -317,6 +318,57 @@ def test_forget_takes_another_machines_memory_which_no_export_of_ours_reaches():
         assert err is None, err
         assert len(paths) == 1, paths
         assert not (other / "old-lesson.md").exists()
+
+
+def test_a_skill_the_other_machine_dropped_reads_apart_from_one_never_pushed():
+    """El cuarto estado. Las dos situaciones dejan la misma foto en disco
+    —local sí, repo no— y solo el historial de git las distingue, que es
+    justo lo que ahorra inventar un archivo de tombstones."""
+    import subprocess
+    with tempfile.TemporaryDirectory() as d:
+        repo = Path(d) / "repo"
+        skills = repo / "knowledge" / "config" / "skills" / "skills"
+        skills.mkdir(parents=True)
+
+        def git(*args):
+            subprocess.run(["git", "-C", str(repo), *args],
+                           capture_output=True, check=True)
+
+        git("init", "-q", "-b", "main")
+        git("config", "user.email", "t@t")
+        git("config", "user.name", "t")
+        for name in ("borrada-alla", "sigue"):
+            (skills / name).mkdir()
+            (skills / name / "SKILL.md").write_text("x", encoding="utf-8")
+        git("add", "-A")
+        git("commit", "-qm", "las dos")
+        # la otra máquina la saca del repo y vos pulleás ese borrado
+        shutil.rmtree(skills / "borrada-alla")
+        git("add", "-A")
+        git("commit", "-qm", "forget borrada-alla")
+
+        real_root, real_cache = srv.REPO_ROOT, dict(srv._DROPPED)
+        try:
+            srv.REPO_ROOT = repo
+            srv._DROPPED.update({"ts": 0.0, "data": None})
+            assert srv.dropped_skills(force=True) == {"borrada-alla"}
+        finally:
+            srv.REPO_ROOT = real_root
+            srv._DROPPED.update(real_cache)
+
+
+def test_the_dropped_lookup_survives_a_repo_git_never_saw():
+    """Sin git, o sin historia, la vista tiene que seguir pintándose: el
+    cuarto estado es información de más, nunca un requisito."""
+    with tempfile.TemporaryDirectory() as d:
+        real_root, real_cache = srv.REPO_ROOT, dict(srv._DROPPED)
+        try:
+            srv.REPO_ROOT = Path(d)
+            srv._DROPPED.update({"ts": 0.0, "data": None})
+            assert srv.dropped_skills(force=True) == set()
+        finally:
+            srv.REPO_ROOT = real_root
+            srv._DROPPED.update(real_cache)
 
 
 def test_search_sessions():
@@ -1451,4 +1503,6 @@ if __name__ == "__main__":
     test_forget_removes_from_the_repo_and_never_from_the_machine()
     test_forget_drops_a_plugin_from_the_manifest_without_touching_the_others()
     test_forget_takes_another_machines_memory_which_no_export_of_ours_reaches()
+    test_a_skill_the_other_machine_dropped_reads_apart_from_one_never_pushed()
+    test_the_dropped_lookup_survives_a_repo_git_never_saw()
     print("OK")

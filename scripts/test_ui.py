@@ -2291,6 +2291,53 @@ def test_a_module_lists_what_only_the_repo_has_so_R_has_a_row_to_land_on():
         assert pintado["en-ambas"].startswith(" [=]"), pintado["en-ambas"]
 
 
+def test_a_skill_dropped_in_the_repo_is_painted_apart_from_one_never_pushed():
+    real = ui.srv.dropped_skills
+    try:
+        ui.srv.dropped_skills = lambda: {"borrada-alla"}
+        with tempfile.TemporaryDirectory() as d:
+            claude = Path(d) / "claude"
+            for name in ("borrada-alla", "recien-escrita"):
+                (claude / "skills" / name).mkdir(parents=True)
+                (claude / "skills" / name / "SKILL.md").write_text(
+                    "---\nname: %s\ndescription: x\n---\ny" % name, encoding="utf-8")
+            cfg = Path(d) / "config"
+            (cfg / "skills" / "skills").mkdir(parents=True)
+
+            items = ui.module_items("skills", claude_dir=claude, repo_config=cfg)
+            estado = {i["label"]: i["where"] for i in items}
+            # misma foto en disco, dos estados distintos: solo git los separa
+            assert estado == {"borrada-alla": "gone",
+                              "recien-escrita": "local"}, estado
+            pintado = {i["label"]: ui.strip_ansi(ui.fmt_home(i, 100)) for i in items}
+            assert pintado["borrada-alla"].startswith(" [x]"), pintado["borrada-alla"]
+            assert pintado["recien-escrita"].startswith(" [L]"), pintado["recien-escrita"]
+    finally:
+        ui.srv.dropped_skills = real
+
+
+def test_the_state_legend_only_shows_up_when_something_is_out_of_parity():
+    real_items, real_drop = ui.module_items, ui.srv.dropped_skills
+    try:
+        ui.srv.dropped_skills = lambda: set()
+        st = ui.new_state()
+        st["mod"] = "skills"
+
+        ui.module_items = lambda mod, **kw: [
+            {"kind": "item", "what": "skill", "id": "personal:a", "label": "a",
+             "desc": "", "where": "both"}]
+        limpio = "\n".join(ui.strip_ansi(ui.fmt_home(r, 100)) for r in ui.module_lines(st))
+        assert "[L]" not in limpio and "[R]" not in limpio
+
+        ui.module_items = lambda mod, **kw: [
+            {"kind": "item", "what": "skill", "id": "personal:a", "label": "a",
+             "desc": "", "where": "gone"}]
+        sucio = "\n".join(ui.strip_ansi(ui.fmt_home(r, 100)) for r in ui.module_lines(st))
+        assert "[x]" in sucio and "[L]" in sucio      # la fila y la leyenda entera
+    finally:
+        ui.module_items, ui.srv.dropped_skills = real_items, real_drop
+
+
 def test_d_uninstalls_a_plugin_through_the_claude_cli():
     llamadas = []
     real = ui.srv.plugin_cmd

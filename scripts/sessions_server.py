@@ -1247,6 +1247,41 @@ def list_memory(src=None) -> list[dict]:
 FORGET_KINDS = ("skill", "config", "plugin", "memory")
 
 
+_DROPPED = {"ts": 0.0, "data": None}
+DROPPED_TTL = 60.0     # seconds; one `git log` per minute, not per repaint
+
+
+def dropped_skills(limit=400, force=False):
+    """Skill names the repo used to carry and a commit removed.
+
+    This is the fourth parity state, and the only one that is not on disk:
+    a skill you have locally but the repo does not can mean two opposite
+    things — you just wrote it and never pushed, or another machine dropped
+    it and you pulled the deletion. They looked identical, which is exactly
+    what a tombstone file is usually invented for. Git already recorded it,
+    so `--diff-filter=D` answers for free and nothing new has to be kept in
+    sync (see `forget`).
+
+    Names re-added later are excluded by the caller, which only asks about
+    skills that are absent from the repo right now.
+    """
+    import time
+    if not force and _DROPPED["data"] is not None and \
+            time.monotonic() - _DROPPED["ts"] < DROPPED_TTL:
+        return _DROPPED["data"]
+    code, out = _git("log", f"-{limit}", "--diff-filter=D", "--name-only",
+                     "--format=", "--", "knowledge/config/skills/skills", timeout=20)
+    names = set()
+    if code == 0:
+        for line in out.splitlines():
+            parts = line.strip().split("/")
+            # knowledge/config/skills/skills/<name>/…
+            if len(parts) > 5 and parts[:4] == ["knowledge", "config", "skills", "skills"]:
+                names.add(parts[4])
+    _DROPPED["data"], _DROPPED["ts"] = names, time.monotonic()
+    return names
+
+
 def _forget_rel(p: Path) -> str:
     """Repo-relative when it is inside the repo, absolute otherwise (tests
     point the domains at temp dirs, and a manifest is for reading anyway)."""
