@@ -17,51 +17,137 @@ const PORT = process.env.STO_SESSIONS_PORT || "8765";
 const API = `http://127.0.0.1:${PORT}/api/home`;
 
 // ── the wordmark ──
-// Block Elements (U+2580–259F), the same glyphs `ui.py` draws by hand. They are
-// fixed width in Unicode; an "ambiguous-width" character would throw the block
-// off because the width maths counts code points, not columns.
+// A 7×6 pixel face, drawn with `█` and nothing else.
+//
+// `ui.py` bevels its glyphs with ▄ and ▀ to buy height out of five rows. The
+// prototype's letters are flat-topped pixels — no bevel anywhere — so this set
+// is redrawn square and one row taller instead of imported. Every glyph is
+// exactly GW columns: the shadow pass composites on a character grid and a
+// short row would shift everything after it.
+//
+// Block Elements are fixed width in Unicode, which is the whole reason the
+// arithmetic works; an "ambiguous-width" character (▰, any emoji) would count
+// as one code point and take two columns.
+const GW = 7;
 const GLYPHS = {
-  S: ["▄████▄", "██  ▀▀", "▀████▄", "▄▄  ██", "▀████▀"],
-  T: ["██████", "  ██  ", "  ██  ", "  ██  ", "  ██  "],
-  O: ["▄████▄", "██  ██", "██  ██", "██  ██", "▀████▀"],
-  B: ["█████▄", "██  ██", "█████▄", "██  ██", "█████▀"],
-  R: ["█████▄", "██  ██", "█████▀", "██ ▀█▄", "██  ██"],
-  A: ["▄████▄", "██  ██", "██████", "██  ██", "██  ██"],
-  I: ["██████", "  ██  ", "  ██  ", "  ██  ", "██████"],
-  N: ["██▄ ██", "████ █", "██▀███", "██ ▀██", "██  ██"],
-  G: ["▄████▄", "██  ▀▀", "██ ███", "██  ██", "▀████▀"],
-  E: ["██████", "██    ", "█████ ", "██    ", "██████"],
-  " ": ["  ", "  ", "  ", "  ", "  "],
+  B: ["██████ ", "██   ██", "██████ ", "██   ██", "██   ██", "██████ "],
+  R: ["██████ ", "██   ██", "██████ ", "██  ██ ", "██   ██", "██   ██"],
+  A: [" █████ ", "██   ██", "██   ██", "███████", "██   ██", "██   ██"],
+  I: ["███████", "  ██   ", "  ██   ", "  ██   ", "  ██   ", "███████"],
+  N: ["██   ██", "███  ██", "████ ██", "██ ████", "██  ███", "██   ██"],
+  G: [" █████ ", "██   ██", "██     ", "██  ███", "██   ██", " █████ "],
+  E: ["███████", "██     ", "█████  ", "██     ", "██     ", "███████"],
+  T: ["███████", "  ██   ", "  ██   ", "  ██   ", "  ██   ", "  ██   "],
+  S: [" ██████", "██     ", "██████ ", "     ██", "     ██", "██████ "],
+  O: [" █████ ", "██   ██", "██   ██", "██   ██", "██   ██", " █████ "],
+  " ": ["   ", "   ", "   ", "   ", "   ", "   "],
 };
-const block = (word) =>
-  [0, 1, 2, 3, 4].map((r) => [...word].map((ch) => GLYPHS[ch][r]).join(" "));
-const FULL = block("BRAINGENT STO");
-const SHORT = block("STO");
+
+/** A word as rows of `"main" | "shadow" | null` cells.
+ *
+ * The prototype gives every letter an outline echoed up and to the right. A
+ * terminal cannot draw a hairline, but it can stamp the same word one cell
+ * up-right in a dim colour and let the bright one land on top — at this
+ * resolution that reads as the same depth. Hence a grid and not six strings:
+ * a row mixes the two colours, so it cannot be one `<Text>`.
+ */
+function stamp(word) {
+  const rows = GLYPHS.B.length;
+  const glyphs = [...word].map((ch) => GLYPHS[ch]);
+  const w = glyphs.reduce((a, g) => a + g[0].length + 1, 0); // +1 gap per glyph
+  const grid = Array.from({ length: rows + 1 }, () => Array(w + 1).fill(null));
+
+  const paint = (dr, dc, layer, skip = () => false) => {
+    let col = dc;
+    for (const g of glyphs) {
+      g.forEach((line, r) => {
+        [...line].forEach((ch, i) => {
+          const y = r + dr, x = col + i;
+          if (ch !== " " && !grid[y][x] && !skip(y, x)) grid[y][x] = layer;
+        });
+      });
+      col += g[0].length + 1;
+    }
+  };
+
+  // the letters first: the echo is only allowed into cells they do not want.
+  // The other order eats them — a stroke is two columns wide, so a one-cell
+  // offset overlaps it almost entirely and the word turns into a solid slab.
+  paint(1, 0, "main");
+
+  // the counters stay hollow. An outline runs around the outside of a letter,
+  // so the hole in a B or an O has to stay empty: filled with echo they read
+  // as solid slugs and the word stops being legible at all. `inside` is the
+  // horizontal span each glyph occupies on each row — between its own first
+  // and last lit column, and never across the gap to the next letter.
+  const inside = new Set();
+  let col = 0;
+  for (const g of glyphs) {
+    g.forEach((line, r) => {
+      const lo = line.indexOf("█"), hi = line.lastIndexOf("█");
+      for (let i = lo + 1; i < hi; i++) inside.add(`${r + 1},${col + i}`);
+    });
+    col += g[0].length + 1;
+  }
+  paint(0, 1, "shadow", (y, x) => inside.has(`${y},${x}`));  // up one, right one
+  return grid;
+}
+
+// Four tiers and not two: the whole name is ~101 columns and the `STO` block is
+// 25, so between them sits every ordinary 80-column terminal — which would have
+// got the smallest wordmark with two thirds of the row empty.
+const FULL = stamp("BRAINGENT STO");   // ~101
+const MID = stamp("BRAINGENT");        // ~73, with STO spelled under it
+const SHORT = stamp("STO");            // ~25, with the name above it
+const gridWidth = (g) => g[0].length;
 
 // `sto ui` stores the accent as a raw SGR code; Ink wants a name.
 const ACCENTS = { 36: "cyan", 32: "green", 35: "magenta", 34: "blue", 33: "yellow", 31: "red" };
 
+/** One grid row, as runs of same-layer cells so each run is a single `<Text>`. */
+function StampRow({ cells, accent }) {
+  const runs = [];
+  for (const cell of cells) {
+    const last = runs[runs.length - 1];
+    // ░ and not █ for the echo: at one cell of offset a solid halo reads as
+    // part of the letter, and a lighter texture reads as behind it
+    const ch = cell === "main" ? "█" : cell === "shadow" ? "░" : " ";
+    if (last && last.layer === cell) last.text += ch;
+    else runs.push({ layer: cell, text: ch });
+  }
+  return (
+    <Text>
+      {runs.map((r, i) =>
+        r.layer === "main" ? (
+          <Text key={i} color={accent} bold>{r.text}</Text>
+        ) : r.layer === "shadow" ? (
+          <Text key={i} dimColor>{r.text}</Text>
+        ) : (
+          <Text key={i}>{r.text}</Text>
+        )
+      )}
+    </Text>
+  );
+}
+
 function Wordmark({ width, accent }) {
-  // three tiers, like the terminal one: the whole name is ~90 columns and a
-  // wordmark cut in half is worse than a smaller wordmark
-  if (width >= FULL[0].length + 4)
-    return (
-      <Box flexDirection="column">
-        {FULL.map((l, i) => (
-          <Text key={i} color={accent}>{l}</Text>
-        ))}
-      </Box>
-    );
-  if (width >= SHORT[0].length + 4)
-    return (
-      <Box flexDirection="column">
-        <Text bold>braingent</Text>
-        {SHORT.map((l, i) => (
-          <Text key={i} color={accent}>{l}</Text>
-        ))}
-      </Box>
-    );
-  return <Text color={accent} bold>braingent STO</Text>;
+  // a wordmark cut in half is worse than a smaller wordmark, so the tiers step
+  // down instead of clipping
+  const grid = [FULL, MID, SHORT].find((g) => width >= gridWidth(g) + 4);
+  if (!grid) return <Text color={accent} bold>braingent STO</Text>;
+  return (
+    <Box flexDirection="column" width={gridWidth(grid)}>
+      {grid === SHORT && <Text bold>braingent</Text>}
+      {grid.map((cells, i) => (
+        <StampRow key={i} cells={cells} accent={accent} />
+      ))}
+      {grid === MID && (
+        <Box justifyContent="flex-end">
+          <Text color={accent} bold>S T O</Text>
+        </Box>
+      )}
+    </Box>
+  );
 }
 
 // ── pieces ──
