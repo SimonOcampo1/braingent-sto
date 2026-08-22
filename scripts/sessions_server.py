@@ -1547,6 +1547,35 @@ def memory_graph(src=None, bodies=False) -> dict:
 FETCH_TTL = 60  # seconds: a network round trip per `sto status` is the whole cost
 
 
+_NEIGH = {"ts": 0.0, "links": None}
+NEIGH_TTL = 60.0
+
+
+def memory_neighbours(project, slug, src=None, force=False):
+    """One level of the graph around a memory: (outgoing, incoming).
+
+    The terminal cannot draw the graph — with fifty nodes the edges cross and
+    nothing is legible, which is why the spatial view stays in the `g` window.
+    What does fit in text is the neighbourhood: what this memory points at and
+    what points back. That answers "what does this connect to", which is the
+    question you actually have while reading one.
+
+    Resolution is not re-implemented here: `memory_graph` already decides how a
+    `[[wikilink]]` resolves (inside the project first, then a unique slug across
+    the repo), and a second copy of those rules would drift from the graph the
+    `g` window draws. Memoised for a minute — opening five memories in a row
+    should not walk every file five times.
+    """
+    import time
+    if force or _NEIGH["links"] is None or time.monotonic() - _NEIGH["ts"] >= NEIGH_TTL:
+        _NEIGH["links"] = [l for l in memory_graph(src)["links"]
+                           if l.get("kind") == "link"]
+        _NEIGH["ts"] = time.monotonic()
+    me = f"{project}/{slug}"
+    out = sorted({l["target"] for l in _NEIGH["links"] if l["source"] == me})
+    inc = sorted({l["source"] for l in _NEIGH["links"] if l["target"] == me})
+    return out, inc
+
 def _stale_fetch_ref(ref: str, ttl=FETCH_TTL) -> bool:
     """Same idea as `_stale_fetch`, per remote: git touches the packed/loose
     ref file of a remote when it fetches it, so upstream and origin get their

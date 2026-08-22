@@ -93,6 +93,7 @@ STRINGS = {
         "st_both": "en ambos", "st_local": "solo acá", "st_repo": "solo en el repo",
         "st_gone": "borrada en el repo",
         "forget_title": "Sacar {what} del repo",
+        "mem_links": "Enlaces", # → sale de esta memoria · ← apunta a ella
         "bring_title": "Traer {what} del repo a esta máquina",
         "bring_backup": "si ya existía algo, queda respaldado en ~/.claude/.sto-backup/",
         "brought": "traída: {id}",
@@ -242,6 +243,7 @@ STRINGS = {
         "st_both": "in both", "st_local": "only here", "st_repo": "only in the repo",
         "st_gone": "dropped in the repo",
         "forget_title": "Drop {what} from the repo",
+        "mem_links": "Links",  # → out of this memory · ← into it
         "bring_title": "Bring {what} from the repo to this machine",
         "bring_backup": "anything already there is backed up under ~/.claude/.sto-backup/",
         "brought": "brought: {id}",

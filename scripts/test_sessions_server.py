@@ -473,6 +473,42 @@ def test_apply_config_and_bring_share_one_copy_loop():
                             home="C:/casa") == 0
 
 
+def test_memory_neighbours_is_one_level_and_both_directions():
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d) / "memory"
+        box = root / "proj" / "Box"
+        box.mkdir(parents=True)
+        (box / "a.md").write_text(
+            "---\nname: a\n---\napunta a [[b]] y nada mas", encoding="utf-8")
+        (box / "b.md").write_text(
+            "---\nname: b\n---\nb apunta a [[c]]", encoding="utf-8")
+        (box / "c.md").write_text("---\nname: c\n---\nhoja", encoding="utf-8")
+
+        out, inc = srv.memory_neighbours("proj", "b", src=root, force=True)
+        assert out == ["proj/c"], out
+        assert inc == ["proj/a"], inc
+        # un nivel: `a` no aparece como vecino de `c`
+        out, inc = srv.memory_neighbours("proj", "c", src=root, force=True)
+        assert out == [] and inc == ["proj/b"], (out, inc)
+
+
+def test_memory_neighbours_reuses_the_graphs_own_link_resolution():
+    """No re-implementa cómo resuelve un [[wikilink]]: si `memory_graph` no
+    dibujó la arista, la vecindad tampoco la inventa."""
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d) / "memory"
+        for proj in ("uno", "dos"):
+            (root / proj / "Box").mkdir(parents=True)
+            (root / proj / "Box" / "choque.md").write_text(
+                "---\nname: choque\n---\nx", encoding="utf-8")
+        (root / "uno" / "Box" / "src.md").write_text(
+            "---\nname: src\n---\nva a [[choque]]", encoding="utf-8")
+
+        out, _ = srv.memory_neighbours("uno", "src", src=root, force=True)
+        # resuelve dentro del proyecto primero, así que no es ambiguo
+        assert out == ["uno/choque"], out
+
+
 def test_search_sessions():
     with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as k:
         proj = Path(d) / "projX"
@@ -1611,4 +1647,6 @@ if __name__ == "__main__":
     test_an_unknown_agent_falls_back_instead_of_exploding()
     test_bring_installs_one_skill_the_repo_carries_and_resolves_home()
     test_apply_config_and_bring_share_one_copy_loop()
+    test_memory_neighbours_is_one_level_and_both_directions()
+    test_memory_neighbours_reuses_the_graphs_own_link_resolution()
     print("OK")

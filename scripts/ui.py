@@ -772,9 +772,34 @@ def detail_lines(st, w):
 def detail_memory(row):
     f = srv.KNOWLEDGE_MEMORY / row["project"] / row["machine"] / f"{row['slug']}.md"
     try:
-        return f.read_text(encoding="utf-8", errors="replace").splitlines()
+        lines = f.read_text(encoding="utf-8", errors="replace").splitlines()
     except OSError as e:
         return [f"error: could not read {f} ({e})"]
+    return lines + _neighbour_lines(row)
+
+
+def _neighbour_lines(row):
+    """One level of the graph, in words.
+
+    The prototype drew the graph with ASCII boxes; that is legible with five
+    nodes and unreadable with fifty, so the spatial view stays in the `g`
+    window. What belongs in the text is the neighbourhood — it answers "what
+    does this connect to", which is the question you have while reading a
+    memory, without pretending to be a map.
+    """
+    try:
+        out, inc = srv.memory_neighbours(row["project"], row["slug"])
+    except Exception:
+        return []                      # a memory reads fine without its edges
+    if not (out or inc):
+        return []
+    lines = ["", cli.c(t("mem_links"), cli.BOLD)]
+    for arrow, ids in (("→", out), ("←", inc)):
+        for mid in ids:
+            proj, _, slug = mid.rpartition("/")
+            tail = "" if proj == row["project"] else cli.c(f"  ({proj})", cli.DIM)
+            lines.append(f"  {cli.c(arrow, ACCENT)} {slug}{tail}")
+    return lines
 
 
 def _flatten(lines):
