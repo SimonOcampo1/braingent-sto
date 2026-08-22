@@ -239,7 +239,7 @@ it. Git keeps the history anyway — this makes it legible without digging.
 
 ## 10. Ship it as a plugin
 
-`claude plugin marketplace add SimonOcampo1/sto-agentic-os` is how people install
+`claude plugin marketplace add SimonOcampo1/braingent-sto` is how people install
 things now. A `.claude-plugin/marketplace.json` plus a plugin dir carrying the
 MCP server (item 1) and the optional hooks (items 2 and 3) makes STO installable
 in one command instead of a clone plus a PowerShell script.

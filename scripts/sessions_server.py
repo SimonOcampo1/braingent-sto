@@ -1523,7 +1523,7 @@ def set_badge(on: bool) -> dict:
 # cannot touch your memories — git has nothing to bring there.
 
 UPSTREAM_URL = os.environ.get(
-    "STO_UPSTREAM", "https://github.com/SimonOcampo1/sto-agentic-os.git")
+    "STO_UPSTREAM", "https://github.com/SimonOcampo1/braingent-sto.git")
 UPSTREAM = "upstream"
 
 

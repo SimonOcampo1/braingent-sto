@@ -8,7 +8,7 @@ Code, comments, docstrings and docs are written in English. The TUI and the CLI 
 
 ## Where code is written
 
-Two clones, one rule: **code changes are made in the public clone** (`../sto-agentic-os-public`, remote `braingent-sto`) and reach the private one (`my-agentic-os`) through `sto update`. The private clone commits knowledge — `knowledge/`, `vault/` — and nothing under `scripts/` or `app/`.
+Two clones, one rule: **code changes are made in the public clone** (`../sto-agentic-os`, remote `braingent-sto`) and reach the private one (`my-agentic-os`) through `sto update`. The private clone commits knowledge — `knowledge/`, `vault/` — and nothing under `scripts/` or `app/`.
 
 It is not bureaucracy: editing the same file in both clones is what produces the merge conflicts `sto update` aborts on, and every fix taken this way is one more real test of the update path users depend on. `tools/build_public.py` stays for repairing drift, not for daily work.
 
