@@ -2212,6 +2212,85 @@ def test_d_asks_before_deleting_a_skill_and_esc_cancels():
         ui.srv.delete_skill = real
 
 
+
+def test_R_asks_before_dropping_from_the_repo_and_never_touches_the_machine():
+    llamadas = []
+    real = ui.srv.forget
+
+    def falso(target, apply=False):
+        llamadas.append((target, apply))
+        return (["knowledge/config/skills/skills/vieja/SKILL.md"], None)
+
+    try:
+        ui.srv.forget = falso
+        st = ui.new_state()
+        st["mod"] = "skills"
+        st["rows"] = [{"kind": "item", "what": "skill", "id": "personal:vieja",
+                       "label": "vieja", "desc": "", "where": "repo"}]
+        st = ui.handle(st, "R")
+        # la tarjeta sale de un dry run: nada se borró todavía
+        assert st["confirm"]["kind"] == "forget"
+        assert llamadas == [("skill:vieja", False)], llamadas
+        txt = "\n".join(ui.strip_ansi(l) for l in st["manifest"])
+        assert "vieja" in txt
+        assert "SKILL.md" in txt                     # el manifiesto, no un resumen
+        assert "no se toca" in txt or "untouched" in txt
+
+        st = ui.handle(st, "\x1b")
+        assert st["confirm"] is None
+        assert all(not a for _, a in llamadas)       # cancelar no aplicó nada
+
+        st = ui.handle(st, "R")
+        st = ui.handle(st, "\r")
+        assert ("skill:vieja", True) in llamadas
+        assert "vieja" in st["flash"]
+    finally:
+        ui.srv.forget = real
+
+
+def test_R_says_why_when_the_export_would_just_put_it_back():
+    """El guard de `srv.forget` se muestra tal cual: es la única pista de que
+    hay que desinstalarla local primero."""
+    real = ui.srv.forget
+    try:
+        ui.srv.forget = lambda target, apply=False: ([], "still installed here")
+        st = ui.new_state()
+        st["mod"] = "skills"
+        st["rows"] = [{"kind": "item", "what": "skill", "id": "personal:viva",
+                       "label": "viva", "desc": "", "where": "both"}]
+        st = ui.handle(st, "R")
+        assert st["confirm"] is None                 # no pregunta lo que no puede hacer
+        assert st["flash"] == "still installed here"
+    finally:
+        ui.srv.forget = real
+
+
+def test_a_module_lists_what_only_the_repo_has_so_R_has_a_row_to_land_on():
+    with tempfile.TemporaryDirectory() as d:
+        claude = Path(d) / "claude"
+        (claude / "skills" / "local-only").mkdir(parents=True)
+        (claude / "skills" / "local-only" / "SKILL.md").write_text(
+            "---\nname: local-only\ndescription: aca\n---\nx", encoding="utf-8")
+        (claude / "skills" / "en-ambas").mkdir(parents=True)
+        (claude / "skills" / "en-ambas" / "SKILL.md").write_text(
+            "---\nname: en-ambas\ndescription: dos\n---\nx", encoding="utf-8")
+        cfg = Path(d) / "config"
+        for name in ("en-ambas", "repo-only"):
+            (cfg / "skills" / "skills" / name).mkdir(parents=True)
+            (cfg / "skills" / "skills" / name / "SKILL.md").write_text(
+                "---\nname: %s\ndescription: r\n---\nx" % name, encoding="utf-8")
+
+        items = ui.module_items("skills", claude_dir=claude, repo_config=cfg)
+        estado = {i["label"]: i["where"] for i in items}
+        assert estado == {"local-only": "local", "en-ambas": "both",
+                          "repo-only": "repo"}, estado
+        # y el marcador compacto los distingue en cualquier ancho
+        pintado = {i["label"]: ui.strip_ansi(ui.fmt_home(i, 100)) for i in items}
+        assert pintado["repo-only"].startswith(" [R]"), pintado["repo-only"]
+        assert pintado["local-only"].startswith(" [L]"), pintado["local-only"]
+        assert pintado["en-ambas"].startswith(" [=]"), pintado["en-ambas"]
+
+
 def test_d_uninstalls_a_plugin_through_the_claude_cli():
     llamadas = []
     real = ui.srv.plugin_cmd

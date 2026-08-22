@@ -364,7 +364,12 @@ def _txt(line):
 MODULE_LISTABLE = {"skills", "plugins"}   # the only ones with a real delete API
 
 
-def module_items(mod, claude_dir=None):
+def _where(name, local, repo):
+    """Which side of the sync holds this item: both, only here, only in the repo."""
+    return "both" if name in local and name in repo else ("local" if name in local else "repo")
+
+
+def module_items(mod, claude_dir=None, repo_config=None):
     """What a config module holds on this machine.
 
     `skills` and `plugins` come from the server APIs and can be deleted. The
@@ -372,14 +377,24 @@ def module_items(mod, claude_dir=None):
     them, but deleting them has no safe operation on the other side, so no.
     """
     cd = claude_dir or srv.CLAUDE_DIR
+    cfg = repo_config if repo_config is not None else srv.KNOWLEDGE_CONFIG
     if mod == "skills":
-        return [{"kind": "item", "what": "skill", "id": row["id"], "label": name,
-                 "desc": row.get("description", "")}
-                for name, row in sorted(_personal_skills(claude_dir).items())]
+        local = _personal_skills(claude_dir)
+        repo = _personal_skills(cfg / "skills")
+        # what the repo carries and this machine does not is listed too, and it
+        # is the only reason `R` has anything to act on: the guard in
+        # `srv.forget` refuses everything that is still installed here
+        return [{"kind": "item", "what": "skill",
+                 "id": (local.get(name) or repo[name])["id"], "label": name,
+                 "where": _where(name, local, repo),
+                 "desc": (local.get(name) or repo[name]).get("description", "")}
+                for name in sorted(set(local) | set(repo))]
     if mod == "plugins":
         _, installed = srv._local_plugins(claude_dir)
-        return [{"kind": "item", "what": "plugin", "id": p, "label": p, "desc": ""}
-                for p in installed]
+        _, in_repo = srv._repo_plugins(cfg)
+        return [{"kind": "item", "what": "plugin", "id": p, "label": p, "desc": "",
+                 "where": _where(p, set(installed), set(in_repo))}
+                for p in sorted(set(installed) | set(in_repo))]
     out = []
     for entry in srv.CONFIG_MODULES.get(mod, ()):
         base = cd / entry
@@ -421,7 +436,11 @@ def fmt_home(r, w=100):
         # scrollbar's air. Without this the description rides on top of it.
         cut = max(0, w - 40)
         desc = cli.c("   " + " ".join(r["desc"].split())[:cut], cli.DIM) if r["desc"] else ""
-        return f"   {cli._pad(r['label'], 30, cli.BOLD)}{desc}"
+        # `[L]`/`[R]`/`[=]` instead of the coloured legend the wide prototype
+        # drew: same three states, and they survive a narrow terminal
+        mark, colour = {"local": ("[L]", cli.YELLOW), "repo": ("[R]", cli.GREEN)}.get(
+            r.get("where"), ("[=]", cli.DIM))
+        return f" {cli.c(mark, colour)} {cli._pad(r['label'], 30, cli.BOLD)}{desc}"
     return r["text"]
 
 
@@ -1558,6 +1577,8 @@ def handle(st, key):
         st["loaded_at"] = 0.0
     elif key == "d" and st["tab"] == HOME and st["mod"]:
         return _handle_delete(st)
+    elif key == "R" and st["tab"] == HOME and st["mod"]:
+        return _handle_forget(st)
     elif key == "f" and st["tab"] == HOME:
         st["fetch"] = True
         st["loaded_at"] = 0.0
@@ -1660,6 +1681,52 @@ def delete_lines(row):
             cli.c(" " + t("confirm"), ACCENT) + cli.c("   " + t("cancel"), cli.DIM)]
 
 
+def _handle_forget(st):
+    """`R` inside a module: the repo half of `d`.
+
+    Uppercase because `r` already reloads, and because of the pair this is the
+    one that travels to the other machine on the next push. Skills and plugins
+    only, same as `d`: those are the two domains whose items this screen lists
+    one by one.
+    """
+    if not st["rows"]:
+        return st
+    row = st["rows"][st["sel"]]
+    if not (isinstance(row, dict) and row.get("what") in ("skill", "plugin")):
+        st["flash"] = t("not_deletable", id=st["mod"])
+        return st
+    name = row["label"] if row["what"] == "skill" else row["id"]
+    paths, err = srv.forget(f"{row['what']}:{name}")
+    if err:
+        st["flash"] = err          # the guard explains itself; do not paraphrase
+        return st
+    st["confirm"] = {"kind": "forget", "what": row["what"],
+                     "id": name, "label": row["label"]}
+    st["manifest"] = forget_lines(row, paths)
+    return st
+
+
+def forget_lines(row, paths):
+    """The confirmation card for a forget. Same contract as `manifest_lines`:
+    the last line is the one painted on the bottom bar."""
+    out = [cli.c(" " + t("forget_title", what=row["what"]), cli.BOLD)
+           + "  " + cli.c(row["label"], cli.GREEN)]
+    out += [cli.c("   " + p, cli.DIM) for p in paths[:8]]
+    if len(paths) > 8:
+        out.append(cli.c(f"   … +{len(paths) - 8}", cli.DIM))
+    out.append(cli.c("   " + t("forget_keeps_local"), cli.DIM))
+    out.append(cli.c("   " + t("forget_travels"), cli.DIM))
+    out.append(cli.c(" " + t("confirm"), ACCENT) + cli.c("   " + t("cancel"), cli.DIM))
+    return out
+
+
+def _do_forget(st, c):
+    _, err = srv.forget(f"{c['what']}:{c['id']}", apply=True)
+    st["flash"] = err or t("forgotten", id=c["label"])
+    st["loaded_at"] = 0.0
+    return st
+
+
 def _do_delete(st, c):
     if c["what"] == "skill":
         err = srv.delete_skill(c["id"])
@@ -1737,6 +1804,8 @@ def _handle_confirm(st, key):
         return st
     if c["kind"] == "delete":
         return _do_delete(st, c)
+    if c["kind"] == "forget":
+        return _do_forget(st, c)
     return start_job(st, c["kind"])
 
 
