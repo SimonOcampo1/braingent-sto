@@ -672,6 +672,52 @@ def cmd_memory(*args):
     return {"message": "\n".join(rows) or t("cli_no_memories")}
 
 
+def cmd_ui(*args):
+    """`sto ui`, and `sto ui --ink` for the optional Ink flavour.
+
+    Two front-ends over one home. The default one is `ui.py`: Python stdlib,
+    always there, no runtime to install. `--ink` is a Node app under `app-tui/`
+    that reads `GET /api/home` — the same numbers, laid out with a real flexbox
+    instead of column arithmetic done by hand.
+
+    It is opt-in and it stays opt-in. Without Node this says so and falls back
+    rather than failing: the flavour is a preference, and the OS has to run on
+    a machine that never installs one.
+    """
+    if not args:
+        return __import__("ui").run()   # ponytail: lazy — ui imports cli
+    if args != ("--ink",):
+        return _no_args("ui")
+    node = shutil.which("node")
+    if node is None:
+        print(t("ink_no_node"))
+        return __import__("ui").run()
+    app = srv.REPO_ROOT / "app-tui"
+    if not (app / "node_modules").exists():
+        print(t("ink_installing"))
+        if subprocess.run(["npm", "install"], cwd=app, shell=True).returncode:
+            print(t("ink_install_failed"))
+            return __import__("ui").run()
+    # the Ink app talks HTTP, so unlike the stdlib TUI it needs the server up.
+    # A daemon thread and not a subprocess: it dies with this process, and a
+    # server orphaned by a crashed front-end is a port nobody can rebind.
+    _serve_in_background()
+    subprocess.run(["npx", "tsx", "src/app.jsx"], cwd=app, shell=True)
+    return {"message": ""}
+
+
+def _serve_in_background():
+    """Start the API server here unless something already answers on the port."""
+    import socket
+    import threading
+    port = int(os.environ.get("STO_SESSIONS_PORT", "8765"))
+    with socket.socket() as probe:
+        if probe.connect_ex(("127.0.0.1", port)) == 0:
+            return                      # somebody is already serving it
+    httpd = srv.ThreadingHTTPServer(("127.0.0.1", port), srv.Handler)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+
+
 def _no_args(cmd):
     """Force the TypeError that main() already turns into 'invalid arguments'."""
     raise TypeError(f"{cmd} takes no arguments")
@@ -693,7 +739,7 @@ CLI = {
     "usage": cmd_usage,
     "machines": cmd_machines,
     "graph": cmd_graph,
-    "ui": lambda *a: __import__("ui").run() if not a else _no_args("ui"),  # ponytail: lazy import — ui imports cli, a cycle if it were up top
+    "ui": cmd_ui,
 }
 
 

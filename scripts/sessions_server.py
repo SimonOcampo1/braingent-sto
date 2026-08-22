@@ -2068,6 +2068,75 @@ def usage_snapshot(detail: bool = True) -> dict:
         return data
 
 
+def _usage_with_resets(ui):
+    """The usage block with the reset already worded ("resets Wed 15:00").
+
+    The raw snapshot carries a UTC timestamp, and turning it into the sentence
+    on screen is a rule — which day counts as today, when the weekday shows up
+    at all — that `ui._reset_at` already owns. A second front-end formatting
+    the same ISO string itself is how the two start disagreeing about what
+    "tomorrow" means.
+    """
+    u = usage_snapshot(detail=False)
+    return {**u, "limits": [{**l, "resets": ui._reset_at(l.get("resetsAt"))}
+                            for l in (u.get("limits") or [])]}
+
+
+def home_data(fetch=False):
+    """Every fact the home screen shows, as data — one call, nothing rendered.
+
+    `ui.home_lines()` paints these same facts into ANSI for the terminal TUI.
+    A second front-end that re-derived them from the six loose endpoints would
+    drift from it the first time one of the rules changed (which side of a
+    parity counts, how `max()` dedupes the memories), so it asks here instead
+    and only decides how it looks.
+
+    `ui` is imported inside the function and not at the top for the reason
+    `cli.py` does the same: ui imports cli imports this module.
+    """
+    import ui  # ponytail: lazy — importing it up top is the cycle
+
+    sy = sync_status(fetch=fetch, force=fetch)
+    up, down = ui.sync_preview(sy)
+    p = ui.parity()
+    here = LOCAL_MACHINE
+    return {
+        "agent": agents.label(),
+        "machine": here,
+        # the strings and the accent travel with the data so a second
+        # front-end honours `sto ui` > Config without a second copy of the
+        # table; English is merged under the active language, so the fallback
+        # `i18n.t()` does is already resolved by the time it gets there
+        "lang": ui.i18n.LANG,
+        "accent": ui.ACCENT,
+        "strings": {**ui.i18n.STRINGS["en"],
+                    **ui.i18n.STRINGS.get(ui.i18n.LANG, {})},
+        "machines": [{"name": n, "local": d["local"]}
+                     for n, d in sorted(list_machines().items())],
+        "usage": _usage_with_resets(ui),
+        "counters": [{"key": k, "n": n} for k, n in ui.counters()],
+        "knowledge": ui.knowledge_counts(),
+        "sync": {
+            "branch": sy.get("branch"),
+            "remote": sy.get("remote"),
+            "ahead": sy["ahead"],
+            "behind": sy["behind"],
+            "dirty": sy["dirty"],
+            "toPush": ui.count_items(up),
+            "toPull": ui.count_items(down),
+            "pushParts": ui.preview_parts(up),
+            "pullParts": ui.preview_parts(down),
+            "lastSync": ui.last_sync(),
+            "checkedAgo": ui.checked_ago(),
+        },
+        "update": ui.update_state(),
+        "modules": p["modules"],
+        "localOnly": p["local_only"],
+        "repoOnly": p["repo_only"],
+        "gone": sorted(dropped_skills()),
+    }
+
+
 _DETAIL_RE = re.compile(r"^/api/sessions/([^/?]+)$")
 _SKILL_RE = re.compile(r"^/api/skills/([^/?]+)$")
 _SKILL_EXPORT_RE = re.compile(r"^/api/skills/([^/?]+)/export$")
@@ -2094,6 +2163,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(usage_snapshot())
             if self.path == "/api/sync/status":
                 return self._json(sync_status())
+            if self.path in ("/api/home", "/api/home?fetch=1"):
+                return self._json(home_data(fetch=self.path.endswith("fetch=1")))
             if self.path == "/api/config/modules":
                 return self._json({"modules": config_status()})
             if self.path == "/api/memory":

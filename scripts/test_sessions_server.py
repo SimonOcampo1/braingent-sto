@@ -509,6 +509,29 @@ def test_memory_neighbours_reuses_the_graphs_own_link_resolution():
         assert out == ["uno/choque"], out
 
 
+def test_home_data_answers_the_whole_home_in_one_payload():
+    """One call, and it survives importing `ui` from inside the server.
+
+    `ui` imports `cli` imports this module, so the import has to stay inside
+    the function; up top it is a cycle and the server does not start. And the
+    keys are a contract: a second front-end paints from them, so dropping one
+    is not a rename, it is a blank panel on a screen no Python test opens.
+    """
+    d = srv.home_data(fetch=False)
+    for key in ("agent", "machine", "machines", "usage", "counters", "knowledge",
+                "sync", "update", "modules", "localOnly", "repoOnly", "gone",
+                "lang", "accent", "strings"):
+        assert key in d, key
+    for key in ("toPush", "toPull", "pushParts", "pullParts", "lastSync",
+                "checkedAgo", "ahead", "behind", "dirty"):
+        assert key in d["sync"], key
+    # the English fallback `i18n.t()` does is resolved here, not there: the
+    # client looks a key up in a dict and has no second table to fall back to
+    assert d["strings"]["sec_sync"], "strings did not merge English underneath"
+    # the reset is worded on this side for the same reason
+    assert all("resets" in l for l in d["usage"]["limits"])
+
+
 def test_search_sessions():
     with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as k:
         proj = Path(d) / "projX"
@@ -1649,4 +1672,5 @@ if __name__ == "__main__":
     test_apply_config_and_bring_share_one_copy_loop()
     test_memory_neighbours_is_one_level_and_both_directions()
     test_memory_neighbours_reuses_the_graphs_own_link_resolution()
+    test_home_data_answers_the_whole_home_in_one_payload()
     print("OK")

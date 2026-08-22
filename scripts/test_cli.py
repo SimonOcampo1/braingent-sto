@@ -551,6 +551,38 @@ def test_graph_open_launches_a_chromeless_window():
     _con_html(caso)
 
 
+def test_ui_ink_falls_back_to_the_stdlib_tui_when_node_is_missing():
+    """The Ink flavour is a preference, not a requirement.
+
+    A machine without Node still has to get a TUI when it asks for one, so the
+    missing runtime is a printed line and the usual screen — not an error that
+    leaves the user with nothing.
+    """
+    import sys
+    import types
+    abierto, real_which = [], cli.shutil.which
+    fake_ui = types.ModuleType("ui")
+    fake_ui.run = lambda: abierto.append("stdlib") or {"message": ""}
+    sys.modules["ui"] = fake_ui
+    try:
+        cli.shutil.which = lambda name: None
+        cli.cmd_ui("--ink")
+        assert abierto == ["stdlib"], abierto
+    finally:
+        cli.shutil.which = real_which
+        sys.modules.pop("ui", None)
+
+
+def test_ui_takes_no_flag_it_does_not_know():
+    """`--web` today is a typo, not a third flavour: it has to say so rather
+    than silently opening the default one."""
+    try:
+        cli.cmd_ui("--web")
+        assert False, "an unknown flag went through"
+    except TypeError:
+        pass
+
+
 def test_graph_open_falls_back_to_the_browser_without_chromium():
     def caso(html):
         abierto, real = [], cli.find_app_browser
@@ -751,6 +783,8 @@ if __name__ == "__main__":
     test_graph_command_without_file()
     test_graph_open_launches_a_chromeless_window()
     test_graph_open_falls_back_to_the_browser_without_chromium()
+    test_ui_ink_falls_back_to_the_stdlib_tui_when_node_is_missing()
+    test_ui_takes_no_flag_it_does_not_know()
     test_graph_open_without_the_html()
     test_cached_sessions_hides_subagent_sessions_by_default()
     test_timeline_lines_is_what_show_prints()

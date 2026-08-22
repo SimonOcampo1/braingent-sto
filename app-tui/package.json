@@ -1,0 +1,16 @@
+{
+  "name": "sto-app-tui",
+  "private": true,
+  "type": "module",
+  "description": "Optional Ink front-end for the STO TUI. Never a dependency of the engine: `sto ui` runs on Python stdlib with or without this folder.",
+  "scripts": {
+    "start": "tsx src/app.jsx"
+  },
+  "dependencies": {
+    "ink": "^6.4.0",
+    "react": "^19.2.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.20.6"
+  }
+}

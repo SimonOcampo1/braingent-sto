@@ -160,6 +160,11 @@ STRINGS = {
         "usage_pct": "uso {p}%",
 
         "k_home": " ↑↓ mover  ↵ abrir  Tab sección  p push  l pull  f fetch  u update  q salir",
+        "k_reload": "recargar", "k_quit": "salir",
+        "sec_general": "Estado general",
+        "ink_no_node": "la interfaz Ink necesita Node.js (https://nodejs.org/) — abriendo la de siempre",
+        "ink_installing": "instalando las dependencias de la interfaz Ink (una sola vez)...",
+        "ink_install_failed": "npm install falló — abriendo la interfaz de siempre",
         "update_safe": "solo código: tus memorias no están en upstream",
         "update_restart": "actualizado · cerrá y reabrí sto ui para usar la versión nueva",
         "unlinked_short": "repo sin enlazar a upstream",
@@ -312,6 +317,11 @@ STRINGS = {
         "usage_pct": "usage {p}%",
 
         "k_home": " ↑↓ move  ↵ open  Tab section  p push  l pull  f fetch  u update  q quit",
+        "k_reload": "reload", "k_quit": "quit",
+        "sec_general": "Overall",
+        "ink_no_node": "the Ink front-end needs Node.js (https://nodejs.org/) — opening the usual one",
+        "ink_installing": "installing the Ink front-end dependencies (once)...",
+        "ink_install_failed": "npm install failed — opening the usual front-end",
         "update_safe": "code only: your memories are not in upstream",
         "update_restart": "updated · close and reopen sto ui to run the new version",
         "unlinked_short": "repo not linked to upstream",
