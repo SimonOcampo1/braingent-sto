@@ -580,11 +580,12 @@ def test_banner_rows_all_have_the_same_visible_width():
     # if one wordmark row measures differently, the letters below start in
     # another column and the block comes out crooked
     assert len({len(w) for w in ui.WORDMARK}) == 1
-    # banner(): margen, la etiqueta en letra normal, y las 5 filas del bloque
-    lineas = ui.banner(100)
+    assert len({len(w) for w in ui.FULL}) == 1
+    # y cada glifo mide lo mismo, que es lo que mantiene el bloque derecho
+    assert {len(r) for ch, g in ui._GLYPHS.items() if ch != " " for r in g} == {6}
+    lineas = ui.banner(120)          # el nombre completo entra
     assert lineas[0] == ""
-    assert ui.strip_ansi(lineas[1]).strip() == ui.LABEL
-    assert len({len(ui.strip_ansi(l)) for l in lineas[2:]}) == 1
+    assert len({len(ui.strip_ansi(l)) for l in lineas[1:]}) == 1
 
 
 def test_bar_clamps_out_of_range_percentages():
@@ -1713,18 +1714,19 @@ def test_drain_of_nothing_leaves_the_state_alone():
 # ── responsive ──
 
 def test_the_wordmark_collapses_to_one_line_on_a_narrow_terminal():
-    ancho = ui.banner(100)
-    angosto = ui.banner(20)
-    # margen + etiqueta + 5 filas de bloque
-    assert len(ancho) == 7 and len(angosto) == 2   # la 1ra es el margen
+    # tres escalones, y ninguno se sale de su ancho
+    entero = ui.banner(120)          # BRAINGENT STO en bloques
+    medio = ui.banner(40)            # STO en bloques, el nombre en letra normal
+    angosto = ui.banner(20)          # una linea
+    assert len(entero) == 6, entero          # margen + 5 filas
+    assert len(medio) == 7                   # margen + etiqueta + 5 filas
+    assert len(angosto) == 2
+    assert "braingent" == ui.strip_ansi(medio[1]).strip()
     assert "braingent STO" in ui.strip_ansi(angosto[1])
-    assert "braingent" == ui.strip_ansi(ancho[1]).strip()
-    # sacar OS del bloque lo bajo de 41 a 20 columnas: la version grande
-    # sobrevive una terminal de la mitad del ancho que necesitaba antes
-    assert ui.WORDMARK_W <= 24, ui.WORDMARK_W
-    # and no version overflows its width
-    assert all(len(ui.strip_ansi(l)) <= 100 for l in ancho)
-    assert len(ui.strip_ansi(angosto[1])) <= 30
+    for lineas, w in ((entero, 120), (medio, 40), (angosto, 20)):
+        assert all(len(ui.strip_ansi(l)) <= w for l in lineas), (w, lineas)
+    # el escalon del medio existe porque el nombre entero no entra en 80
+    assert ui.FULL_W > 80 >= ui.WORDMARK_W, (ui.FULL_W, ui.WORDMARK_W)
 
 
 def test_the_buttons_collapse_to_one_line_when_the_boxes_do_not_fit():

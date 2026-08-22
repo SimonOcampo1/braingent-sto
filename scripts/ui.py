@@ -135,26 +135,46 @@ def section(title, w):
 _GLYPHS = {"S": ("▄████▄", "██  ▀▀", "▀████▄", "▄▄  ██", "▀████▀"),
            "T": ("██████", "  ██  ", "  ██  ", "  ██  ", "  ██  "),
            "O": ("▄████▄", "██  ██", "██  ██", "██  ██", "▀████▀"),
+           "B": ("█████▄", "██  ██", "█████▄", "██  ██", "█████▀"),
+           "R": ("█████▄", "██  ██", "█████▀", "██ ▀█▄", "██  ██"),
+           "A": ("▄████▄", "██  ██", "██████", "██  ██", "██  ██"),
+           "I": ("██████", "  ██  ", "  ██  ", "  ██  ", "██████"),
+           "N": ("██▄ ██", "████ █", "██▀███", "██ ▀██", "██  ██"),
+           "G": ("▄████▄", "██  ▀▀", "██ ███", "██  ██", "▀████▀"),
+           "E": ("██████", "██    ", "█████ ", "██    ", "██████"),
            " ": ("  ",) * 5}
-# Only S, T and O are drawn, so the block spells `STO` and the rest of the name
-# rides above it in ordinary letters. Drawing b-r-a-i-n-g-e-n-t as Block
-# Elements would be nine new glyphs by hand for a line nobody reads twice — and
-# at six columns each, `braingent STO` would be ~84 columns of banner.
-WORDMARK = [" ".join(_GLYPHS[ch][r] for ch in "STO") for r in range(5)]
-WORDMARK_W = len(WORDMARK[0]) + 2
+
+def _block(word):
+    return [" ".join(_GLYPHS[ch][r] for ch in word) for r in range(5)]
+
+
 LABEL = "braingent"
+FULL = _block("BRAINGENT STO")     # ~90 columns
+WORDMARK = _block("STO")           # ~20, the fallback block
+FULL_W = len(FULL[0]) + 2
+WORDMARK_W = len(WORDMARK[0]) + 2
 
 
 def banner(w):
-    """The wordmark, or a single line when the terminal is too narrow.
+    """The wordmark, in three sizes.
 
-    Dropping `OS` from the block made it 20 columns instead of 41, so the big
-    version now survives a terminal half the width it used to need.
+    The whole name in Block Elements is ~90 columns, so it cannot be the only
+    version: a terminal narrower than that would get a wordmark cut in half,
+    which is worse than a smaller one. The tiers step down instead — full name,
+    then `STO` in blocks with the name above it in ordinary letters, then a
+    single line.
     """
-    if w < WORDMARK_W + 2:
-        return ["", cli.c(f"  ███ {LABEL} STO ███", ACCENT)]
-    return ["", cli.c("  " + LABEL, cli.BOLD)] + [
-        cli.c("  " + line, ACCENT) for line in WORDMARK]
+    if w >= FULL_W + 2:
+        return [""] + [cli.c("  " + line, ACCENT) for line in FULL]
+    if w >= WORDMARK_W + 2:
+        return ["", cli.c("  " + LABEL, cli.BOLD)] + [
+            cli.c("  " + line, ACCENT) for line in WORDMARK]
+    # el escalon mas angosto se sigue achicando solo: con `braingent` adentro,
+    # la version con barras mide 25 y se desbordaba en una terminal de 20
+    for uno in (f"███ {LABEL} STO ███", f"{LABEL} STO", "STO"):
+        if len(uno) + 2 <= w:
+            break
+    return ["", cli.c("  " + uno, ACCENT)]
 
 
 def bar(pct, width=18):
@@ -164,10 +184,16 @@ def bar(pct, width=18):
 
 
 def _reset_at(iso):
-    """'2026-08-14T18:00:00Z' → 'resets 15:00' in local time. Without data, ''.
+    """'2026-08-14T18:00:00Z' → 'resets Fri 15:00' in local time. Without data, ''.
 
     The quota endpoint returns UTC; painting that hour as-is claims the quota
     resets three hours later than it actually does.
+
+    And the hour alone answers the wrong question. The weekly limit resets four
+    days out, where `resets 15:00` reads as *today* at three — the hour is the
+    part you can guess, the day is the part you need. So the day shows up
+    whenever it is not today, and the weekday comes from `i18n` and not from
+    `strftime`, which would print English names on a Spanish UI.
     """
     if not isinstance(iso, str) or "T" not in iso:
         return ""              # a bare date has no reset time
@@ -175,7 +201,15 @@ def _reset_at(iso):
         local = datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone()
     except ValueError:
         return ""
-    return t("resets_at", h=f"{local:%H:%M}")
+    hora = f"{local:%H:%M}"
+    dias = (local.date() - datetime.now().astimezone().date()).days
+    if dias <= 0:
+        return t("resets_at", h=hora)
+    if dias == 1:
+        return t("resets_tomorrow", h=hora)
+    if dias < 7:
+        return t("resets_on", d=t("dow").split(",")[local.weekday()], h=hora)
+    return t("resets_on", d=f"{local:%d/%m}", h=hora)
 
 
 # ── sync buttons ──

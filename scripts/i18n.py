@@ -70,6 +70,8 @@ STRINGS = {
         "sec_prefs": "Preferencias",
 
         "no_usage": "sin datos de uso", "resets_at": "resetea {h}",
+        "resets_tomorrow": "resetea mañana {h}", "resets_on": "resetea {d} {h}",
+        "dow": "lun,mar,mié,jue,vie,sáb,dom",
         "n_sessions": "sesiones", "n_projects": "proyectos",
         "n_memories": "memorias", "n_skills": "skills", "n_machines": "máquinas",
         "n_vault": "vault", "n_activate": "activar",
@@ -220,6 +222,8 @@ STRINGS = {
         "sec_prefs": "Preferences",
 
         "no_usage": "no usage data", "resets_at": "resets {h}",
+        "resets_tomorrow": "resets tomorrow {h}", "resets_on": "resets {d} {h}",
+        "dow": "Mon,Tue,Wed,Thu,Fri,Sat,Sun",
         "n_sessions": "sessions", "n_projects": "projects",
         "n_memories": "memories", "n_skills": "skills", "n_machines": "machines",
         "n_vault": "vault", "n_activate": "to activate",
