@@ -1,4 +1,4 @@
-# STO agenticOS (frontend)
+# braingent-sto (frontend)
 
 Dashboard over local data. Views:
 

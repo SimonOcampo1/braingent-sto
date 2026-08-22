@@ -1,6 +1,6 @@
-# STO agenticOS UI — design brief
+# braingent-sto UI — design brief
 
-Design intent for the STO agenticOS shell (Overview, Sessions, Skills, Graph,
+Design intent for the braingent-sto shell (Overview, Sessions, Skills, Graph,
 Routines, Usage). Reuse this visual language for the next slices (run-skill
 buttons, terminal).
 
@@ -14,7 +14,7 @@ A solo developer who uses Claude Code daily. Reviews past AI sessions to underst
 
 ## Product Purpose
 
-STO agenticOS — a read-only dashboard over data that already exists on disk: Claude Code session logs (`~/.claude/projects/**/*.jsonl`), installed skills (`~/.claude/skills` + plugins), the graphify knowledge graph, Hermes cron routines, and token usage (ccusage). Sessions render as a full back-and-forth conversation: user prompts right, Claude prose left (markdown + LaTeX), tool calls grouped into collapsible activity runs with their key parameter, image attachments inline, errors visible. The UI is intentionally thin; the motor (skills, Hermes, memoria) lives outside it.
+braingent-sto — a read-only dashboard over data that already exists on disk: Claude Code session logs (`~/.claude/projects/**/*.jsonl`), installed skills (`~/.claude/skills` + plugins), the graphify knowledge graph, Hermes cron routines, and token usage (ccusage). Sessions render as a full back-and-forth conversation: user prompts right, Claude prose left (markdown + LaTeX), tool calls grouped into collapsible activity runs with their key parameter, image attachments inline, errors visible. The UI is intentionally thin; the motor (skills, Hermes, memoria) lives outside it.
 
 ## Brand Personality
 

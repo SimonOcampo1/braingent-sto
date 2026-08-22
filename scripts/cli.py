@@ -1,4 +1,4 @@
-"""STO agenticOS CLI: presentation on top of the server's data functions.
+"""braingent-sto CLI: presentation on top of the server's data functions.
 
 Imports `sessions_server` directly (no HTTP): the data functions are pure and
 do not need the server running.

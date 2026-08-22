@@ -1,4 +1,4 @@
-# STO agenticOS — design system
+# braingent-sto — design system
 
 Tokens live in `src/index.css` under `@theme` (Tailwind v4). OKLCH everywhere;
 neutrals tinted toward the accent hue (70–80).
