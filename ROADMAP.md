@@ -368,50 +368,22 @@ Items 1 and 3 raise it without a second store; item 14 goes past it, if ever.
 
 ---
 
-## Naming
+## Naming — settled
 
-`agenticOS` is aspirational and slightly wrong: there is no scheduler, no
-processes, no sandbox. What there *is* is continuity — your setup and your memory
-keep existing on the other machine — plus a control plane over both. The name
-should say that, not operating system.
+The project is **braingent-sto**. The command stays `sto`.
 
-Two tests any candidate has to pass:
+This section used to carry nine candidates and a long argument about which half
+of the product a name has to cover. That was decided: the repo, the README and
+the banner all say `braingent-sto`, so the list was noise pretending to be an
+open question.
 
-- **Does it cover both halves?** Memory *and* setup (skills, plugins, settings).
-  A name that only says memory sells half the product, and the memory half is the
-  crowded one.
-- **Is the metaphor already taken?** `claude-sync` ships under "one Claude brain
-  across all your devices"; "second brain" belongs to the PKM world. Walking into
-  someone else's metaphor makes you sound like their clone.
+The tagline is what carries the weight: *shared memory and setup for Claude
+Code, across your machines, in a repo you own.*
 
-Candidates:
-
-| Name | Covers both halves | Free metaphor | Note |
-|---|---|---|---|
-| **STO Continuum** | yes — continuity of *everything* | yes | says the value, promises no kernel |
-| **STO Control Plane** | yes | yes | precise, cold, infrastructural |
-| **STO Carryover** / **STO Relay** | yes | yes | shorter, less solemn |
-| **STO BrainKit** | yes — brain = memory, kit = the setup | yes | keeps the warmth of "brain" and adds the half it was missing |
-| **STO Portable Brain** | yes, by saying it | yes | explicit; the name *is* the tagline, at the cost of length |
-| **STO Brainstem** | yes — the brain plus the wiring | yes | evocative, slightly clinical |
-| **STO Agentic Brain** | no — brain ≠ skills/plugins | no — `claude-sync`'s tagline | warm and instantly readable, which is worth something |
-| **STO Brain** | no | no | same, minus the filler adjective; "agentic" adds no information |
-| keep **agenticOS** | yes, vaguely | crowded | free: the repo is already public under it |
-
-The trap the "brain" family walks into: **memory is the crowded half**. Eight
-projects do agent memory; the thing none of them does is carry the *setup* — the
-skills, plugins and settings — in the same private repo. A name that says brain
-and nothing else sells the half you would have to win on someone else's turf. The
-fix is not to drop the metaphor, it is to pair it with the other half
-(`BrainKit`) or to state the portability outright (`Portable Brain`).
-
-Implementation note if the name changes: keep the TUI wordmark as plain `STO`.
-`WORDMARK` is hand-built Block Elements glyphs and only `S`, `T` and `O` exist —
-any new word means drawing a new glyph set by hand, for a banner nobody asked to
-change. The command stays `sto` in every case.
-
-Whatever wins, the tagline carries the weight: *shared memory and setup for
-Claude Code, across your machines, in a repo you own.*
+One implementation note survives the pruning, because it is still true of any
+future rename: keep the TUI wordmark as plain `STO`. `WORDMARK` is hand-built
+Block Elements glyphs and only `S`, `T` and `O` exist — a new word means drawing
+a new glyph set by hand.
 
 ---
 
