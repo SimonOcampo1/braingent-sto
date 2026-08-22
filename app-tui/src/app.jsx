@@ -1,488 +1,252 @@
 /**
- * The Ink front-end of the STO home: the same facts `sto ui` paints, laid out
- * as the prototype draws them.
+ * The Ink front-end of the STO TUI: the same facts `sto ui` paints, laid out
+ * the way the prototype draws them.
  *
  * It owns no rules. Every number, every string and the accent colour come from
- * `GET /api/home`, which is the same Python `ui.home_lines()` reads — so the
- * two front-ends cannot drift on what "to push" counts or which side of a
- * parity a skill falls on. This file decides how it looks and nothing else.
+ * the API, which is the same Python the terminal TUI reads — so the two cannot
+ * drift on what "to push" counts or which side of a parity a skill falls on.
+ * This app decides how it looks and what a key does, and nothing else.
  *
  * It is optional. `sto ui` runs on Python stdlib whether or not Node exists on
  * the machine; this is the flavour you pick, not the one you need.
  */
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { spawn } from "node:child_process";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { Box, Text, render, useApp, useInput } from "ink";
 
+import { ACCENTS, Key, Rule, Wordmark } from "./theme.jsx";
+import Home, { WIDE } from "./home.jsx";
+import { Memories, Sessions } from "./lists.jsx";
+
 const PORT = process.env.STO_SESSIONS_PORT || "8765";
-const API = `http://127.0.0.1:${PORT}/api/home`;
+const API = `http://127.0.0.1:${PORT}/api`;
+const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 
-// ── the wordmark ──
-// A 7×6 pixel face, drawn with `█` and nothing else.
-//
-// `ui.py` bevels its glyphs with ▄ and ▀ to buy height out of five rows. The
-// prototype's letters are flat-topped pixels — no bevel anywhere — so this set
-// is redrawn square and one row taller instead of imported. Every glyph is
-// exactly GW columns: the shadow pass composites on a character grid and a
-// short row would shift everything after it.
-//
-// Block Elements are fixed width in Unicode, which is the whole reason the
-// arithmetic works; an "ambiguous-width" character (▰, any emoji) would count
-// as one code point and take two columns.
-const GW = 7;
-const GLYPHS = {
-  B: ["██████ ", "██   ██", "██████ ", "██   ██", "██   ██", "██████ "],
-  R: ["██████ ", "██   ██", "██████ ", "██  ██ ", "██   ██", "██   ██"],
-  A: [" █████ ", "██   ██", "██   ██", "███████", "██   ██", "██   ██"],
-  I: ["███████", "  ██   ", "  ██   ", "  ██   ", "  ██   ", "███████"],
-  N: ["██   ██", "███  ██", "████ ██", "██ ████", "██  ███", "██   ██"],
-  G: [" █████ ", "██   ██", "██     ", "██  ███", "██   ██", " █████ "],
-  E: ["███████", "██     ", "█████  ", "██     ", "██     ", "███████"],
-  T: ["███████", "  ██   ", "  ██   ", "  ██   ", "  ██   ", "  ██   "],
-  S: [" ██████", "██     ", "██████ ", "     ██", "     ██", "██████ "],
-  O: [" █████ ", "██   ██", "██   ██", "██   ██", "██   ██", " █████ "],
-  " ": ["   ", "   ", "   ", "   ", "   ", "   "],
-};
+/** How wide and how tall to draw. `process.stdout.columns` is undefined when
+ *  the render is piped rather than shown — which is how a screenshot gets
+ *  taken — so the environment gets a say before the fallback. */
+const termWidth = () => process.stdout.columns || Number(process.env.COLUMNS) || 100;
+const termRows = () => process.stdout.rows || Number(process.env.LINES) || 40;
 
-/** A word as rows of `"main" | "shadow" | null` cells.
- *
- * The prototype gives every letter an outline echoed up and to the right. A
- * terminal cannot draw a hairline, but it can stamp the same word one cell
- * up-right in a dim colour and let the bright one land on top — at this
- * resolution that reads as the same depth. Hence a grid and not six strings:
- * a row mixes the two colours, so it cannot be one `<Text>`.
- */
-function stamp(word) {
-  const rows = GLYPHS.B.length;
-  const glyphs = [...word].map((ch) => GLYPHS[ch]);
-  const w = glyphs.reduce((a, g) => a + g[0].length + 1, 0); // +1 gap per glyph
-  const grid = Array.from({ length: rows + 1 }, () => Array(w + 1).fill(null));
+const TABS = [
+  { key: "1", id: "home", label: "tab_home" },
+  { key: "2", id: "sessions", label: "tab_sessions", api: "/sessions" },
+  { key: "3", id: "memory", label: "tab_memory", api: "/memory" },
+];
 
-  const paint = (dr, dc, layer, skip = () => false) => {
-    let col = dc;
-    for (const g of glyphs) {
-      g.forEach((line, r) => {
-        [...line].forEach((ch, i) => {
-          const y = r + dr, x = col + i;
-          if (ch !== " " && !grid[y][x] && !skip(y, x)) grid[y][x] = layer;
-        });
-      });
-      col += g[0].length + 1;
-    }
-  };
+// ── the chrome ──
 
-  // the letters first: the echo is only allowed into cells they do not want.
-  // The other order eats them — a stroke is two columns wide, so a one-cell
-  // offset overlaps it almost entirely and the word turns into a solid slab.
-  paint(1, 0, "main");
-
-  // the counters stay hollow. An outline runs around the outside of a letter,
-  // so the hole in a B or an O has to stay empty: filled with echo they read
-  // as solid slugs and the word stops being legible at all. `inside` is the
-  // horizontal span each glyph occupies on each row — between its own first
-  // and last lit column, and never across the gap to the next letter.
-  const inside = new Set();
-  let col = 0;
-  for (const g of glyphs) {
-    g.forEach((line, r) => {
-      const lo = line.indexOf("█"), hi = line.lastIndexOf("█");
-      for (let i = lo + 1; i < hi; i++) inside.add(`${r + 1},${col + i}`);
-    });
-    col += g[0].length + 1;
-  }
-  paint(0, 1, "shadow", (y, x) => inside.has(`${y},${x}`));  // up one, right one
-  return grid;
-}
-
-// Four tiers and not two: the whole name is ~101 columns and the `STO` block is
-// 25, so between them sits every ordinary 80-column terminal — which would have
-// got the smallest wordmark with two thirds of the row empty.
-const FULL = stamp("BRAINGENT STO");   // ~101
-const MID = stamp("BRAINGENT");        // ~73, with STO spelled under it
-const SHORT = stamp("STO");            // ~25, with the name above it
-const gridWidth = (g) => g[0].length;
-
-// `sto ui` stores the accent as a raw SGR code; Ink wants a name.
-const ACCENTS = { 36: "cyan", 32: "green", 35: "magenta", 34: "blue", 33: "yellow", 31: "red" };
-
-/** One grid row, as runs of same-layer cells so each run is a single `<Text>`. */
-function StampRow({ cells, accent }) {
-  const runs = [];
-  for (const cell of cells) {
-    const last = runs[runs.length - 1];
-    // ░ and not █ for the echo: at one cell of offset a solid halo reads as
-    // part of the letter, and a lighter texture reads as behind it
-    const ch = cell === "main" ? "█" : cell === "shadow" ? "░" : " ";
-    if (last && last.layer === cell) last.text += ch;
-    else runs.push({ layer: cell, text: ch });
-  }
+function Header({ d, width, t, accent }) {
+  const repo = (d.sync.remote || "").replace(/^https:\/\//, "").replace(/\.git$/, "");
+  const bits = [
+    [null, "braingent STO"],
+    width >= 84 && ["repo", repo],
+    ["agent", d.agent],
+    [t("col_machine"), d.machine],
+  ].filter(Boolean);
   return (
-    <Text>
-      {runs.map((r, i) =>
-        r.layer === "main" ? (
-          <Text key={i} color={accent} bold>{r.text}</Text>
-        ) : r.layer === "shadow" ? (
-          <Text key={i} dimColor>{r.text}</Text>
-        ) : (
-          <Text key={i}>{r.text}</Text>
-        )
-      )}
-    </Text>
-  );
-}
-
-function Wordmark({ width, accent }) {
-  // a wordmark cut in half is worse than a smaller wordmark, so the tiers step
-  // down instead of clipping
-  const grid = [FULL, MID, SHORT].find((g) => width >= gridWidth(g) + 4);
-  if (!grid) return <Text color={accent} bold>braingent STO</Text>;
-  return (
-    <Box flexDirection="column" width={gridWidth(grid)}>
-      {grid === SHORT && <Text bold>braingent</Text>}
-      {grid.map((cells, i) => (
-        <StampRow key={i} cells={cells} accent={accent} />
-      ))}
-      {grid === MID && (
-        <Box justifyContent="flex-end">
-          <Text color={accent} bold>S T O</Text>
-        </Box>
-      )}
+    <Box flexDirection="column">
+      <Box paddingX={1}>
+        {bits.map(([label, value], i) => (
+          <Box key={i}>
+            {/* a dim pipe between segments, not three spaces: at this density
+                whitespace alone reads as one long sentence */}
+            {i > 0 && <Text dimColor>{"  │  "}</Text>}
+            {label && <Text dimColor>{label} </Text>}
+            <Text bold={i === 0} color={i === 0 ? accent : undefined}>{value}</Text>
+          </Box>
+        ))}
+      </Box>
+      <Rule n={width} />
     </Box>
   );
 }
 
-// ── pieces ──
-
-function Panel({ title, accent, children, ...rest }) {
+function Tabs({ tab, t, accent, busy }) {
   return (
-    <Box
-      flexDirection="column"
-      borderStyle="round"
-      borderColor="gray"
-      paddingX={1}
-      {...rest}
-    >
-      <Text color={accent} bold>{title}</Text>
-      <Box flexDirection="column" marginTop={1}>{children}</Box>
-    </Box>
-  );
-}
-
-/** `label:` in dim, the value hard against a fixed column so a stack aligns. */
-function Field({ label, width = 14, children }) {
-  return (
-    <Box>
-      <Box width={width}><Text dimColor>{label}</Text></Box>
-      {children}
-    </Box>
-  );
-}
-
-function Bar({ pct, width = 14, accent }) {
-  const n = Math.max(0, Math.min(width, Math.round(((pct || 0) * width) / 100)));
-  return (
-    <Text>
-      <Text color={accent}>{"█".repeat(n)}</Text>
-      <Text dimColor>{"░".repeat(width - n)}</Text>
-    </Text>
-  );
-}
-
-/** The four parity states of the prototype, as one dot. */
-const DOT = { both: ["●", "green"], local: ["◐", "yellow"], repo: ["◑", "blue"], none: ["○", "gray"] };
-
-function Dot({ local, repo }) {
-  const key = local === repo ? (local === 0 ? "none" : "both") : local > repo ? "local" : "repo";
-  const [glyph, colour] = DOT[key];
-  return <Text color={colour}>{glyph}</Text>;
-}
-
-/** A key cap: reverse video, the way the prototype draws the footer. */
-function Key({ k, label }) {
-  return (
-    <Box marginRight={2}>
-      <Text inverse bold> {k} </Text>
-      <Text dimColor> {label}</Text>
-    </Box>
-  );
-}
-
-function Cell({ w, children, align = "flex-start" }) {
-  return <Box width={w} justifyContent={align}>{children}</Box>;
-}
-
-// ── the home ──
-
-const SIDE = 34;   // the left column; below WIDE the two stack instead
-const WIDE = 92;   // and the whole grid becomes one column
-
-/** The Δ columns of the prototype: how many items only one side has.
- *
- * `skills` is the only module where the engine knows this by name, so it is
- * the only one that gets an exact answer; for the rest the difference between
- * the two file counts is the honest approximation, and it is what the terminal
- * TUI already shows as `148 local · 149 in repo`.
- */
-function deltas(m, d) {
-  if (m.id === "skills") return [d.localOnly.length, d.repoOnly.length];
-  return [Math.max(0, m.localFiles - m.repoFiles), Math.max(0, m.repoFiles - m.localFiles)];
-}
-
-function Home({ d, t, accent, width, busy }) {
-  const sync = d.sync;
-  const wide = width >= WIDE;
-  // one number for "how much of this machine is in the repo": the share of
-  // items that both sides hold, over everything either side holds
-  const totals = d.modules.reduce(
-    (a, m) => {
-      const [dl, dr] = deltas(m, d);
-      return { same: a.same + Math.min(m.localFiles, m.repoFiles), drift: a.drift + dl + dr };
-    },
-    { same: 0, drift: 0 }
-  );
-  const parity = totals.same + totals.drift === 0
-    ? 100
-    : Math.round((100 * totals.same) / (totals.same + totals.drift));
-
-  // `Δ L` / `Δ R` and not the words: the two labels wrap at this width, and
-  // the product already spells these two sides `[L]` and `[R]` inside a module
-  const cols = [
-    [17, "flex-start", ""],
-    [8, "flex-end", t("local")],
-    [9, "flex-end", t("in_repo")],
-    [6, "flex-end", "Δ L"],
-    [6, "flex-end", "Δ R"],
-    [4, "center", ""],
-  ];
-
-  return (
-    <Box flexDirection="column" width={width}>
-      {/* the three facts a header owes: which machine, where it syncs, which
-          agent it reads. The name is the wordmark's job, not this line's. */}
-      <Box justifyContent="space-between" paddingX={1}>
-        <Text>
-          <Text dimColor>machine </Text>
-          <Text bold>{d.machine}</Text>
-        </Text>
-        {wide && (
-          <Text dimColor>
-            {(sync.remote || "").replace(/^https:\/\//, "").replace(/\.git$/, "")}
+    <Box paddingX={1} marginY={1}>
+      {TABS.map((x, i) => (
+        <Box key={x.id} marginRight={3}>
+          <Text inverse={i === tab} bold={i === tab} dimColor={i !== tab}> {x.key} </Text>
+          <Text color={i === tab ? accent : undefined} bold={i === tab} dimColor={i !== tab}>
+            {" " + t(x.label)}
           </Text>
-        )}
-        <Text>
-          <Text dimColor>agent </Text>
-          <Text color={accent}>{d.agent}</Text>
-          {busy ? <Text color="yellow"> ●</Text> : null}
-        </Text>
-      </Box>
-
-      <Box paddingX={1} marginTop={1}>
-        <Wordmark width={width} accent={accent} />
-      </Box>
-
-      {/* two rows of two, not two columns: stacked columns leave the panels of
-          the shorter one floating against nothing, which is what the grid of
-          the prototype does not do */}
-      <Box
-        marginTop={1}
-        width="100%"
-        flexDirection={wide ? "row" : "column"}
-        gap={1}
-        alignItems={wide ? "stretch" : undefined}
-      >
-        <Panel title={t("sec_sync")} accent={accent} width={wide ? SIDE : undefined} flexShrink={0}>
-          {/* the count and what it is made of on adjacent lines: the number is
-              the one the button carries, the words under it are why */}
-          {[["to_push", sync.toPush, sync.pushParts],
-            ["to_pull", sync.toPull, sync.pullParts]].map(([k, n, parts]) => (
-            <Box key={k} flexDirection="column" marginBottom={1}>
-              <Field label={t(k)}>
-                <Text color={n ? accent : undefined} bold={!!n}>{n}</Text>
-              </Field>
-              {/* one per line and not joined: the rail is 34 columns and a
-                  joined list wraps mid-item, with the tail unindented */}
-              {(parts.length ? parts : [t("nothing")]).map((part) => (
-                <Text key={part} dimColor>{"  " + part}</Text>
-              ))}
-            </Box>
-          ))}
-          <Field label={t("last_sync")}><Text>{sync.lastSync}</Text></Field>
-          <Box>
-            <Text color={accent}>↑{sync.ahead} ↓{sync.behind}</Text>
-            <Text dimColor> · </Text>
-            <Text color={sync.dirty ? "yellow" : "green"}>
-              {sync.dirty ? t("dirty") : t("clean")}
-            </Text>
-          </Box>
-          <Text dimColor>{t("checked", { ago: sync.checkedAgo })}</Text>
-          {!!d.update.available && (
-            <Text color="green">▲ {t("update_available")}: {d.update.available}</Text>
-          )}
-        </Panel>
-
-        <Panel title={t("sec_parity")} accent={accent} flexGrow={1}>
-          <Box>
-            {cols.map(([w, align, label], i) => (
-              <Cell key={i} w={w} align={align}><Text dimColor>{label}</Text></Cell>
-            ))}
-          </Box>
-          {d.modules.map((m) => {
-            const [dl, dr] = deltas(m, d);
-            return (
-              <Box key={m.id}>
-                <Cell w={cols[0][0]}>
-                  <Text dimColor={!m.enabled}>{m.id}</Text>
-                </Cell>
-                <Cell w={cols[1][0]} align="flex-end"><Text>{m.localFiles}</Text></Cell>
-                <Cell w={cols[2][0]} align="flex-end"><Text>{m.repoFiles}</Text></Cell>
-                <Cell w={cols[3][0]} align="flex-end">
-                  <Text color={dl ? "yellow" : undefined} dimColor={!dl}>{dl || "·"}</Text>
-                </Cell>
-                <Cell w={cols[4][0]} align="flex-end">
-                  <Text color={dr ? "green" : undefined} dimColor={!dr}>{dr || "·"}</Text>
-                </Cell>
-                <Cell w={cols[5][0]} align="center">
-                  <Dot local={m.localFiles} repo={m.repoFiles} />
-                </Cell>
-              </Box>
-            );
-          })}
-          {/* the legend only when something is out of parity: on a tidy repo it
-              would be four states none of which are on screen */}
-          {/* the legend only when a row on this table is out of parity. `gone`
-              is deliberately not part of the test: it counts skills git saw
-              deleted at some point, and none of them is a row here — it would
-              light up four states on a screen showing none of them. */}
-          {d.modules.some((m) => deltas(m, d).some(Boolean)) && (
-            <Box marginTop={1}>
-              {/* one Text and not a wrapping row of them: `gap` between flex
-                  children of a bordered box costs a blank line per wrap */}
-              <Text>
-                {[["●", "green", "st_both"], ["◐", "yellow", "st_local"],
-                  ["◑", "blue", "st_repo"], ["✕", "red", "st_gone"]].map(([g, c, k], i) => (
-                  <Text key={k}>
-                    {i ? "   " : ""}
-                    <Text color={c}>{g}</Text>
-                    <Text dimColor> {t(k)}</Text>
-                  </Text>
-                ))}
-              </Text>
-            </Box>
-          )}
-        </Panel>
-      </Box>
-
-      <Box
-        marginTop={1}
-        width="100%"
-        flexDirection={wide ? "row" : "column"}
-        gap={1}
-        alignItems={wide ? "stretch" : undefined}
-      >
-        <Panel title={t("sec_usage")} accent={accent} width={wide ? SIDE : undefined} flexShrink={0}>
-          {/* name and reset above, bar below: side by side the longest label
-              pushes the bar past the panel and Ink shortens the bar to fit,
-              so two limits end up drawn on two different scales */}
-          {(d.usage.limits || []).map((l, i) => (
-            <Box key={i} flexDirection="column" marginBottom={i ? 0 : 1}>
-              <Box justifyContent="space-between">
-                <Text dimColor>{(l.label || l.kind || "?").replace(/_/g, " ")}</Text>
-                <Text dimColor>{l.resets}</Text>
-              </Box>
-              <Box>
-                <Bar pct={l.percent} accent={accent} width={22} />
-                <Text color="yellow">{String(l.percent ?? 0).padStart(4)}%</Text>
-              </Box>
-            </Box>
-          ))}
-          {(d.usage.limits || []).length === 0 && <Text dimColor>{t("no_usage")}</Text>}
-        </Panel>
-
-        <Panel title={t("sec_general")} accent={accent} flexGrow={1}>
-          <Box>
-            <Box width={17}><Text dimColor>{t("st_both")}</Text></Box>
-            <Bar pct={parity} accent={accent} width={20} />
-            <Text color="yellow">{String(parity).padStart(4)}%</Text>
-          </Box>
-          <Box marginTop={1} gap={2} flexWrap="wrap">
-            {d.counters.map((c) => (
-              <Text key={c.key}>
-                <Text color={accent} bold>{c.n}</Text>
-                <Text dimColor> {t(c.key)}</Text>
-              </Text>
-            ))}
-          </Box>
-          <Box marginTop={1}>
-            <Box width={17}><Text dimColor>{t("sec_machines")}</Text></Box>
-            <Text>
-              {d.machines.map((m) => m.name + (m.local ? ` (${t("this_one")})` : "")).join(" · ")}
-            </Text>
-          </Box>
-          <Box>
-            <Box width={17}><Text dimColor>{t("sec_always")}</Text></Box>
-            <Text>
-              {Object.entries(d.knowledge)
-                .map(([k, n]) => `${n} ${t("n_" + k, {}) || k}`)
-                .join(" · ")}
-            </Text>
-          </Box>
-        </Panel>
-      </Box>
-
-      <Box marginTop={1} paddingX={1} flexWrap="wrap">
-        <Key k="p" label="PUSH" />
-        <Key k="l" label="PULL" />
-        <Key k="f" label="FETCH" />
-        <Key k="r" label={t("k_reload")} />
-        <Key k="q" label={t("k_quit")} />
+        </Box>
+      ))}
+      <Box flexGrow={1} justifyContent="flex-end">
+        <Text color="yellow">{busy ? "⟳" : " "}</Text>
       </Box>
     </Box>
   );
 }
 
-// ── shell ──
+function Actions({ d, t, accent, flash }) {
+  const s = d.sync;
+  if (flash) return <Box paddingX={1}><Text color="yellow">{flash}</Text></Box>;
+  return (
+    <Box paddingX={1} flexWrap="wrap">
+      <Key k="p" label={`PUSH ${s.toPush}`} on={s.toPush > 0 || s.ahead > 0} accent={accent} />
+      <Key k="l" label={`PULL ${s.toPull}`} on={s.toPull > 0 || s.behind > 0} accent={accent} />
+      <Key k="f" label="FETCH" accent={accent} />
+      <Key k="g" label={t("graph_button")} accent={accent} />
+      <Key k="r" label={t("k_reload")} accent={accent} />
+      <Key k="q" label={t("k_quit")} accent={accent} />
+    </Box>
+  );
+}
 
-/** How wide to draw. `process.stdout.columns` is undefined when the render is
- *  piped rather than shown, which is exactly how a screenshot gets taken, so
- *  `COLUMNS` gets a say before the fallback. */
-const termWidth = () =>
-  process.stdout.columns || Number(process.env.COLUMNS) || 100;
+/** Nothing runs until you answer. The counts are the ones already on the home;
+ *  the per-file manifest lives in the stdlib TUI, and this says so by showing
+ *  exactly what it knows instead of implying it checked more. */
+function Confirm({ what, d, t, accent }) {
+  const s = d.sync;
+  const [n, parts] = what === "push" ? [s.toPush, s.pushParts] : [s.toPull, s.pullParts];
+  return (
+    <Box flexDirection="column" borderStyle="round" borderColor="yellow"
+         paddingX={2} paddingY={1} marginX={1}>
+      <Text bold color="yellow">{what === "push" ? "▲ PUSH" : "▼ PULL"} · {n}</Text>
+      <Box marginTop={1} flexDirection="column">
+        {(parts.length ? parts : [t("nothing")]).map((p) => (
+          <Text key={p} dimColor>{p}</Text>
+        ))}
+      </Box>
+      <Box marginTop={1}>
+        <Key k="y" label={what.toUpperCase()} accent={accent} />
+        <Key k="Esc" label={t("k_quit")} accent={accent} />
+      </Box>
+    </Box>
+  );
+}
+
+// ── the app ──
 
 function App() {
   const { exit } = useApp();
   const [d, setD] = useState(null);
   const [err, setErr] = useState(null);
   const [busy, setBusy] = useState(true);
-  const [width, setWidth] = useState(termWidth());
+  const [tab, setTab] = useState(Number(process.env.STO_TUI_TAB) || 0);
+  const [rows, setRows] = useState({});          // per-tab payloads, fetched lazily
+  const [sel, setSel] = useState([0, 0, 0]);     // one cursor per tab
+  const [memSel, setMemSel] = useState(0);
+  const [confirm, setConfirm] = useState(null);
+  const [flash, setFlash] = useState("");
+  const [size, setSize] = useState({ w: termWidth(), h: termRows() });
+  const alive = useRef(true);
 
-  async function load(fetchRemote = false) {
+  const say = useCallback((msg) => {
+    setFlash(msg);
+    setTimeout(() => alive.current && setFlash(""), 2500);
+  }, []);
+
+  const load = useCallback(async (fetchRemote = false) => {
     setBusy(true);
     try {
-      const r = await fetch(API + (fetchRemote ? "?fetch=1" : ""));
-      if (!r.ok) throw new Error(`${r.status}`);
+      const r = await fetch(`${API}/home${fetchRemote ? "?fetch=1" : ""}`);
+      if (!r.ok) throw new Error(String(r.status));
       setD(await r.json());
       setErr(null);
     } catch (e) {
       setErr(e.message);
     }
     setBusy(false);
-  }
+  }, []);
 
-  useEffect(() => { load(); }, []);
+  // a list tab pays for its data the first time it is opened, not on start-up:
+  // /memory walks every memory in the repo and the home never needs it
+  const loadTab = useCallback(async (i) => {
+    const spec = TABS[i];
+    if (!spec.api || rows[spec.id]) return;
+    setBusy(true);
+    try {
+      const r = await fetch(API + spec.api);
+      const data = await r.json();
+      setRows((prev) => ({ ...prev, [spec.id]: data }));
+    } catch { /* the screen shows empty; the home still works */ }
+    setBusy(false);
+  }, [rows]);
+
+  useEffect(() => { load(); return () => { alive.current = false; }; }, [load]);
+  useEffect(() => { loadTab(tab); }, [tab, loadTab]);
   useEffect(() => {
-    const on = () => setWidth(termWidth());
+    const on = () => setSize({ w: termWidth(), h: termRows() });
     process.stdout.on("resize", on);
     return () => process.stdout.off("resize", on);
   }, []);
 
-  // isActive: piped into a file there is no raw mode to put stdin into, and
-  // Ink throws rather than degrade. Rendering one frame to a pipe is how the
-  // screen gets captured, so it has to survive not having a keyboard.
+  const move = (delta, total) => {
+    if (tab === 2 && size.w >= 90) {
+      // on the memories screen the arrows walk the memories of the project and
+      // Tab changes project: the right-hand list is the one you came to read
+      setMemSel((m) => Math.max(0, Math.min(total - 1, m + delta)));
+      return;
+    }
+    setSel((s) => {
+      const next = [...s];
+      next[tab] = Math.max(0, Math.min(total - 1, next[tab] + delta));
+      return next;
+    });
+  };
+
+  async function run(what) {
+    setConfirm(null);
+    say(t("s_" + (what === "push" ? "push" : "pull")) || "…");
+    try {
+      const r = await fetch(`${API}/sync/${what}`, { method: "POST" });
+      const out = await r.json();
+      say(out.error || out.message || "ok");
+    } catch (e) {
+      say(String(e.message));
+    }
+    load();
+  }
+
+  const list = d ? (rows[TABS[tab].id] || []) : [];
+  const groups = tab === 2 ? list : [];
+  const mems = groups[sel[2]] ? groups[sel[2]].memories : [];
+
   useInput(
-    (input) => {
+    (input, key) => {
+      if (confirm) {
+        if (input === "y") run(confirm);
+        else if (key.escape || input === "n") setConfirm(null);
+        return;
+      }
+      const digit = TABS.findIndex((x) => x.key === input);
+      if (digit >= 0) return setTab(digit);
+      if (key.tab) {
+        if (tab === 2) setSel((s) => {
+          const next = [...s];
+          next[2] = (next[2] + 1) % Math.max(1, groups.length);
+          return next;
+        });
+        else setTab((x) => (x + 1) % TABS.length);
+        setMemSel(0);
+        return;
+      }
+      if (key.upArrow) return move(-1, tab === 2 ? mems.length : list.length);
+      if (key.downArrow) return move(1, tab === 2 ? mems.length : list.length);
+      if (key.pageUp) return move(-10, tab === 2 ? mems.length : list.length);
+      if (key.pageDown) return move(10, tab === 2 ? mems.length : list.length);
       if (input === "q") exit();
-      if (input === "r") load();
+      if (input === "r") { setRows({}); load(); }
       if (input === "f") load(true);
+      if (input === "p" && d) setConfirm("push");
+      if (input === "l" && d) setConfirm("pull");
+      if (input === "g") {
+        // the graph is a real window, and `sto graph --open` is what already
+        // knows how to find a chrome-less browser and fall back to the default
+        say(t("graph_opening"));
+        spawn(process.platform === "win32" ? "python" : "python3",
+              [path.join(REPO, "scripts", "cli.py"), "graph", "--open"],
+              { detached: true, stdio: "ignore", cwd: REPO }).unref();
+      }
     },
+    // piped into a file there is no raw mode to put stdin into, and Ink throws
+    // rather than degrade. Rendering one frame to a pipe is how the screen gets
+    // captured, so it has to survive not having a keyboard.
     { isActive: Boolean(process.stdin.isTTY) }
   );
 
@@ -500,8 +264,33 @@ function App() {
     if (vars) for (const [k, v] of Object.entries(vars)) s = s.replaceAll(`{${k}}`, v);
     return s;
   };
+  const accent = ACCENTS[d.accent] || "cyan";
+  // the chrome costs a fixed number of rows; whatever is left is the list's
+  const viewport = Math.max(3, size.h - (tab === 0 ? 0 : 14));
+
   return (
-    <Home d={d} t={t} accent={ACCENTS[d.accent] || "cyan"} width={width} busy={busy} />
+    <Box flexDirection="column" width={size.w}>
+      <Header d={d} width={size.w} t={t} accent={accent} />
+      {tab === 0 && size.h > 26 && (
+        <Box paddingX={1} marginTop={1}><Wordmark width={size.w} accent={accent} /></Box>
+      )}
+      <Tabs tab={tab} t={t} accent={accent} busy={busy} />
+
+      {tab === 0 && <Home d={d} t={t} accent={accent} width={size.w} />}
+      {tab === 1 && (
+        <Sessions rows={list} sel={sel[1]} size={viewport} t={t} accent={accent}
+                  width={size.w} />
+      )}
+      {tab === 2 && (
+        <Memories groups={groups} sel={sel[2]} memSel={memSel} size={viewport}
+                  t={t} accent={accent} width={size.w} />
+      )}
+
+      <Box marginTop={1}><Rule n={size.w} /></Box>
+      {confirm
+        ? <Confirm what={confirm} d={d} t={t} accent={accent} />
+        : <Actions d={d} t={t} accent={accent} flash={flash} />}
+    </Box>
   );
 }
 
