@@ -13,6 +13,7 @@ import sys
 from pathlib import Path, PurePath
 
 sys.path.insert(0, str(Path(__file__).parent))  # so `import dream_extract` works
+import agents
 import dream_extract as dx
 
 MAX_SESSIONS = 500
@@ -299,7 +300,10 @@ def find_path_by_id(sid: str, projects_dir=None, knowledge_dir=None):
     return None
 
 
-CLAUDE_DIR = Path.home() / ".claude"
+# The agent's home comes from `agents.py`, the one place that knows the shape of
+# an agent. Kept under the old name: every call site already threads it through
+# a `claude_dir=` parameter, and renaming 16 of those buys nothing.
+CLAUDE_DIR = agents.home()
 GRAPH_JSON = Path(__file__).parent.parent / "graphify-out" / "graph.json"
 DESC_CAP = 300
 
@@ -333,12 +337,12 @@ def _frontmatter(text: str) -> dict:
 
 def _skill_paths(claude_dir: Path):
     """Yield (source, skill_dir) for personal skills + installed-plugin skills."""
-    skills_root = claude_dir / "skills"
+    skills_root = claude_dir / agents.active()["skills"]
     if skills_root.is_dir():
         for d in sorted(skills_root.iterdir()):
             if (d / "SKILL.md").is_file():
                 yield "personal", d
-    manifest = claude_dir / "plugins" / "installed_plugins.json"
+    manifest = claude_dir / agents.active()["plugins"] / "installed_plugins.json"
     try:
         plugins = json.loads(manifest.read_text(encoding="utf-8")).get("plugins", {})
     except (OSError, ValueError):

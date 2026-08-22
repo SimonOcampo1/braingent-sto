@@ -4,6 +4,7 @@ import shutil
 import tempfile
 from pathlib import Path
 
+import agents
 import sessions_server as srv
 from sessions_server import (
     session_meta, session_timeline, list_sessions, find_path_by_id,
@@ -369,6 +370,53 @@ def test_the_dropped_lookup_survives_a_repo_git_never_saw():
         finally:
             srv.REPO_ROOT = real_root
             srv._DROPPED.update(real_cache)
+
+
+def test_a_second_agent_is_a_table_entry_and_not_a_patch_across_the_engine():
+    """La prueba del borde: un agente con OTRA carpeta y OTROS nombres de
+    subdirectorio recorre `_skill_paths` sin que el motor sepa que existe.
+
+    Se define acá y no en `AGENTS` a propósito: declarar dónde viven los
+    archivos es necesario y no suficiente — los transcripts todavía tienen que
+    ser un formato que `dream_extract` sepa leer. Enviar una entrada de más
+    seria prometer soporte que no hay.
+    """
+    with tempfile.TemporaryDirectory() as d:
+        casa = Path(d) / ".otroagente"
+        (casa / "habilidades" / "una").mkdir(parents=True)
+        (casa / "habilidades" / "una" / "SKILL.md").write_text(
+            "---\nname: una\ndescription: de otro agente\n---\ncuerpo", encoding="utf-8")
+
+        agents.AGENTS["fake"] = {"label": "Otro Agente", "dir": ".otroagente",
+                                 "skills": "habilidades", "plugins": "extensiones",
+                                 "projects": "sesiones"}
+        real_env = {k: os.environ.get(k) for k in (agents.AGENT_ENV, agents.HOME_ENV)}
+        try:
+            os.environ[agents.AGENT_ENV] = "fake"
+            os.environ[agents.HOME_ENV] = str(casa)
+            assert agents.active_slug() == "fake"
+            assert agents.label() == "Otro Agente"
+            assert agents.home() == casa
+            assert agents.sub("projects") == casa / "sesiones"
+
+            # el motor lo lee sin una sola rama por agente
+            filas = srv.list_skills(claude_dir=agents.home())
+            assert [r["id"] for r in filas] == ["personal:una"], filas
+            assert filas[0]["description"] == "de otro agente"
+        finally:
+            agents.AGENTS.pop("fake", None)
+            for k, v in real_env.items():
+                os.environ.pop(k, None) if v is None else os.environ.update({k: v})
+
+
+def test_an_unknown_agent_falls_back_instead_of_exploding():
+    real = os.environ.get(agents.AGENT_ENV)
+    try:
+        os.environ[agents.AGENT_ENV] = "no-existe"
+        assert agents.active_slug() == agents.DEFAULT
+    finally:
+        os.environ.pop(agents.AGENT_ENV, None) if real is None else \
+            os.environ.update({agents.AGENT_ENV: real})
 
 
 def test_search_sessions():
@@ -1505,4 +1553,6 @@ if __name__ == "__main__":
     test_forget_takes_another_machines_memory_which_no_export_of_ours_reaches()
     test_a_skill_the_other_machine_dropped_reads_apart_from_one_never_pushed()
     test_the_dropped_lookup_survives_a_repo_git_never_saw()
+    test_a_second_agent_is_a_table_entry_and_not_a_patch_across_the_engine()
+    test_an_unknown_agent_falls_back_instead_of_exploding()
     print("OK")

@@ -21,9 +21,11 @@ from collections import Counter
 from datetime import date, datetime, time
 from pathlib import Path
 
+import agents
+
 HOME = Path.home()
 HERMES_HOME = Path(os.environ.get("HERMES_HOME", HOME / "AppData" / "Local" / "hermes"))
-PROJECTS_DIR = Path(os.environ.get("DREAM_PROJECTS_DIR", HOME / ".claude" / "projects"))
+PROJECTS_DIR = Path(os.environ.get("DREAM_PROJECTS_DIR", agents.sub("projects")))
 STATE_DIR = Path(os.environ.get("DREAM_STATE_DIR", HERMES_HOME / "dreaming"))
 MARKER = STATE_DIR / "last_run"
 OUT = STATE_DIR / "distilled.txt"

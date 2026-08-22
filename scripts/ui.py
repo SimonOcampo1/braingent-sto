@@ -421,7 +421,11 @@ def module_lines(st):
     w = max(24, st.get("w", 100) - 2)
     mod = st["mod"]
     items = module_items(mod)
-    out = [_txt(""), _txt(section(t("sec_contents", mod=mod, n=len(items)), w))]
+    # the prototype gave every row an `Agente` column; with one agent that is
+    # 45 identical cells. The header says it once, which is the same promise —
+    # the screen already names an agent before there is a second one
+    out = [_txt(""), _txt(section(t("sec_contents", mod=mod, n=len(items),
+                                    agent=srv.agents.label()), w))]
     if mod not in MODULE_LISTABLE:
         out.append(_txt(cli.c("  " + t("not_deletable", id=mod), cli.DIM)))
     elif any(i.get("where") and i["where"] != "both" for i in items):

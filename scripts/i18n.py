@@ -85,7 +85,7 @@ STRINGS = {
         "inspect_hint": "↵ para ver el contenido de cada módulo",
         "to_push": "Para subir", "to_pull": "Para bajar",
         "nothing": "nada", "files": "archivos",
-        "sec_contents": "{mod} · {n} en esta máquina",
+        "sec_contents": "{mod} · {n} · {agent}",
         "delete_title": "Borrar {what}", "delete_warning":
             "se elimina de esta máquina; vuelve con un pull si está en el repo",
         "not_deletable": "{id}: no se borra desde acá",
@@ -231,7 +231,7 @@ STRINGS = {
         "inspect_hint": "↵ to see what each module holds",
         "to_push": "To push", "to_pull": "To pull",
         "nothing": "nothing", "files": "files",
-        "sec_contents": "{mod} · {n} on this machine",
+        "sec_contents": "{mod} · {n} · {agent}",
         "delete_title": "Delete {what}", "delete_warning":
             "removed from this machine; comes back on pull if it is in the repo",
         "not_deletable": "{id}: cannot be deleted from here",
