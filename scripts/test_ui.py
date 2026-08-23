@@ -2544,6 +2544,64 @@ def test_the_language_switch_reaches_the_whole_frame():
         ui.i18n.LANG = real
 
 
+# ── search_all: one search over the four corpora ──
+
+
+def test_every_term_has_to_hit_somewhere():
+    """A search that returns the union of its terms returns everything. And
+    where a term hits matters more than how often: a note called `textual` is
+    about textual, one that mentions it once in passing is not."""
+    name = ui._score(["textual"], "sto-tui-textual", "", "")
+    body = ui._score(["textual"], "other-note", "", "textual appears here")
+    assert name > body, (name, body)
+    assert ui._score(["textual", "grid"], "sto-tui-textual", "", "") == 0.0
+    assert ui._score(["textual", "grid"], "sto-tui-textual", "", "a grid here") > 0
+
+    # more mentions is worth something, but never as much as being the title
+    many = ui._score(["grid"], "note", "", "grid " * 20)
+    assert body < many < name, (body, many, name)
+
+
+def test_the_index_only_re_reads_what_moved():
+    """0.44 s of vault scanning per keystroke is not a search box. The index is
+    derived from files that stay the source of truth, so it can be wrong only
+    for as long as an mtime is."""
+    import os
+    with tempfile.TemporaryDirectory() as tmp:
+        f = Path(tmp) / "note.md"
+        f.write_text("first body", encoding="utf-8")
+        ui._INDEX.clear()
+        first = ui._indexed([f])
+        assert "first body" in first[str(f)][1]
+
+        reads = []
+        real = Path.read_text
+        Path.read_text = lambda self, **kw: (reads.append(self), real(self, **kw))[1]
+        try:
+            ui._indexed([f])
+            assert reads == [], "an unchanged file was read again"
+            f.write_text("second body", encoding="utf-8")
+            os.utime(f, (0, time.time() + 10))
+            again = ui._indexed([f])
+            assert reads, "a changed file was not re-read"
+            assert "second body" in again[str(f)][1]
+        finally:
+            Path.read_text = real
+
+
+def test_search_all_labels_every_hit_with_its_kind():
+    """Four corpora into one list, and the row has to say which one it came
+    from -- that is the whole difference between a search and a pile."""
+    hits = ui.search_all("sto")
+    assert isinstance(hits, list)
+    assert all({"kind", "label", "sub", "score", "mtime", "ref"} <= set(h)
+               for h in hits), hits[:1]
+    assert all(h["kind"] in ("session", "memory", "tool", "note") for h in hits)
+    assert hits == sorted(hits, key=lambda h: (-h["score"], -h["mtime"]))
+    assert ui.search_all("") == []
+    assert ui.search_all("   ") == []
+
+
 if __name__ == "__main__":
     import sys
     fns = [v for k, v in sorted(globals().items())

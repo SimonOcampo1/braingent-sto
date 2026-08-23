@@ -460,6 +460,160 @@ def module_items(mod, claude_dir=None, repo_config=None):
     return out
 
 
+# ── one search over everything ──
+#
+# Here and not in a TUI: nothing in a flavour recomputes a rule, so the two
+# cannot disagree about an answer -- and this is the function `sto find`
+# (ROADMAP 8) would be, rather than a third copy of a ranking.
+#
+# Measured on a real repo, one uncached pass is 0.83 s: the vault alone is
+# 0.44 s and walking the config modules another 0.26 s. Per keystroke that is a
+# stutter, not a search box, so both are cached and the caller debounces.
+
+_INDEX: dict[str, tuple[float, str]] = {}
+_TOOLS: dict = {"stamp": None, "rows": []}
+
+
+def _indexed(paths):
+    """`{path: (mtime, lowercased text)}`, re-reading only what moved.
+
+    Derived and disposable: the files stay the source of truth, so the worst a
+    stale entry can be is as stale as an mtime. Entries for files that have
+    since been deleted are left in the dict rather than swept -- this is called
+    with one corpus at a time, so "not in the argument" does not mean "gone",
+    and a few dead strings cost less than being wrong about that.
+    """
+    out = {}
+    for path in paths:
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            continue
+        key = str(path)
+        hit = _INDEX.get(key)
+        if hit is None or hit[0] != mtime:
+            try:
+                hit = (mtime, path.read_text(encoding="utf-8",
+                                             errors="replace").lower())
+            except OSError:
+                continue
+            _INDEX[key] = hit
+        out[key] = hit
+    return out
+
+
+def _score(terms, name, desc, body):
+    """How well one item answers the query. `0.0` means it does not.
+
+    Where a term hits weighs more than how often: a note *called* `textual` is
+    about textual, one that mentions it in passing is not. The count still
+    counts, capped, so it can break a tie between two bodies but never outrank
+    a title.
+
+    Every term has to land somewhere or the item is out. Searching two words
+    and getting back the union of both is how a search returns everything.
+    """
+    total = 0.0
+    for term in terms:
+        best = 0.0
+        for text, weight in ((name, 3.0), (desc, 2.0), (body, 1.0)):
+            if text and term in text:
+                best = max(best, weight + min(text.count(term), 10) * 0.1)
+        if not best:
+            return 0.0
+        total += best
+    return total
+
+
+def _tool_rows():
+    """Every config module's items, with the module on each row.
+
+    Cached against the mtimes of the module entries: walking them is a quarter
+    of a second, which is fine once and impossible per keystroke. `plugins` has
+    no entry to stat -- it is a manifest, not a directory -- so it rides on the
+    others' stamp and refreshes with them.
+    """
+    stamp = []
+    for entries in srv.CONFIG_MODULES.values():
+        for entry in entries:
+            try:
+                stamp.append((srv.CLAUDE_DIR / entry).stat().st_mtime)
+            except OSError:
+                stamp.append(0.0)
+    stamp = tuple(stamp)
+    if _TOOLS["stamp"] != stamp:
+        _TOOLS["rows"] = [dict(row, module=mod)
+                          for mod in srv.CONFIG_MODULES
+                          for row in module_items(mod)]
+        _TOOLS["stamp"] = stamp
+    return _TOOLS["rows"]
+
+
+def search_all(q, limit=40):
+    """Sessions, memories, tools and vault notes, ranked into one list.
+
+    Each hit says which corpus it came from, because that is the whole
+    difference between a search and a pile.
+    """
+    terms = [x for x in q.strip().lower().split() if x]
+    if not terms:
+        return []
+    hits = []
+
+    # `search_sessions` picks the candidates -- it is typo-tolerant and it
+    # searches prompt bodies through an index it already keeps -- but the score
+    # is recomputed here. Its own is on another scale entirely, and ranking the
+    # corpora against each other with it buried every memory and note under
+    # forty sessions. The floor is for the hits it found through a typo, which
+    # `_score` cannot see and would drop.
+    rows, prompts = cli.cached_sessions()
+    for r in srv.search_sessions(q, rows=rows, limit=limit):
+        score = _score(terms, r["title"].lower(), "", prompts.get(r["id"], ""))
+        hits.append({"kind": "session", "label": r["title"], "sub": r["project"],
+                     "score": max(score, 1.0), "mtime": r["mtime"], "ref": r})
+
+    memories = {}
+    for p in srv.list_memory():
+        for m in p["memories"]:
+            path = (srv.KNOWLEDGE_MEMORY / p["project"] / m["machine"]
+                    / f"{m['slug']}.md")
+            memories[path] = (p, m)
+    text = _indexed(memories)
+    for path, (p, m) in memories.items():
+        body = text.get(str(path), (0.0, ""))[1]
+        score = _score(terms, m["slug"].lower(),
+                       (m["description"] or "").lower(), body)
+        if score:
+            hits.append({"kind": "memory", "label": m["slug"],
+                         "sub": f"{srv._proj_label(p['project'])} \u00b7 {m['machine']}",
+                         "score": score, "mtime": m["mtime"],
+                         "ref": {"project": p["project"], "slug": m["slug"],
+                                 "machine": m["machine"]}})
+
+    notes = sorted((srv.REPO_ROOT / "vault").rglob("*.md"))
+    text = _indexed(notes)
+    for path in notes:
+        mtime, body = text.get(str(path), (0.0, ""))
+        score = _score(terms, path.stem.lower(), "", body)
+        if score:
+            hits.append({"kind": "note", "label": path.stem,
+                         "sub": path.parent.name, "score": score,
+                         "mtime": mtime, "ref": {"path": str(path)}})
+
+    for row in _tool_rows():
+        # a tool has a name and a description and no body: it is found by what
+        # it is called and by what it says it does
+        score = _score(terms, row["label"].lower(), (row["desc"] or "").lower(), "")
+        if score:
+            hits.append({"kind": "tool", "label": row["label"],
+                         "sub": row["module"], "score": score, "mtime": 0.0,
+                         "ref": {"module": row["module"], "id": row["id"],
+                                 "what": row["what"]}})
+
+    hits.sort(key=lambda h: (-h["score"], -h["mtime"]))
+    return hits[:limit]
+
+
 def module_lines(st):
     """The inside-a-module view: title, warning and the list of items."""
     w = max(24, st.get("w", 100) - 2)
