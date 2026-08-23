@@ -220,5 +220,6 @@ Toast.-error { border-left: outer $error; }
     grid-size: 1 1;
     grid-columns: 1fr;
 }
-.narrow #wordmark { display: none; }
-.narrow #session-detail, .narrow #skill-detail { display: none; }
+/* the banner is hidden by the app, not here: it already decides on height as
+ * well as width, and two places deciding one thing is one place too many */
+.narrow #skill-detail { display: none; }

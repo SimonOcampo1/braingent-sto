@@ -931,7 +931,8 @@ class StoApp(App):
         # the rows: on a short window the table under it is worth more
         mark = self.query_one("#wordmark", Wordmark)
         mark.display = (self.tab == HOME and self.size.height >= 26
-                        and self.size.width >= WORDMARK_W + 4)
+                        and self.size.width >= WORDMARK_W + 4
+                        and not self.has_class("narrow"))
         for i, pane in enumerate(self.panes):
             pane.display = i == self.tab
         self.paint_tabs()
