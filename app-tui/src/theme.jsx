@@ -120,13 +120,14 @@ export function Bar({ pct, width = 20, accent, warn = 100 }) {
   const tip = EIGHTHS[Math.floor((exact - full) * 8)];
   const colour = (pct || 0) >= warn ? "red" : accent;
   const rest = Math.max(0, width - full - (tip ? 1 : 0));
-  // painted with background colour rather than drawn with block characters:
-  // `░` as a track is a field of dots you can see the terminal through, and
-  // the partial tip left a seam where its unlit half fell outside the track.
-  // Backgrounds have no texture and the tip sits on one.
+  // The track is painted, not drawn: `░` is a field of dots you can see the
+  // terminal through, and next to a border that is one crisp line it reads as
+  // the dirty thing on the page. The fill stays a block character so the bar
+  // still says something with colour off, and the partial tip sits on the
+  // painted track, which is what makes the eighth exact instead of a seam.
   return (
     <Text>
-      <Text backgroundColor={colour}>{" ".repeat(full)}</Text>
+      <Text color={colour}>{"█".repeat(full)}</Text>
       {!!tip && <Text color={colour} backgroundColor="gray">{tip}</Text>}
       <Text backgroundColor="gray">{" ".repeat(rest)}</Text>
     </Text>

@@ -62,9 +62,14 @@ export function Config({ d, t, accent, width, sel, rows }) {
                 <Text color={accent} bold={on}>{t(accentName(d))}</Text>
               </Field>
               <Box marginLeft={2}>
+                {/* the one in use is full strength, the rest are dimmed: a
+                    swatch strip needs to say which one is on without a cursor */}
                 {d.prefs.accents.map(([, code]) => (
-                  <Text key={code} backgroundColor={code === d.prefs.accent ? "white" : undefined}>
-                    <Text color={ANSI[code]}>{"██"}</Text>
+                  <Text key={code} color={ANSI[code]} dimColor={code !== d.prefs.accent}>
+                    {/* `──` and not another solid glyph for the unused ones:
+                        every candidate at that weight is ambiguous-width in
+                        Unicode and would slide the strip by a column */}
+                    {code === d.prefs.accent ? "██" : "──"}
                   </Text>
                 ))}
               </Box>
@@ -105,10 +110,10 @@ export function Config({ d, t, accent, width, sel, rows }) {
         if (r.kind === "fixed")
           return (
             <Box key={i}>
-              <Text color="green"> ●</Text>
-              <Field label={" " + t("n_" + r.id)} width={lab}>
+              <Text color="green"> ● </Text>
+              <Field label={t("n_" + r.id)} width={lab - 2}>
                 <Text>
-                  {d.knowledge[r.id]}
+                  <Text bold>{String(d.knowledge[r.id]).padStart(4)}</Text>
                   <Text dimColor>{"   " + t("always_syncing")}</Text>
                 </Text>
               </Field>
@@ -118,15 +123,21 @@ export function Config({ d, t, accent, width, sel, rows }) {
         return (
           <Box key={i}>
             {mark}
-            <Field label={r.id} width={lab}>
+            <Field label={r.id} width={lab - 2}>
+              <Text color={m.enabled ? accent : undefined} dimColor={!m.enabled}>
+                {m.enabled ? "[x]" : "[ ]"}
+              </Text>
+              <Box width={14}>
+                <Text dimColor>{"  " + (m.enabled ? t("syncing") : t("not_syncing"))}</Text>
+              </Box>
+              {/* the numbers padded to a fixed width, which aligns the words
+                  after them too — separate flex columns for each overflowed
+                  the panel and wrapped "in repo" onto its own line */}
               <Text>
-                <Text color={m.enabled ? accent : undefined} dimColor={!m.enabled}>
-                  {m.enabled ? "[x]" : "[ ]"}
-                </Text>
-                <Text dimColor>
-                  {"  " + (m.enabled ? t("syncing") : t("not_syncing"))}
-                  {`   ${m.localFiles} ${t("local")} · ${m.repoFiles} ${t("in_repo")}`}
-                </Text>
+                {String(m.localFiles).padStart(4)}
+                <Text dimColor>{" " + t("local") + " · "}</Text>
+                {String(m.repoFiles).padStart(3)}
+                <Text dimColor>{" " + t("in_repo")}</Text>
               </Text>
             </Field>
           </Box>

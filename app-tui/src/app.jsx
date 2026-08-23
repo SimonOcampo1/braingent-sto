@@ -97,7 +97,7 @@ function Actions({ d, t, accent, flash, tab }) {
       <Key k="g" label={t("graph_button")} accent={accent} />
       {/* the navigation keys only where there is something to navigate */}
       {(tab === SESSIONS || tab === MEMORY || tab === CONFIG) &&
-        <Key k="↑↓" label={t("col_when")} accent={accent} />}
+        <Key k="↑↓" label={t("k_move")} accent={accent} />}
       {tab === MEMORY && <Key k="←→" label={t("col_project")} accent={accent} />}
       {tab === CONFIG && <Key k="↵" label={t("k_change")} accent={accent} />}
       <Key k="r" label={t("k_reload")} accent={accent} />
