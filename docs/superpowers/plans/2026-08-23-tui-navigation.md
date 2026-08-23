@@ -15,7 +15,7 @@
 - **Code, comments and docstrings are written in English.** Every user-facing string lives in `scripts/i18n.py` — never hardcode one in `tui_app.py`. (`CLAUDE.md`)
 - **This repo is the public clone.** All code changes happen here; they reach the private clone through `sto update`. Never edit the same file in both.
 - **Zero new dependencies.** Textual is the one optional library and nothing is added beside it.
-- **No emoji** anywhere — in code, comments, commits or notes. Glyphs that carry data (`▲ ▼ ● ◐ ⚙ ✕`) are not emoji and stay.
+- **No emoji, and no pictographs either.** Only glyphs that draw or carry data: Block Elements, Box Drawing, Geometric Shapes (`▲ ▼ ● ◐ ○`) and arrows. Nothing from Miscellaneous Symbols or Dingbats — a gear, a check mark, a framed square are decoration, and `test_no_pictographs_in_the_source` fails on them.
 - Run the full suite with:
   `uv run --no-project --with textual python scripts/test_tui_app.py`
   and the four stdlib suites with:

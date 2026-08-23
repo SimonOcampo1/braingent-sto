@@ -15,7 +15,7 @@
 - **Code, comments and docstrings in English.** Every user-facing string lives in `scripts/i18n.py`, in both `es` and `en` — never hardcode one in `ui.py`, `cli.py` or `tui_app.py`. (`CLAUDE.md`)
 - **This repo is the public clone.** Code changes happen here and reach the private one through `sto update`.
 - **Zero new dependencies.**
-- **No emoji.** Glyphs that carry data (`▲ ▼ ● ◐`) are not emoji and stay.
+- **No emoji, and no pictographs either.** Only glyphs that draw or carry data: Block Elements, Box Drawing, Geometric Shapes (`▲ ▼ ● ◐ ○`) and arrows. Nothing from Miscellaneous Symbols or Dingbats — a gear, a check mark, a framed square are decoration, and `test_no_pictographs_in_the_source` fails on them.
 - Suites: `uv run --no-project --with textual python scripts/test_tui_app.py`, and `cd scripts && python test_sessions_server.py && python test_dream_extract.py && python test_cli.py && python test_ui.py`.
 - `test_ui.py` discovers every module-level `test_*` by itself — adding one needs no runner edit. `test_tui_app.py` has an explicit `__main__` list and does.
 - Commits: Conventional Commits, subject in Spanish, no Claude/Anthropic trailers.

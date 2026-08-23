@@ -1352,7 +1352,7 @@ def test_the_push_draws_its_steps_while_it_runs_instead_of_freezing():
         st = ui.tick(st)
         panel = "\n".join(ui.strip_ansi(l) for l in ui.draw(st, 80, 20))
         assert "exportando sesiones" in panel and "subiendo a origin" in panel
-        assert "✓ exportando sesiones" in panel          # el paso cerrado
+        assert "● exportando sesiones" in panel          # el paso cerrado
         assert any(c + " subiendo" in panel for c in ui.SPIN)  # el que corre, girando
         # and keys do nothing until it is done
         assert ui.handle(st, "q")["quit"] is False
@@ -1510,14 +1510,14 @@ def test_the_strip_says_it_is_synced_only_when_nothing_is_pending():
     verde = f"\033[{ui.cli.GREEN}m"
     for w in (100, ui.BUTTONS_W, 40):
         lineas = ui.sync_buttons(sy, w, up=0, down=0)
-        assert "\u2713" in ui.strip_ansi(lineas[0]), (w, lineas[0])   # above the buttons
+        assert "\u25cf" in ui.strip_ansi(lineas[0]), (w, lineas[0])   # above the buttons
         assert verde in lineas[0], (w, lineas[0])
         for kw in ({"up": 1}, {"down": 1}):
             texto = ui.strip_ansi("\n".join(ui.sync_buttons(sy, w, **kw)))
-            assert "\u2713" not in texto, (w, kw)
+            assert "\u25cf" not in texto, (w, kw)
     for pend in ({"ahead": 1, "behind": 0}, {"ahead": 0, "behind": 1}):
         malo = ui.sync_buttons({**pend, "dirty": False}, 100, up=0, down=0)
-        assert "\u2713" not in ui.strip_ansi("\n".join(malo)), pend
+        assert "\u25cf" not in ui.strip_ansi("\n".join(malo)), pend
     for lang in ui.LANGS:
         real = ui.i18n.LANG
         try:
@@ -2600,6 +2600,61 @@ def test_search_all_labels_every_hit_with_its_kind():
     assert hits == sorted(hits, key=lambda h: (-h["score"], -h["mtime"]))
     assert ui.search_all("") == []
     assert ui.search_all("   ") == []
+
+
+# -- no pictographs anywhere we write --
+
+
+def _pictographic(code):
+    """Emoji and the symbol blocks that read as emoji.
+
+    Block Elements, Box Drawing, Geometric Shapes and arrows are deliberately
+    NOT here: those draw the interface. A bar is a bar and a filled circle is a
+    state. A gear, a check mark and a framed square are decoration.
+    """
+    return (0x1F300 <= code <= 0x1FAFF          # emoji proper
+            or 0x2600 <= code <= 0x27BF         # misc symbols and dingbats
+            or 0x2B00 <= code <= 0x2BFF
+            or code in (0xFE0F, 0x200D))        # variation selector, ZWJ
+
+
+def test_no_pictographs_in_the_source():
+    """No emoji in anything this project writes, and a test rather than a rule.
+
+    A rule that lives only in an instructions file is a rule that gets broken
+    and then argued about; this one gets broken and then fails. It caught a
+    gear in front of every tool call of a transcript that had been there for
+    months, and it is the reason `_pictographic` draws the line where it does
+    rather than wherever the next person remembers it.
+
+    `knowledge/` is exempt and always will be: those are captured transcripts
+    and memories. What somebody typed into a session is data, and rewriting
+    data to match our own house style is worse than the emoji.
+    """
+    import re
+    import subprocess
+    root = Path(ui.__file__).resolve().parent.parent
+    listed = subprocess.run(["git", "ls-files"], cwd=root, capture_output=True,
+                            text=True, encoding="utf-8")
+    if listed.returncode != 0:
+        return                                  # not a checkout; nothing to police
+    escape = re.compile(r"\\u([0-9a-fA-F]{4})")
+    bad = []
+    for rel in listed.stdout.splitlines():
+        if not rel.strip() or rel.startswith("knowledge/"):
+            continue
+        path = root / rel
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue                            # binary, or gone
+        for n, line in enumerate(text.splitlines(), 1):
+            hit = {ord(c) for c in line if _pictographic(ord(c))}
+            hit |= {int(m.group(1), 16) for m in escape.finditer(line)
+                    if _pictographic(int(m.group(1), 16))}
+            for code in sorted(hit):
+                bad.append(f"{rel}:{n}  U+{code:04X}")
+    assert not bad, "pictographs in tracked source:\n" + "\n".join(bad[:40])
 
 
 if __name__ == "__main__":

@@ -216,7 +216,7 @@ function ActivityGroup({ items }: { items: Extract<TimelineItem, { role: "tool" 
               <ToolRow key={i} it={it} />
             ) : (
               <li key={i} className="text-[11.5px] font-mono leading-relaxed">
-                <span className="text-danger">✕ {it.text || "tool error"}</span>
+                <span className="text-danger">× {it.text || "tool error"}</span>
               </li>
             ),
           )}

@@ -8,7 +8,7 @@ import {
 
 const VIEWS = [
   { id: "dashboard", label: "Dashboard", glyph: "⌂" },
-  { id: "sessions", label: "Sessions", glyph: "❯" },
+  { id: "sessions", label: "Sessions", glyph: ">" },
   { id: "skills", label: "Skills", glyph: "◆" },
 ] as const;
 export type ViewId = (typeof VIEWS)[number]["id"];
@@ -190,7 +190,7 @@ export default function App() {
                 : "text-fg-faint hover:text-fg hover:bg-surface-overlay",
             ].join(" ")}
           >
-            ⚙
+            ●
           </button>
           <button
             onClick={() => {

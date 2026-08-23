@@ -252,7 +252,7 @@ def sync_buttons(sy, w=100, up=0, down=0):
     pull_on = down > 0 or sy["behind"] > 0
     # Two dim buttons are the same picture as "I have not checked yet". With
     # nothing to move in either direction, say so.
-    ok = [cli.c(f"  ✓ {t('all_synced')}", cli.GREEN)] if not (push_on or pull_on) else []
+    ok = [cli.c(f"  ● {t('all_synced')}", cli.GREEN)] if not (push_on or pull_on) else []
     if w < BUTTONS_W:
         return ok + [cli.c(f"  [p] ↑ PUSH {up}", ACCENT if push_on else cli.DIM)
                      + cli.c(f"   [l] ↓ PULL {down}", ACCENT if pull_on else cli.DIM)]
@@ -733,7 +733,7 @@ def home_lines(st):
     # — a flash would be gone by the next repaint, when nothing has changed yet.
     if st.get("updated"):
         out += [_txt(l) for l in wrap_items(
-            [cli.c("✓ " + t("update_restart"), NOTICE)], w)]
+            [cli.c("● " + t("update_restart"), NOTICE)], w)]
     here = f" ({t('this_one')})"
     machines = [n + (here if d["local"] else "")
                 for n, d in sorted(srv.list_machines().items())]
@@ -2061,7 +2061,7 @@ def start_job(st, kind):
 
 
 def job_lines(st):
-    """The panel: one step per line, ✓ the closed ones, spinner the running one."""
+    """The panel: one step per line, ● the closed ones, spinner the running one."""
     job = st["job"]
     out = [cli.c(" " + t({"push": "push_to", "pull": "pull_from",
                           "update": "update_available"}[job["kind"]]), cli.BOLD)]
@@ -2069,7 +2069,7 @@ def job_lines(st):
     for i, step in enumerate(steps):
         running = i == len(steps) - 1 and job["res"] is None
         mark = (cli.c(SPIN[st["frame"] % len(SPIN)], ACCENT) if running
-                else cli.c("✓", cli.GREEN))
+                else cli.c("●", cli.GREEN))
         out.append(f"   {mark} {t(step)}")
     return out
 

@@ -47,7 +47,7 @@ with -0.02/-0.03em tracking (5h block %, token totals). Markdown prose
 ## Theming
 
 All tokens are CSS variables; `src/theme.ts` restyles `:root` at runtime and
-persists to localStorage. Settings (⚙ in the dock): light/dark, three dark
+persists to localStorage. Settings (the gear in the dock): light/dark, three dark
 intensities (graphite / deeper / OLED true black), six accent hues, three UI
 fonts (Archivo / System / Mono). Graph canvas color rides `--graph-bg` (hex,
 three.js can't parse oklch); views remount on theme change to repaint it.

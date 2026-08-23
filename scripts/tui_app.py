@@ -94,12 +94,17 @@ def transcript(row):
             if buf:
                 out.append(("code", "\n".join(esc(x) for x in buf)))
         elif kind == "tool":
-            out.append(("tool", f"[$warning]\u2699 {esc(item['tool'])}[/]"
+            # `\u203a` and not a gear: the amber, the indent and the class
+            # already say this is a tool call, and a pictograph says it a
+            # second time in a font the terminal may not even have
+            out.append(("tool", f"[$warning]\u203a {esc(item['tool'])}[/]"
                                 f"  {esc(clip(item.get('detail', ''), 120))}"))
         elif kind == "image":
-            out.append(("tool", f"\u26f6 {t('cli_image')}"))
+            # the string already reads "image"; a glyph in front of a word that
+            # says the same thing is decoration
+            out.append(("tool", esc(t("cli_image"))))
         elif kind == "error":
-            out.append(("bad", f"\u2715 {esc(clip(item['text'], 400))}"))
+            out.append(("bad", f"\u00d7 {esc(clip(item['text'], 400))}"))
     return out
 
 
@@ -1388,7 +1393,7 @@ class StoApp(App):
         if getattr(self, "_spin", None) is not None:
             self._spin.stop()
             self._spin = None
-        colour, mark = ("$error", "✕") if error else ("$success", "✓")
+        colour, mark = ("$error", "×") if error else ("$success", "●")
         self.query_one("#status", Static).update(
             Content.from_markup(f"[{colour}]{mark}[/] [$foreground 70%]{esc(message)}[/]")
             if message else Content(""))
