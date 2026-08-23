@@ -648,6 +648,38 @@ def test_tools_reaches_every_config_module_and_reads_one():
     asyncio.run(go())
 
 
+def test_the_home_search_finds_things_that_are_not_sessions():
+    """The box on the home used to hand its text to the Sessions tab, which
+    made it a worse copy of the box already on that screen. It searches every
+    corpus now, and each row says which one it came from."""
+    async def go():
+        app = tui_app.StoApp()
+        async with app.run_test(size=(124, 30)) as pilot:
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            home = app.query_one("#home")
+            assert not app.query_one("#results").display, "results before a query"
+
+            box = home.query_one("#search", tui_app.Search)
+            box.focus()
+            for ch in "claude":
+                await pilot.press(ch)
+            await pilot.pause(0.4)          # past the debounce
+            assert app.tab == tui_app.HOME, "the home handed the query away"
+            assert app.query_one("#results").display, "no results panel"
+            assert home.hits, "nothing found for a word this repo is full of"
+            assert {h["kind"] for h in home.hits} <= {"session", "memory",
+                                                      "tool", "note"}
+            assert not app.query_one("#home-grid").display, "the dashboard stayed"
+
+            await pilot.press("escape")
+            await pilot.pause()
+            assert not app.query_one("#results").display, "escape left it open"
+            assert app.query_one("#home-grid").display, "the dashboard did not return"
+
+    asyncio.run(go())
+
+
 if __name__ == "__main__":
     test_the_wordmark_is_a_rectangle()
     test_the_accent_and_the_ground_are_one_theme_each()
@@ -673,4 +705,5 @@ if __name__ == "__main__":
     test_the_marquee_runs_only_where_text_is_cut_and_only_with_focus()
     test_a_memory_renders_as_markdown_and_a_transcript_does_not()
     test_tools_reaches_every_config_module_and_reads_one()
+    test_the_home_search_finds_things_that_are_not_sessions()
     print("OK")

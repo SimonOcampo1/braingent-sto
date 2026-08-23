@@ -725,6 +725,12 @@ class Home(Container):
     def compose(self) -> ComposeResult:
         yield Wordmark(id="wordmark")
         yield Search(id="search")
+        # the kind is a column and not a glyph in front: it is the thing you
+        # scan for, and a column aligns and sorts where a glyph does neither
+        yield Card(t("sec_results"),
+                   Table((t("sec_kinds"), 9, "text"), (t("col_name"), 46, "text"),
+                         (t("col_project"), None, "text"), id="t-results"),
+                   id="results")
         with Grid(id="home-grid"):
             yield Card(t("sec_sync"), Static(id="sync-body"))
             yield Card(t("sec_parity"),
@@ -734,13 +740,88 @@ class Home(Container):
             yield Card(t("sec_usage"), Static(id="usage-body"))
             yield Card(t("sec_general"), Static(id="overall-body"))
 
+    # the box fires per keystroke and a search is a tenth of a second even with
+    # the index warm -- `difflib` is doing real work. It runs when you stop
+    # typing, which is also when you meant it to
+    DEBOUNCE = 0.2
+
     def on_mount(self) -> None:
+        self.hits = []
+        self._timer = None
+        self.query_one("#results").display = False
         self.refresh_data()
 
+    def on_input_changed(self, event) -> None:
+        if self._timer is not None:
+            self._timer.stop()
+        self._timer = self.set_timer(self.DEBOUNCE, self.run_search)
+
+    def run_search(self) -> None:
+        """Every corpus, ranked, with the kind of each hit beside it.
+
+        The box used to hand its text to the Sessions tab, which made it a
+        worse copy of the box already on that screen.
+        """
+        self._timer = None
+        q = self.query_one("#search", Search).value
+        self.hits = ui.search_all(q) if q.strip() else []
+        panel = self.query_one("#results")
+        panel.display = bool(q.strip())
+        # the dashboard steps aside: while you are searching, the four cards
+        # are not what you are looking at
+        self.query_one("#home-grid").display = not panel.display
+        table = self.query_one("#t-results", Table)
+        table.clear()
+        for h in self.hits:
+            table.add_row(
+                Content.from_markup(f"[$accent]{t('kind_' + h['kind'])}[/]"),
+                clip(h["label"], 200), clip(h["sub"], 40))
+        table.fit()
+        if not self.hits and q.strip():
+            self.app.empty(table, t("cli_no_hits", q=q))
+        self.app._more_check()
+
     def on_input_submitted(self, event) -> None:
-        """The home has no list of its own, so its box hands the query to the
-        screen that does — which is what you wanted when you typed it here."""
-        self.app.search_sessions(event.value)
+        """`↵` in the box goes to the results, not to another screen."""
+        if self.hits:
+            self.query_one("#t-results", Table).focus()
+
+    def on_data_table_row_selected(self, event) -> None:
+        self.open()
+
+    def open(self) -> None:
+        """`↵` on a result opens it where it belongs."""
+        table = self.query_one("#t-results", Table)
+        if not self.hits or not table.has_focus:
+            return
+        hit = self.hits[table.cursor_row]
+        ref = hit["ref"]
+        if hit["kind"] == "session":
+            self.app.push_screen(Reader(clip(ref["title"], 60), transcript(ref)))
+        elif hit["kind"] == "memory":
+            self.app.open_memory(ref["project"], ref["slug"], ref["machine"])
+        elif hit["kind"] == "note":
+            body = Path(ref["path"]).read_text(encoding="utf-8", errors="replace")
+            self.app.push_screen(Reader(hit["label"], body, markdown=True))
+        else:
+            # after the refresh: `enter` reaches here twice -- once as the
+            # table's RowSelected and once as the app's priority binding -- and
+            # switching tab inside the first made the second land on the Tools
+            # pane and open its row as a document. Deferred, both calls are the
+            # same idempotent jump
+            self.app.call_after_refresh(self._go_tool, ref)
+
+    def _go_tool(self, ref) -> None:
+        self.app.show_tab(TOOLS)
+        self.app.panes[TOOLS].show(ref["module"], ref["id"])
+
+    def close_search(self) -> bool:
+        """`Esc` puts the dashboard back. True if there was something to close."""
+        if not self.query_one("#results").display:
+            return False
+        self.query_one("#search", Search).value = ""
+        self.run_search()
+        return True
 
     def refresh_data(self) -> None:
         app = self.app
@@ -1406,8 +1487,10 @@ class StoApp(App):
             pane.open()
 
     def action_back(self) -> None:
-        """`Esc` climbs one level, and does nothing at the top."""
+        """`Esc` closes the search, then climbs one level, then does nothing."""
         pane = self.panes[self.tab]
+        if hasattr(pane, "close_search") and pane.close_search():
+            return
         if hasattr(pane, "back"):
             pane.back()
 
@@ -1427,13 +1510,6 @@ class StoApp(App):
         pane = self.panes[self.tab]
         if hasattr(pane, "act"):
             pane.act(verb)
-
-    def search_sessions(self, text) -> None:
-        """The home's box hands its query to the screen that has the list."""
-        self.show_tab(SESSIONS)
-        box = self.panes[SESSIONS].query_one("#search", Search)
-        box.value = text
-        box.focus()
 
     def open_memory(self, project, slug, machine=None) -> None:
         """A memory, its body, and one level of the graph around it as rows you

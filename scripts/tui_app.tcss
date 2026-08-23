@@ -92,6 +92,8 @@ Search {
 Search:focus { border: round $accent; border-title-color: $accent; }
 
 .home { layout: vertical; }
+/* the results take the dashboard's room rather than squeezing beside it */
+#results { height: 1fr; display: none; }
 #home-grid {
     layout: grid;
     grid-size: 2 2;
