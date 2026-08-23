@@ -309,6 +309,25 @@ def test_a_pane_off_screen_is_rebuilt_when_you_reach_it_and_not_before():
     asyncio.run(go())
 
 
+def test_the_wordmark_goes_when_it_does_not_fit_and_not_before():
+    """It is 51 columns and two rows, and it was hidden below 100 — at 70 it
+    fits with nineteen to spare.
+
+    What was actually broken at 70 was everything under it being pushed off
+    the screen, which is a different bug with a different fix. Width and height
+    get their own breakpoints so the banner answers for its own size.
+    """
+    async def go():
+        for size, want in (((70, 30), True), ((50, 30), False), ((120, 20), False)):
+            app = tui_app.StoApp()
+            async with app.run_test(size=size) as pilot:
+                await pilot.pause()
+                mark = app.query_one("#wordmark")
+                assert mark.display is want, (size, mark.display, want)
+
+    asyncio.run(go())
+
+
 if __name__ == "__main__":
     test_the_wordmark_is_a_rectangle()
     test_the_accent_and_the_ground_are_one_theme_each()
@@ -323,4 +342,5 @@ if __name__ == "__main__":
     test_the_home_does_not_pay_for_ccusage_before_it_paints()
     test_a_count_nobody_has_run_yet_is_not_a_zero()
     test_a_pane_off_screen_is_rebuilt_when_you_reach_it_and_not_before()
+    test_the_wordmark_goes_when_it_does_not_fit_and_not_before()
     print("OK")

@@ -948,10 +948,17 @@ class StoApp(App):
         self.load_all()
 
     def on_resize(self) -> None:
-        # Textual CSS has no media query, so the breakpoint is a class the app
-        # puts on itself and the stylesheet answers. Nothing else happens here:
-        # a resize that re-ran the screens made dragging a window feel like mud.
+        # Textual CSS has no media query, so the breakpoints are classes the
+        # app puts on itself and the stylesheet answers. Nothing else happens
+        # here: a resize that re-ran the screens made dragging a window feel
+        # like mud.
+        #
+        # Three and not one, because they answer three different questions.
+        # `narrow` is "do two columns fit"; `tiny` and `short` are "does the
+        # wordmark fit", which is a smaller box with its own pair of numbers.
         self.set_class(self.size.width < 100, "narrow")
+        self.set_class(self.size.width < WORDMARK_W + 5, "tiny")
+        self.set_class(self.size.height < 24, "short")
 
     def apply_theme(self) -> None:
         """One accent, one ground, both ours.
