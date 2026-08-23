@@ -1205,7 +1205,12 @@ class StoApp(App):
             self._spin = self.set_interval(0.08, self._tick)
 
     def _paint_status(self) -> None:
-        self.query_one("#status", Static).update(Content.from_markup(
+        # the interval outlives the screen: an app closed while a load is still
+        # running keeps ticking at a strip that is no longer there
+        strip = self.query("#status")
+        if not strip:
+            return
+        strip.first(Static).update(Content.from_markup(
             f"[$accent]{self.SPINNER[self._frame % len(self.SPINNER)]}[/]"
             f" [$foreground 70%]{esc(self._busy)}[/]"))
 

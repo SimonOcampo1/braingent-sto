@@ -537,6 +537,43 @@ def test_a_column_whose_only_correct_order_is_the_default_is_not_in_the_cycle():
     assert table.sortable == [1, 2], table.sortable
 
 
+def test_the_marquee_runs_only_where_text_is_cut_and_only_with_focus():
+    """The selected row scrolls what its column cut off — that row and no
+    other, and only while the table has the keys.
+
+    Both halves matter. A timer for a row that fits is a screen that moves for
+    nothing, and a table animating in a pane nobody is looking at is a screen
+    that never sits still.
+    """
+    async def go():
+        app = tui_app.StoApp()
+        async with app.run_test(size=(70, 30)) as pilot:
+            await app.workers.wait_for_complete()
+            await pilot.press("2")
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            await pilot.pause()
+            table = app.query_one("#t-rows", tui_app.Table)
+            if table.row_count == 0:
+                return
+            table.focus()
+            table.move_cursor(row=0)
+            await pilot.pause()
+            assert table.raw, "no raw cell text was kept"
+
+            widths = [c.get_render_width(table) for c in table.columns.values()]
+            cut = any(len(v) > widths[c] for (r, c), v in table.raw.items()
+                      if r == 0 and c < len(widths))
+            assert (table._marquee is not None) is cut, (cut, table._marquee)
+
+            app.query_one("#tabs").focus()
+            await pilot.pause()
+            assert table._marquee is None, "the marquee outlived the focus"
+
+    asyncio.run(go())
+
+
 if __name__ == "__main__":
     test_the_wordmark_is_a_rectangle()
     test_the_accent_and_the_ground_are_one_theme_each()
@@ -559,4 +596,5 @@ if __name__ == "__main__":
     test_up_leaves_a_list_only_from_its_first_row()
     test_s_cycles_the_sort_and_comes_back_to_the_natural_order()
     test_a_column_whose_only_correct_order_is_the_default_is_not_in_the_cycle()
+    test_the_marquee_runs_only_where_text_is_cut_and_only_with_focus()
     print("OK")

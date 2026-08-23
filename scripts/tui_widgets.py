@@ -20,6 +20,7 @@ import ui  # noqa: E402
 from textual.binding import Binding  # noqa: E402
 from textual.containers import Container  # noqa: E402
 from textual.content import Content  # noqa: E402
+from textual.coordinate import Coordinate  # noqa: E402
 from textual.theme import Theme  # noqa: E402
 from textual.widgets import DataTable, Input, Static  # noqa: E402
 
@@ -133,6 +134,10 @@ class Table(DataTable):
         self.sortable = [i for i, col in enumerate(spec) if len(col) > 2]
         self.sort_by = None
         self._labels = [col[0] for col in spec]
+        # what `add_row` was given, before the column cut it. Only the plain
+        # strings: a `Content` carries markup and slicing it cuts a tag in half
+        self.raw = {}
+        self._marquee = None
 
     def on_mount(self) -> None:
         for col in self.spec:
@@ -140,6 +145,91 @@ class Table(DataTable):
 
     def on_resize(self) -> None:
         self.fit()
+        # a wider column can un-cut the row that was scrolling, and a narrower
+        # one can cut the row that was not
+        self.marquee_later()
+
+    def add_row(self, *cells, **kw):
+        row = super().add_row(*cells, **kw)
+        for col, value in enumerate(cells):
+            if isinstance(value, str):
+                self.raw[(self.row_count - 1, col)] = value
+        return row
+
+    def clear(self, *args, **kw):
+        self.raw.clear()
+        self.marquee_reset()
+        return super().clear(*args, **kw)
+
+    # ── the marquee: the selected row shows what its column cut off ──
+
+    MARQUEE_TICK = 0.2      # seconds per column of travel
+    MARQUEE_HOLD = 5        # ticks of stillness at each end
+
+    def marquee_reset(self) -> None:
+        if self._marquee is not None:
+            self._marquee[0].stop()
+            self._marquee = None
+
+    def marquee_start(self) -> None:
+        """Scroll whatever this row's columns cut off, and nothing else.
+
+        Tied to the focus on purpose: at most one row, in one table, is ever
+        moving, and it is the one the keys are pointed at. A table nobody is
+        looking at holds no timer at all.
+        """
+        self.marquee_reset()
+        if not self.has_focus or not self.is_mounted:
+            return
+        row = self.cursor_row
+        widths = [c.get_render_width(self) for c in self.columns.values()]
+        over = {col: text for (r, col), text in self.raw.items()
+                if r == row and col < len(widths) and len(text) > widths[col]}
+        if not over:
+            return                        # the common case costs nothing
+        # the negative start is the pause before it moves: a row that slides
+        # the instant the cursor lands is unreadable while you are still
+        # finding it
+        self._marquee = (self.set_interval(self.MARQUEE_TICK, self._marquee_tick),
+                         row, over, widths, [-self.MARQUEE_HOLD])
+
+    def _marquee_tick(self) -> None:
+        if self._marquee is None:
+            return
+        _, row, over, widths, state = self._marquee
+        state[0] += 1
+        longest = max(len(v) - widths[c] for c, v in over.items())
+        if state[0] > longest + self.MARQUEE_HOLD:
+            state[0] = -self.MARQUEE_HOLD
+        offset = max(0, min(state[0], longest))
+        for col, text in over.items():
+            self.update_cell_at(Coordinate(row, col), text[offset:])
+
+    def marquee_later(self) -> None:
+        """Measure after the layout, not before it.
+
+        `get_render_width` is nothing but a guess until the columns have been
+        fitted, and taking the focus is one of the moments that happens on the
+        same frame — measured then, every column looks zero wide and nothing is
+        ever found to be cut off.
+        """
+        self.marquee_reset()
+        self.call_after_refresh(self.marquee_start)
+
+    def on_data_table_row_highlighted(self, event) -> None:
+        self.marquee_start()
+
+    def on_focus(self) -> None:
+        self.marquee_later()
+
+    def on_show(self) -> None:
+        self.marquee_later()
+
+    def on_blur(self) -> None:
+        self.marquee_reset()
+
+    def on_hide(self) -> None:
+        self.marquee_reset()
 
     # ── the sort cycle ──
 
