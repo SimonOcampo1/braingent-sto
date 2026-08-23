@@ -496,7 +496,7 @@ class Skills(Container):
 
 class Config(Container):
     def compose(self) -> ComposeResult:
-        yield Card(t("tab_config"), Table(("", 26), ("", 14), ("", None), id="t-config", show_header=False))
+        yield Card(t("tab_config"), Table(("", 24), ("", 26), ("", None), id="t-config", show_header=False))
 
     def on_mount(self) -> None:
         table = self.query_one("#t-config", Table)
