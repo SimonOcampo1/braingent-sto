@@ -127,13 +127,109 @@ class Table(DataTable):
         kw.setdefault("cursor_type", "row")
         super().__init__(**kw)
         self.spec = spec
+        # a third field says how a column sorts, and its absence says it does
+        # not. Declared and not guessed: `when` renders `2 h` and `5 d`, and a
+        # heuristic that sorts that as text interleaves hours with weeks
+        self.sortable = [i for i, col in enumerate(spec) if len(col) > 2]
+        self.sort_by = None
+        self._labels = [col[0] for col in spec]
 
     def on_mount(self) -> None:
-        for label, width in self.spec:
-            self.add_column(label, width=width or 1)
+        for col in self.spec:
+            self.add_column(col[0], width=col[1] or 1)
 
     def on_resize(self) -> None:
         self.fit()
+
+    # ── the sort cycle ──
+
+    SORT_KEYS = {"num": lambda v: float(str(v).strip() or 0),
+                 "text": lambda v: str(v).lower()}
+
+    def _key(self, kind):
+        """A sort key that survives the cells it is given.
+
+        A numeric column can hold `·` for "none" and a text one can hold a
+        `Content`; either raises inside `sorted` and takes the whole table with
+        it. Anything unparseable sorts as if it were empty, which puts it at
+        one end instead of crashing.
+        """
+        base = self.SORT_KEYS[kind]
+
+        def key(value):
+            try:
+                return base(value)
+            except (TypeError, ValueError):
+                return 0 if kind == "num" else ""
+        return key
+
+    def cycle_sort(self, column=None) -> None:
+        """One step of `s`, or a click straight onto a header.
+
+        The semantics of a header click, which is the thing everybody already
+        knows: the next sortable column ascending, or the same column reversed
+        if you are already on it. Past the last sortable column the cycle ends
+        at `None`, which is the order the pane wrote — so `s` can never strand
+        you in a sort you cannot leave.
+        """
+        if not self.sortable:
+            return
+        if column is not None:
+            # a click names its column, so the only question is the direction
+            if column not in self.sortable:
+                return
+            same = self.sort_by is not None and self.sort_by[0] == column
+            self.sort_by = (column, bool(same and not self.sort_by[1]))
+        elif self.sort_by is None:
+            self.sort_by = (self.sortable[0], False)
+        elif not self.sort_by[1]:
+            self.sort_by = (self.sort_by[0], True)      # same column, reversed
+        else:
+            nxt = self.sortable.index(self.sort_by[0]) + 1
+            self.sort_by = ((self.sortable[nxt], False)
+                            if nxt < len(self.sortable) else None)
+        self.apply_sort()
+
+    def apply_sort(self) -> None:
+        """Sort the rows, and put the arrow on the header that did it."""
+        for i, col in enumerate(self.columns.values()):
+            # rebuilt from the kept label, never appended to the live one, or
+            # the arrow compounds one per press
+            label = self._labels[i]
+            if self.sort_by and self.sort_by[0] == i:
+                arrow = " ▼" if self.sort_by[1] else " ▲"
+                # the label gives up room for it rather than the column growing
+                # or the arrow being cut: a header that fills its width exactly
+                # ("prompts" in seven) swallowed the one mark that says this is
+                # the column doing the sorting
+                room = (self.spec[i][1] or col.width) - len(arrow)
+                label = label[:max(1, room)].rstrip() + arrow
+            col.label = Content(label)
+        # `Column.label` is a plain dataclass field: assigning it changes
+        # nothing on screen by itself
+        self.refresh()
+        if self.sort_by is None:
+            return self.refill()
+        index, reverse = self.sort_by
+        self.sort(list(self.columns.keys())[index],
+                  key=self._key(self.spec[index][2]), reverse=reverse)
+
+    def refill(self) -> None:
+        """Back to the order the pane wrote the rows in.
+
+        There is no key that means "the order they arrived": `DataTable.sort`
+        only ever sees cell values, never the row key, so arrival order is not
+        reachable from inside a sort. The pane does know it — it is the order
+        `refresh_data` writes — so unsorting is asking it to write them again.
+        That is cheap: the session list is behind an mtime-keyed cache.
+        """
+        for node in self.ancestors_with_self:
+            if node is not self and hasattr(node, "refresh_data"):
+                return node.refresh_data()
+
+    def on_data_table_header_selected(self, event) -> None:
+        event.stop()
+        self.cycle_sort(event.column_index)
 
     def action_cursor_up(self) -> None:
         """At the top of the list, `↑` leaves it for the tab bar.
@@ -151,7 +247,7 @@ class Table(DataTable):
         if not cols or not self.size.width or self.spec[-1][1] is not None:
             return
         pad = self.cell_padding * 2
-        fixed = sum(w for _, w in self.spec[:-1])
+        fixed = sum(col[1] for col in self.spec[:-1])
         want = max(8, self.size.width - fixed - pad * len(cols) - 1)
         if cols[-1].width != want:
             cols[-1].width = want

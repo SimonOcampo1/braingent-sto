@@ -331,8 +331,8 @@ class Split(Levels, Container):
     def compose(self) -> ComposeResult:
         yield Search(id="search")
         yield Card(t("n_projects"),
-                   Table((t("col_project"), self.GROUP_W - 14), (t("col_total"), None),
-                         id="t-groups"), id="groups")
+                   Table((t("col_project"), self.GROUP_W - 14, "text"),
+                         (t("col_total"), None, "num"), id="t-groups"), id="groups")
         yield Card(self.TITLE, self.make_table(), id="rows")
 
     def on_mount(self) -> None:
@@ -397,9 +397,14 @@ class Sessions(Split):
     TITLE = t("tab_sessions")
 
     def make_table(self):
-        return Table((t("col_when"), 10), (t("col_project"), 18),
-                     (t("col_prompts"), 7), (t("col_tools"), 6),
-                     (t("col_errors"), 7), (t("col_title"), None), id="t-rows")
+        # `col_when` has no third field and so is not in the cycle: it renders
+        # `2 h` and `5 d`, and its correct order is `mtime`, which is the one
+        # the rows already arrive in. `col_errors` is a `Content` with markup,
+        # which is neither a number nor comparable text.
+        return Table((t("col_when"), 10), (t("col_project"), 18, "text"),
+                     (t("col_prompts"), 7, "num"), (t("col_tools"), 6, "num"),
+                     (t("col_errors"), 7), (t("col_title"), None, "text"),
+                     id="t-rows")
 
     def refresh_data(self) -> None:
         rows, _ = cli.cached_sessions()
@@ -443,8 +448,9 @@ class Memory(Split):
     TITLE = t("tab_memory")
 
     def make_table(self):
-        return Table((t("col_slug"), 28), (t("col_when"), 9),
-                     (t("col_machine"), 14), (t("col_desc"), None), id="t-rows")
+        return Table((t("col_slug"), 28, "text"), (t("col_when"), 9),
+                     (t("col_machine"), 14, "text"), (t("col_desc"), None, "text"),
+                     id="t-rows")
 
     def refresh_data(self) -> None:
         self.projects = srv.list_memory()
@@ -495,7 +501,8 @@ class Skills(Levels, Container):
     def compose(self) -> ComposeResult:
         yield Search(id="search")
         yield Card(t("tab_skills"),
-                   Table((t("col_name"), 34), (t("col_desc"), None), id="t-rows"),
+                   Table((t("col_name"), 34, "text"), (t("col_desc"), None, "text"),
+                         id="t-rows"),
                    id="rows")
         # inside a `VerticalScroll` because a six-hundred-character description
         # in seventy columns is a document, and because a level you drill into
@@ -923,6 +930,7 @@ class StoApp(App):
         Binding("f", "fetch", "FETCH"),
         Binding("u", "update", "UPDATE"),
         Binding("g", "graph", "GRAPH"),
+        Binding("s", "sort", "sort"),
         Binding("r", "reload", "reload"),
         Binding("q", "quit", "quit"),
         Binding("a", "verb('bring')", "", show=False),
@@ -1312,6 +1320,13 @@ class StoApp(App):
         pane = self.panes[self.tab]
         if hasattr(pane, "back"):
             pane.back()
+
+    def action_sort(self) -> None:
+        """`s` sorts the table the keys are pointed at, and nothing else."""
+        if isinstance(self.focused, Input):
+            return
+        if isinstance(self.focused, Table):
+            self.focused.cycle_sort()
 
     def action_verb(self, verb: str) -> None:
         """`a` / `d` / `R` belong to whichever screen can do them. Bound at the

@@ -480,6 +480,63 @@ def test_up_leaves_a_list_only_from_its_first_row():
     asyncio.run(go())
 
 
+def test_s_cycles_the_sort_and_comes_back_to_the_natural_order():
+    """One key with the semantics of a header click: the next sortable column
+    ascending, or the same column reversed if you are already on it.
+
+    Past the last one the cycle ends at `None`, which is the order the pane
+    wrote — these lists are newest-first, which is what you want almost always
+    — so `s` can never strand you in a sort you cannot leave.
+    """
+    async def go():
+        app = tui_app.StoApp()
+        async with app.run_test(size=(140, 30)) as pilot:
+            await app.workers.wait_for_complete()
+            await pilot.press("2")
+            await pilot.pause()
+            table = app.query_one("#t-rows", tui_app.Table)
+            table.focus()
+            await pilot.pause()
+            if table.row_count < 3:
+                return                      # a machine with almost no sessions
+            natural = [table.get_row_at(i)[5] for i in range(table.row_count)]
+
+            await pilot.press("s")
+            await pilot.pause()
+            assert table.sort_by is not None, "s did not sort"
+            col, reverse = table.sort_by
+            assert reverse is False, table.sort_by
+            up = [table.get_row_at(i)[col] for i in range(table.row_count)]
+            assert up == sorted(up, key=str.lower), up
+
+            await pilot.press("s")
+            await pilot.pause()
+            assert table.sort_by == (col, True), table.sort_by
+            down = [table.get_row_at(i)[col] for i in range(table.row_count)]
+            assert down == list(reversed(up)), (up, down)
+
+            for _ in range(20):
+                await pilot.press("s")
+                await pilot.pause()
+                if table.sort_by is None:
+                    break
+            assert table.sort_by is None, "the cycle never returned to unsorted"
+            after = [table.get_row_at(i)[5] for i in range(table.row_count)]
+            assert after == natural, "unsorted is not the order the pane wrote"
+
+    asyncio.run(go())
+
+
+def test_a_column_whose_only_correct_order_is_the_default_is_not_in_the_cycle():
+    """`when` renders `2 h`, `5 d`, `3 w`. Sorted as text that interleaves
+    hours with weeks; sorted correctly it is `mtime`, which is already the
+    order the pane arrives in."""
+    table = tui_app.Table((tui_app.t("col_when"), 10),
+                          (tui_app.t("col_project"), 18, "text"),
+                          (tui_app.t("col_prompts"), 7, "num"))
+    assert table.sortable == [1, 2], table.sortable
+
+
 if __name__ == "__main__":
     test_the_wordmark_is_a_rectangle()
     test_the_accent_and_the_ground_are_one_theme_each()
@@ -500,4 +557,6 @@ if __name__ == "__main__":
     test_a_wide_split_shows_every_level_at_once()
     test_tab_walks_panels_and_the_tab_bar_is_somewhere_you_can_stand()
     test_up_leaves_a_list_only_from_its_first_row()
+    test_s_cycles_the_sort_and_comes_back_to_the_natural_order()
+    test_a_column_whose_only_correct_order_is_the_default_is_not_in_the_cycle()
     print("OK")
