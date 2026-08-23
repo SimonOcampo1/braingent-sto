@@ -769,6 +769,13 @@ class Home(Container):
             # the one state where every number on this screen is meaningless
             lines.append(f"[$warning]{t('no_remote')}[/]")
             lines.append(f"[$foreground 60%]{t('guide_hint')} · {t('tab_help')}[/]")
+        elif not app.counted:
+            # the counts land one phase after the git status, and `0` there
+            # reads as "nothing to sync" — the opposite of "not known yet"
+            for arrow, key in (("▲", "to_push"), ("▼", "to_pull")):
+                lines.append(f"[$foreground 50%]{arrow} ···[/]  "
+                             f"[$foreground 60%]{t(key)}[/]")
+            lines.append("")
         elif not (drift_l or drift_r or app.to_push or app.to_pull
                   or sy["ahead"] or sy["behind"]):
             # "in sync" is not a percentage. A parity bar at 100 % answered a
@@ -1015,22 +1022,49 @@ class StoApp(App):
         self.usage = {"limits": [], "daily": []}
         self.update = {"available": 0}
         self.to_push = self.to_pull = 0
+        # `0 to push` and `not counted yet` are different answers, and the
+        # first one is a lie the home used to tell for a second and a half
+        self.counted = False
+        # which panes hold a paint older than the data behind them
+        self._stale = set()
 
-    def reload_data(self) -> None:
-        """Everything the chrome and the home read.
+    # Everything the chrome and the home read, in three phases and not one
+    # call. The same functions `ui.py` calls — nothing here recomputes a rule,
+    # so the two flavours cannot disagree about a number — but they do not cost
+    # the same, and paying for the slowest before drawing any of them is how
+    # the screen stayed empty for twenty seconds. `load_all` runs them in turn
+    # and repaints between.
 
-        The same functions `ui.py` calls: nothing here recomputes a rule, so
-        the two flavours cannot disagree about a number. It is also slow —
-        `sync_preview` dry-runs four exports and shells out to git — which is
-        why every caller runs it off the UI thread.
-        """
+    def load_fast(self) -> None:
+        """What git already knows, and the plan percentages. ~0.4 s."""
         self.sync = srv.sync_status(fetch=False)
-        self.preview = ui.sync_preview(self.sync)
+        # `detail=True` spawns `npx ccusage` twice — fifteen seconds for a spend
+        # breakdown only the sparkline reads, and `load_slow` is where it goes.
+        # The percentages are one https call and they come back here.
+        self.usage = srv.usage_snapshot(detail=False)
+
+    def load_counts(self) -> None:
+        """What would travel, and how far apart the two sides are. ~1.3 s:
+        `sync_preview` dry-runs four exports and shells out to git."""
         self.parity = ui.parity()
-        self.usage = srv.usage_snapshot(detail=True)
-        self.update = ui.update_state()
+        self.preview = ui.sync_preview(self.sync)
         self.to_push = ui.count_items(self.preview[0])
         self.to_pull = ui.count_items(self.preview[1])
+        self.counted = True
+
+    def load_slow(self) -> None:
+        """The two that leave the machine: the upstream ref and ccusage."""
+        self.update = ui.update_state()
+        self.usage = srv.usage_snapshot(detail=True)
+
+    PHASES = (("ld_git", "load_fast"), ("ld_counts", "load_counts"),
+              ("ld_usage", "load_slow"))
+
+    def reload_data(self) -> None:
+        """All three, in order. For the callers that end in a repaint of their
+        own and have nothing to show in between."""
+        for _, name in self.PHASES:
+            getattr(self, name)()
 
     def deltas(self, m):
         """How many items only one side has.
@@ -1081,6 +1115,9 @@ class StoApp(App):
     def on_mount(self) -> None:
         self.apply_theme()
         self.show_tab(self.tab)
+        # the strip carries it, not a toast: opening the app is not an event,
+        # and a notification for it is one more thing to dismiss
+        self.busy(t("ld_git"))
         self.load_all()
 
     def on_resize(self) -> None:
@@ -1101,10 +1138,11 @@ class StoApp(App):
         self.register_theme(theme)
         self.theme = theme.name
         # the panes hold rendered content, not live markup: a theme change has
-        # to ask them to paint again or the old accent stays on screen
-        for pane in self.panes:
-            if hasattr(pane, "refresh_data"):
-                pane.refresh_data()
+        # to ask them to paint again or the old accent stays on screen. Only
+        # the ones on screen — the rest are stale until you switch to them,
+        # which is also what stops `on_mount` walking every session on disk
+        # before the first frame.
+        self._repaint()
         self.query_one("#wordmark", Wordmark).repaint()
         self.query_one("#topbar", Static).update(self.topbar_content())
 
@@ -1122,6 +1160,12 @@ class StoApp(App):
         # focus starts on the left-hand list of the screen, which is the one
         # you choose with before you read with
         pane = self.panes[self.tab]
+        if self.tab in self._stale:
+            # skipped while off screen; this is the moment it is worth the half
+            # second, and the moment its columns can be fitted at all
+            self._stale.discard(self.tab)
+            if hasattr(pane, "refresh_data"):
+                pane.refresh_data()
         tables = list(pane.query(Table))
         for table in tables:
             # a hidden pane has no size, so its columns were never fitted; the
@@ -1133,24 +1177,46 @@ class StoApp(App):
     # ── work off the UI thread ──
 
     @work(thread=True, exclusive=True)
-    def load_all(self) -> None:
-        """The first paint does not wait for git.
+    def load_all(self, fetch: bool = False) -> None:
+        """The first paint does not wait for git, and no paint waits for ccusage.
 
-        `reload_data` shells out to git four or five times and dry-runs the
-        exports; on a big repo that is seconds. Doing it in `__init__` meant
-        the terminal sat blank for those seconds and the app felt broken before
-        it had drawn anything.
+        All of this used to be one call in `__init__`, so the terminal sat
+        blank while git ran and the app felt broken before it had drawn
+        anything. Moving it to a thread fixed the blankness and left the
+        slowness: one worker that repainted only at the end still made the
+        whole screen wait on `npx ccusage`. Now each phase repaints as it
+        lands, and the strip says which one is running.
         """
-        self.call_from_thread(self.busy, t("k_reload"))
-        self.reload_data()
-        self.call_from_thread(self._painted)
+        if fetch:
+            self.call_from_thread(self.busy, "FETCH")
+            # the phases read `.git/FETCH_HEAD` afterwards and find it fresh
+            self.sync = srv.sync_status(fetch=True, force=True)
+        for step, name in self.PHASES:
+            self.call_from_thread(self.busy, t(step))
+            getattr(self, name)()
+            self.call_from_thread(self._painted)
+        self.call_from_thread(self.done)
 
-    def _painted(self) -> None:
-        for pane in self.panes:
+    def _repaint(self) -> None:
+        """Rebuild the panes that are on screen, and mark the rest stale.
+
+        A pane nobody is looking at costs the same to rebuild as one on screen
+        — `cached_sessions`, `list_memory` and `module_items` are most of a
+        second between them, on the UI thread — and with the load split in
+        three this runs three times instead of once. `show_tab` rebuilds a
+        stale pane at the moment it becomes visible, which is the only moment
+        the work buys anything.
+        """
+        self._stale = set(range(len(TABS)))
+        for index in {HOME, self.tab}:
+            self._stale.discard(index)
+            pane = self.panes[index]
             if hasattr(pane, "refresh_data"):
                 pane.refresh_data()
+
+    def _painted(self) -> None:
+        self._repaint()
         self.query_one("#topbar", Static).update(self.topbar_content())
-        self.done()
 
     # ── the status strip ──
 
@@ -1253,18 +1319,11 @@ class StoApp(App):
         links = [("→", mid) for mid in out] + [("←", mid) for mid in inc]
         self.push_screen(Reader(f"{project}/{slug}", body, links))
 
-    @work(thread=True, exclusive=True)
     def action_reload(self) -> None:
-        self.call_from_thread(self.busy, t("k_reload"))
-        self.reload_data()
-        self.call_from_thread(self._painted)
+        self.load_all()
 
-    @work(thread=True, exclusive=True)
     def action_fetch(self) -> None:
-        self.call_from_thread(self.busy, "FETCH")
-        self.sync = srv.sync_status(fetch=True, force=True)
-        self.reload_data()
-        self.call_from_thread(self._painted)
+        self.load_all(fetch=True)
 
     def action_graph(self) -> None:
         """The classic window. `cli.open_memory_graph` already knows how to

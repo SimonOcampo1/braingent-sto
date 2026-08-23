@@ -238,6 +238,77 @@ def test_only_the_bracket_is_escaped():
     assert tui_app.esc("a [b] c") == r"a \[b] c"
 
 
+def test_the_home_does_not_pay_for_ccusage_before_it_paints():
+    """`usage_snapshot(detail=True)` shells out to `npx ccusage` twice — twenty
+    seconds cold — and the only thing on the home that reads the detail is the
+    spend sparkline. The percentages are one https call.
+
+    Asking for both in the phase that paints the screen is what made opening
+    the app feel broken, and it is a regression the stdlib flavour already fell
+    into once, so this asserts against it by name and not by timing.
+    """
+    calls = []
+    real_usage, real_update = tui_app.srv.usage_snapshot, tui_app.ui.update_state
+
+    def fake_usage(detail=True):
+        calls.append(detail)
+        return {"limits": [], "daily": []}
+
+    tui_app.srv.usage_snapshot = fake_usage
+    tui_app.ui.update_state = lambda force=False: {"available": 0}
+    try:
+        app = tui_app.StoApp()
+        app.load_fast()
+        assert calls == [False], calls
+        app.load_slow()
+        assert calls == [False, True], calls
+    finally:
+        tui_app.srv.usage_snapshot = real_usage
+        tui_app.ui.update_state = real_update
+
+
+def test_a_count_nobody_has_run_yet_is_not_a_zero():
+    """`0 to push` and `not counted yet` are different answers, and the home
+    painted the first while it meant the second — which reads as "nothing to
+    sync" for as long as the phase takes."""
+    app = tui_app.StoApp()
+    assert app.counted is False
+    app.load_counts()
+    assert app.counted is True
+
+    async def go():
+        app = tui_app.StoApp()
+        async with app.run_test(size=(124, 30)) as pilot:
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            if not app.sync.get("remote"):
+                return                    # no remote: every number is moot
+            app.counted = False
+            app.query_one("#home").refresh_data()
+            await pilot.pause()
+            body = "\n".join(screen_text(app))
+            assert "\u00b7\u00b7\u00b7" in body, body
+
+    asyncio.run(go())
+
+
+def test_a_pane_off_screen_is_rebuilt_when_you_reach_it_and_not_before():
+    """Rebuilding all six panes costs most of a second on the UI thread, and
+    the load repaints three times now instead of once. Only what is on screen
+    is rebuilt; the rest carry a mark and catch up in `show_tab`."""
+    async def go():
+        app = tui_app.StoApp()
+        async with app.run_test(size=(124, 30)) as pilot:
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert tui_app.SESSIONS in app._stale, app._stale
+            await pilot.press("2")
+            await pilot.pause()
+            assert tui_app.SESSIONS not in app._stale, app._stale
+
+    asyncio.run(go())
+
+
 if __name__ == "__main__":
     test_the_wordmark_is_a_rectangle()
     test_the_accent_and_the_ground_are_one_theme_each()
@@ -249,4 +320,7 @@ if __name__ == "__main__":
     test_nothing_that_writes_runs_before_the_manifest_is_on_screen()
     test_a_transcript_is_a_conversation_of_blocks()
     test_only_the_bracket_is_escaped()
+    test_the_home_does_not_pay_for_ccusage_before_it_paints()
+    test_a_count_nobody_has_run_yet_is_not_a_zero()
+    test_a_pane_off_screen_is_rebuilt_when_you_reach_it_and_not_before()
     print("OK")

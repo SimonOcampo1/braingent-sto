@@ -78,6 +78,10 @@ STRINGS = {
         "activate_hint": "config que todavía no está instalada acá",
         "one_session": "sesión", "one_memory": "memoria",
         "loading": "cargando…",
+        # the three phases of the first load, named in the strip so a
+        # spinner says what it is waiting on and not only that it is
+        "ld_git": "leyendo git", "ld_counts": "calculando cambios",
+        "ld_usage": "consultando uso",
         "dirty": "sucio", "clean": "limpio", "never_synced": "sin sincronizar",
         "all_synced": "todo sincronizado",
         "ago_now": "recién", "ago_min": "hace {n} min",
@@ -250,6 +254,8 @@ STRINGS = {
         "activate_hint": "config the repo carries and this machine has not installed",
         "one_session": "session", "one_memory": "memory",
         "loading": "loading…",
+        "ld_git": "reading git", "ld_counts": "counting changes",
+        "ld_usage": "checking usage",
         "dirty": "dirty", "clean": "clean", "never_synced": "never synced",
         "all_synced": "everything in sync",
         "ago_now": "just now", "ago_min": "{n} min ago",
