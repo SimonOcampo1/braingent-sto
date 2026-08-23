@@ -19,6 +19,7 @@ except ImportError:
     raise SystemExit(0)
 
 import tui_app  # noqa: E402
+import tui_widgets  # noqa: E402
 from textual.widgets import Markdown  # noqa: E402
 
 
@@ -764,6 +765,58 @@ def test_a_memory_shows_its_body_and_its_neighbours():
     asyncio.run(go())
 
 
+def test_a_coloured_cell_scrolls_too():
+    """The marquee skipped every cell that carried colour.
+
+    The machines columns are exactly that -- the local one in the accent, the
+    rest dim -- so the one place you most need to read a list that does not fit
+    was the one place nothing moved. `Content` slices and carries its spans
+    across, so it scrolls with its colours rather than being left out or
+    flattened to plain text.
+
+    The other half was `clip(machine, 12)` into a column twelve wide: a cell
+    pre-cut to its own column can never be found to overflow.
+    """
+    async def go():
+        real = tui_app.cli.cached_sessions
+        names = ["MaquinaDeEscritorioLarga", "LaptopDelTrabajo-2024"]
+
+        def fake():
+            rows, prompts = real()
+            for i, r in enumerate(rows):
+                r["machine"] = names[i % len(names)]
+            return rows, prompts
+
+        tui_app.cli.cached_sessions = fake
+        try:
+            app = tui_app.StoApp()
+            async with app.run_test(size=(120, 20)) as pilot:
+                await app.workers.wait_for_complete()
+                await pilot.press("2")
+                await pilot.pause()
+                for table_id in ("#t-groups", "#t-rows"):
+                    table = app.query_one(table_id, tui_app.Table)
+                    if table.row_count < 2:
+                        continue
+                    table.focus()
+                    table.move_cursor(row=1)
+                    await pilot.pause()
+                    await pilot.pause()
+                    assert table._marquee is not None, (table_id, "nothing scrolls")
+                    kinds = {type(v).__name__ for (r, _), v in table.raw.items() if r == 1}
+                    assert "Content" in kinds or table_id == "#t-rows", kinds
+                    before = tui_widgets._plain(table.get_row_at(1)[-1])
+                    for _ in range(9):
+                        table._marquee_tick()
+                        await pilot.pause()
+                    after = tui_widgets._plain(table.get_row_at(1)[-1])
+                    assert after != before, (table_id, before, after)
+        finally:
+            tui_app.cli.cached_sessions = real
+
+    asyncio.run(go())
+
+
 if __name__ == "__main__":
     test_the_wordmark_is_a_rectangle()
     test_the_accent_and_the_ground_are_one_theme_each()
@@ -791,4 +844,5 @@ if __name__ == "__main__":
     test_tools_reaches_every_config_module_and_reads_one()
     test_the_home_search_finds_things_that_are_not_sessions()
     test_a_memory_shows_its_body_and_its_neighbours()
+    test_a_coloured_cell_scrolls_too()
     print("OK")

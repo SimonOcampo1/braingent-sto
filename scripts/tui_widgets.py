@@ -99,6 +99,11 @@ def ago(ts):
     return ui.ago(ts)
 
 
+def _plain(cell):
+    """The characters of a cell, whether it is a string or a `Content`."""
+    return cell if isinstance(cell, str) else cell.plain
+
+
 def clip(text, n):
     s = " ".join(str(text or "").split())
     return s if len(s) <= n else s[: max(0, n - 1)] + "…"
@@ -137,8 +142,9 @@ class Table(DataTable):
         self.sortable = [i for i, col in enumerate(spec) if len(col) > 2]
         self.sort_by = None
         self._labels = [col[0] for col in spec]
-        # what `add_row` was given, before the column cut it. Only the plain
-        # strings: a `Content` carries markup and slicing it cuts a tag in half
+        # what `add_row` was given, before the column cut it. A `Content` is
+        # kept as a `Content`: it slices and carries its spans across, so a
+        # coloured cell scrolls with its colours instead of being left out
         self.raw = {}
         self._marquee = None
 
@@ -155,7 +161,7 @@ class Table(DataTable):
     def add_row(self, *cells, **kw):
         row = super().add_row(*cells, **kw)
         for col, value in enumerate(cells):
-            if isinstance(value, str):
+            if isinstance(value, (str, Content)):
                 self.raw[(self.row_count - 1, col)] = value
         return row
 
@@ -187,7 +193,8 @@ class Table(DataTable):
         row = self.cursor_row
         widths = [c.get_render_width(self) for c in self.columns.values()]
         over = {col: text for (r, col), text in self.raw.items()
-                if r == row and col < len(widths) and len(text) > widths[col]}
+                if r == row and col < len(widths)
+                and len(_plain(text)) > widths[col]}
         if not over:
             return                        # the common case costs nothing
         # the negative start is the pause before it moves: a row that slides
@@ -201,7 +208,7 @@ class Table(DataTable):
             return
         _, row, over, widths, state = self._marquee
         state[0] += 1
-        longest = max(len(v) - widths[c] for c, v in over.items())
+        longest = max(len(_plain(v)) - widths[c] for c, v in over.items())
         if state[0] > longest + self.MARQUEE_HOLD:
             state[0] = -self.MARQUEE_HOLD
         offset = max(0, min(state[0], longest))

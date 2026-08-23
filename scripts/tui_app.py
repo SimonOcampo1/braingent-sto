@@ -422,7 +422,7 @@ class Split(Levels, Container):
         table.clear()
         every = sorted({m for _, _, ms in pairs for m in ms})
         table.add_row(Content.from_markup(f"[$accent b]{t('show_all')}[/]"),
-                      str(total), clip(" ".join(every), 40))
+                      str(total), Content(" ".join(every)))
         for name, n, machines in pairs:
             table.add_row(clip(name, self.GROUP_W - 17), str(n),
                           Content.from_markup(
@@ -513,7 +513,9 @@ class Sessions(Split):
                           str(r["n_tools"]),
                           Content.from_markup(f"[$error]{r['errors']}[/]"
                                               if r["errors"] else "0"),
-                          clip(r.get("machine") or srv.LOCAL_MACHINE, 12),
+                          # not clipped to the column width: the marquee needs
+                          # something longer than the column to scroll
+                          clip(r.get("machine") or srv.LOCAL_MACHINE, 60),
                           clip(r["title"], 200), key=r["id"])
         table.fit()
         if not pool:
