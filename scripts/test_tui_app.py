@@ -328,6 +328,31 @@ def test_the_wordmark_goes_when_it_does_not_fit_and_not_before():
     asyncio.run(go())
 
 
+def test_every_card_of_the_home_is_reachable_in_one_column():
+    """At 70x30 the home rendered SYNC and half of CONFIG PARITY, and USAGE
+    and OVERALL were not on the screen at all.
+
+    Not clipped — absent, with no scroll in the pane, so no key and no mouse
+    could reach them. A `1fr` card inside an `auto` grid row resolves to the
+    card's full natural height, and the first one took the screen.
+    """
+    async def go():
+        app = tui_app.StoApp()
+        async with app.run_test(size=(70, 30)) as pilot:
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            home = app.query_one("#home")
+            assert home.max_scroll_y > 0, "the home does not scroll"
+            assert app.query_one("#more").display, "nothing says there is more"
+            home.scroll_end(animate=False)
+            await pilot.pause()
+            titles = [c.border_title for c in home.query(tui_app.Card)]
+            assert "OVERALL" in titles, titles
+            assert not app.query_one("#more").display, "the arrow stayed at the bottom"
+
+    asyncio.run(go())
+
+
 if __name__ == "__main__":
     test_the_wordmark_is_a_rectangle()
     test_the_accent_and_the_ground_are_one_theme_each()
@@ -343,4 +368,5 @@ if __name__ == "__main__":
     test_a_count_nobody_has_run_yet_is_not_a_zero()
     test_a_pane_off_screen_is_rebuilt_when_you_reach_it_and_not_before()
     test_the_wordmark_goes_when_it_does_not_fit_and_not_before()
+    test_every_card_of_the_home_is_reachable_in_one_column()
     print("OK")

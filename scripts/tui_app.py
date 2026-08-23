@@ -936,12 +936,23 @@ class StoApp(App):
         yield Skills(id="skills", classes="split wide-left")
         yield Config(id="config", classes="three")
         yield Help(id="help", classes="two")
-        yield Static("", id="status")
+        # one container docked to the bottom and not three widgets each docked
+        # to it. The same lesson the chrome learned at the top edge: docking is
+        # to an *edge*, not a stack, so the third one lands on the footer's row
+        # and the two draw over each other.
+        with Container(id="bottom"):
+            yield Static("", id="more")
+            yield Static("", id="status")
         yield Footer(show_command_palette=False)
 
     def on_mount(self) -> None:
         self.apply_theme()
         self.show_tab(self.tab)
+        # the arrow follows the scroll of whichever pane is on screen. `watch`
+        # on the reactive rather than a timer: it has to be right the frame the
+        # scroll lands, and it costs nothing while nothing scrolls.
+        for pane in self.panes:
+            self.watch(pane, "scroll_y", self._more_check, init=False)
         # the strip carries it, not a toast: opening the app is not an event,
         # and a notification for it is one more thing to dismiss
         self.busy(t("ld_git"))
@@ -959,6 +970,7 @@ class StoApp(App):
         self.set_class(self.size.width < 100, "narrow")
         self.set_class(self.size.width < WORDMARK_W + 5, "tiny")
         self.set_class(self.size.height < 24, "short")
+        self.call_after_refresh(self._more_check)
 
     def apply_theme(self) -> None:
         """One accent, one ground, both ours.
@@ -1007,6 +1019,7 @@ class StoApp(App):
             table.call_after_refresh(table.fit)
         if tables:
             tables[0].focus()
+        self.call_after_refresh(self._more_check)
 
     # ── work off the UI thread ──
 
@@ -1097,12 +1110,34 @@ class StoApp(App):
     def action_tab(self, index: int) -> None:
         self.show_tab(index)
 
+    # ── the "there is more below" arrow ──
+
+    def _scrollable(self):
+        """The pane on screen, if it is one that scrolls."""
+        pane = self.panes[self.tab]
+        return pane if pane.max_scroll_y > 0 else None
+
+    def _more_check(self) -> None:
+        pane = self._scrollable()
+        more = self.query_one("#more", Static)
+        # `scroll_y` is a float and lands a hair short of `max_scroll_y` at the
+        # bottom, which left the arrow on screen pointing at nothing
+        more.display = bool(pane and pane.scroll_y < pane.max_scroll_y - 0.5)
+        if more.display:
+            more.update(Content.from_markup("[$accent]▼[/]"))
+
     def on_click(self, event) -> None:
-        """A tab chip is a button. Nothing on the bar looked like it could be
-        clicked and everything on it can be."""
+        """A tab chip is a button, and so is the arrow. Nothing on the bar
+        looked like it could be clicked and everything on it can be."""
         node = event.widget
-        if node is not None and node.id and node.id.startswith("tab-"):
+        if node is None or not node.id:
+            return
+        if node.id.startswith("tab-"):
             self.show_tab(int(node.id.removeprefix("tab-")))
+        elif node.id == "more":
+            pane = self._scrollable()
+            if pane is not None:
+                pane.scroll_page_down(animate=False)
 
     def action_prev_tab(self) -> None:
         self.show_tab(self.tab - 1)
