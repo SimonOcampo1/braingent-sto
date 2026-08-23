@@ -113,6 +113,8 @@ STRINGS = {
         "row_tool": "1 tool", "row_tools": "{n} tools",
 
         "accent_color": "Color de acento", "language": "Idioma",
+        "c_turquesa": "turquesa", "c_verde": "verde", "c_violeta": "violeta",
+        "c_azul": "azul", "c_amarillo": "amarillo", "c_rojo": "rojo",
         "syncing": "sincroniza", "not_syncing": "no sincroniza",
         "always_syncing": "siempre sincroniza",
         "n_in_repo": "{n} en repo", "no_remote": "todavía no configurado",
@@ -161,6 +163,7 @@ STRINGS = {
 
         "k_home": " ↑↓ mover  ↵ abrir  Tab sección  p push  l pull  f fetch  u update  q salir",
         "k_reload": "recargar", "k_quit": "salir",
+        "k_change": "cambiar",
         "sec_general": "Estado general",
         "col_when": "cuándo", "col_project": "proyecto", "col_machine": "máquina",
         "col_prompts": "prompts", "col_tools": "tools", "col_errors": "errores",
@@ -275,6 +278,8 @@ STRINGS = {
         "row_tool": "1 tool", "row_tools": "{n} tools",
 
         "accent_color": "Accent color", "language": "Language",
+        "c_turquesa": "turquoise", "c_verde": "green", "c_violeta": "violet",
+        "c_azul": "blue", "c_amarillo": "yellow", "c_rojo": "red",
         "syncing": "syncing", "not_syncing": "not syncing",
         "always_syncing": "always synced",
         "n_in_repo": "{n} in repo", "no_remote": "not set up yet",
@@ -323,6 +328,7 @@ STRINGS = {
 
         "k_home": " ↑↓ move  ↵ open  Tab section  p push  l pull  f fetch  u update  q quit",
         "k_reload": "reload", "k_quit": "quit",
+        "k_change": "change",
         "sec_general": "Overall",
         "col_when": "when", "col_project": "project", "col_machine": "machine",
         "col_prompts": "prompts", "col_tools": "tools", "col_errors": "errors",

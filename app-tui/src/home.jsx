@@ -8,7 +8,7 @@
  */
 import React from "react";
 import { Box, Text } from "ink";
-import { Bar, BigNum, Cell, Field, Legend, Panel, Rule, clip, inner } from "./theme.jsx";
+import { Bar, Cell, Field, Legend, Panel, Rule, Stat, clip, inner } from "./theme.jsx";
 
 export const RAIL = 38;   // the left column
 export const WIDE = 98;   // below this the two columns become one
@@ -30,30 +30,19 @@ const DOT = {
   repo: ["◑", "blue"], none: ["○", "gray"],
 };
 
-/** One headline number in the tall face, with its direction and its breakdown. */
+/** One direction of the sync: the count, then what it is made of. */
 function Traffic({ arrow, n, parts, label, accent, t, width }) {
   return (
-    <Box>
-      <Box width={3} flexDirection="column" justifyContent="center">
-        <Text color={n ? accent : undefined} dimColor={!n} bold>{arrow}</Text>
+    <Box flexDirection="column">
+      <Box>
+        <Text color={n ? accent : undefined} dimColor={!n} bold>{arrow} {n}</Text>
+        <Text bold>{"  " + label}</Text>
       </Box>
-      <BigNum value={n} accent={accent} muted={!n} />
-      <Box flexDirection="column" marginLeft={2} width={width - 3 - 12}>
-        <Text bold>{label}</Text>
+      <Box flexDirection="column" width={width}>
         {(parts.length ? parts : [t("nothing")]).map((p) => (
-          <Text key={p} dimColor wrap="truncate">{p}</Text>
+          <Text key={p} dimColor>{"    " + p}</Text>
         ))}
       </Box>
-    </Box>
-  );
-}
-
-/** A big number over its name — the tile the counters row is made of. */
-function Stat({ n, label, accent }) {
-  return (
-    <Box flexDirection="column" marginRight={3} alignItems="center">
-      <BigNum value={n} accent={accent} muted={!n} />
-      <Text dimColor>{label}</Text>
     </Box>
   );
 }
@@ -64,21 +53,18 @@ export default function Home({ d, t, accent, width }) {
   const rail = wide ? RAIL : width - 1;
   const main = wide ? width - RAIL - 2 : width - 1;
 
-  // one number for "how much of this machine is in the repo": the share of
-  // items both sides hold, over everything either side holds
-  const totals = d.modules.reduce((a, m) => {
-    const [dl, dr] = deltas(m, d);
-    return { same: a.same + Math.min(m.localFiles, m.repoFiles), drift: a.drift + dl + dr };
-  }, { same: 0, drift: 0 });
-  const parity = totals.same + totals.drift === 0
-    ? 100 : Math.round((100 * totals.same) / (totals.same + totals.drift));
-  const drifting = d.modules.some((m) => deltas(m, d).some(Boolean));
-  const good = parity === 100 ? "green" : accent;
+  const drift = d.modules.reduce(
+    (a, m) => { const [l, r] = deltas(m, d); return [a[0] + l, a[1] + r]; }, [0, 0]);
+  const drifting = drift[0] + drift[1] > 0;
+  // "in sync" is not a percentage. The 100% bar that used to sit here answered
+  // a question nobody asked, and left the one that matters — is there anything
+  // to do? — for the reader to infer from a full bar.
+  const synced = !drifting && !sync.toPush && !sync.toPull && !sync.ahead && !sync.behind;
 
   // `Δ L` / `Δ R` and not the words: they wrap at this width, and the product
-  // already spells these two sides `[L]` and `[R]` inside a module
-  // the table is packed left and stops: stretched to the panel edge the name
-  // and its numbers end up a screen apart and stop reading as one row
+  // already spells these two sides `[L]` and `[R]` inside a module.
+  // The table is packed left and stops: stretched to the panel edge the name
+  // and its numbers end up a screen apart and stop reading as one row.
   const nameW = Math.min(24, Math.max(14, inner(main) - 30));
   const cols = [[nameW, "flex-start", ""], [8, "flex-end", t("local")],
                 [9, "flex-end", t("in_repo")], [6, "flex-end", "Δ L"],
@@ -89,11 +75,17 @@ export default function Home({ d, t, accent, width }) {
     <Box flexDirection={wide ? "row" : "column"} gap={1} alignItems="flex-start">
       <Box flexDirection="column" gap={1}>
         <Panel title={t("sec_sync")} accent={accent} width={rail}>
-          <Traffic arrow="▲" n={sync.toPush} parts={sync.pushParts} width={inner(rail)}
-                   label={t("to_push")} accent={accent} t={t} />
-          <Box marginY={1}><Rule n={inner(rail)} /></Box>
-          <Traffic arrow="▼" n={sync.toPull} parts={sync.pullParts} width={inner(rail)}
-                   label={t("to_pull")} accent={accent} t={t} />
+          {synced ? (
+            <Text color="green" bold>● {t("all_synced")}</Text>
+          ) : (
+            <Box flexDirection="column">
+              <Traffic arrow="▲" n={sync.toPush} parts={sync.pushParts} width={inner(rail)}
+                       label={t("to_push")} accent={accent} t={t} />
+              <Box marginY={1}><Rule n={inner(rail)} /></Box>
+              <Traffic arrow="▼" n={sync.toPull} parts={sync.pullParts} width={inner(rail)}
+                       label={t("to_pull")} accent={accent} t={t} />
+            </Box>
+          )}
           <Box marginTop={1} flexDirection="column">
             <Field label={t("last_sync")} width={12}>
               <Text wrap="truncate">{sync.lastSync}</Text>
@@ -117,12 +109,12 @@ export default function Home({ d, t, accent, width }) {
         <Panel title={t("sec_usage")} accent={accent} width={rail}>
           {(d.usage.limits || []).map((l, i) => (
             <Box key={i} flexDirection="column" marginTop={i ? 1 : 0}>
-              <Box>
-                <BigNum value={l.percent ?? 0} unit="%" accent={accent} />
-                <Box flexDirection="column" marginLeft={2} justifyContent="center">
-                  <Text bold>{clip((l.label || l.kind || "?").replace(/_/g, " "), 16)}</Text>
-                  <Text dimColor>{l.resets}</Text>
-                </Box>
+              <Box justifyContent="space-between">
+                <Text bold>
+                  {clip((l.label || l.kind || "?").replace(/_/g, " "), 16)}
+                  <Text color={accent}>{"  " + (l.percent ?? 0) + "%"}</Text>
+                </Text>
+                <Text dimColor>{l.resets}</Text>
               </Box>
               {/* 80 is where a limit stops being information and starts being a
                   warning, and the bar turns red on its own there */}
@@ -177,31 +169,22 @@ export default function Home({ d, t, accent, width }) {
         </Panel>
 
         <Panel title={t("sec_general")} accent={accent} width={main}>
-          <Box>
-            <BigNum value={parity} unit="%" accent={good} />
-            <Box flexDirection="column" marginLeft={2} justifyContent="center">
-              <Text bold>{t("st_both")}</Text>
-              <Bar pct={parity} accent={good} width={Math.min(40, inner(main) - 12)} />
-            </Box>
-          </Box>
-          <Box marginY={1}><Rule n={inner(main)} /></Box>
           <Box flexWrap="wrap">
             {d.counters.map((c) => (
-              <Stat key={c.key} n={c.n} label={t(c.key)} accent={accent} />
+              <Stat key={c.key} n={c.n} label={t(c.key)} accent={accent} width={18} />
             ))}
           </Box>
-          <Box marginTop={1} flexDirection="column">
-            <Field label={t("sec_machines")} width={16}>
-              <Text wrap="truncate">
-                {d.machines.map((m) => m.name + (m.local ? ` (${t("this_one")})` : "")).join(" · ")}
-              </Text>
-            </Field>
-            <Field label={t("sec_always")} width={16}>
-              <Text dimColor wrap="truncate">
-                {Object.entries(d.knowledge).map(([k, n]) => `${n} ${t("n_" + k)}`).join(" · ")}
-              </Text>
-            </Field>
-          </Box>
+          <Box marginY={1}><Rule n={inner(main)} /></Box>
+          <Field label={t("sec_machines")} width={16}>
+            <Text wrap="truncate">
+              {d.machines.map((m) => m.name + (m.local ? ` (${t("this_one")})` : "")).join(" · ")}
+            </Text>
+          </Field>
+          <Field label={t("sec_always")} width={16}>
+            <Text dimColor wrap="truncate">
+              {Object.entries(d.knowledge).map(([k, n]) => `${n} ${t("n_" + k)}`).join(" · ")}
+            </Text>
+          </Field>
         </Panel>
       </Box>
     </Box>

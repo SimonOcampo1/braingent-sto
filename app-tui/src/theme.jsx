@@ -38,82 +38,42 @@ const GLYPHS = {
   " ": ["   ", "   ", "   ", "   ", "   ", "   "],
 };
 
-/** A word as rows of `"main" | "shadow" | null` cells.
+/** The word as rows of half-block characters.
  *
- * The prototype outlines every letter with an echo up and to the right. A
- * terminal cannot draw a hairline, but it can stamp the word a second time one
- * cell up-right in a dim texture and let the bright one land on top. Hence a
- * grid and not six strings: a row mixes the two colours.
+ * Six pixel rows become three character rows: `█` where both halves of the
+ * cell are lit, `▀` for the top half only, `▄` for the bottom. The letterforms
+ * are the prototype's; what changes is that a banner costs three rows instead
+ * of seven, and the screen under it is the point of the screen.
+ *
+ * The dotted echo that used to outline the letters is gone. At this size `░`
+ * is not an outline, it is grit around clean shapes — and next to borders that
+ * are a single crisp line it read as the one dirty thing on the page.
  */
 function stamp(word) {
-  const rows = GLYPHS.B.length;
   const glyphs = [...word].map((ch) => GLYPHS[ch]);
-  const w = glyphs.reduce((a, g) => a + g[0].length + 1, 0);
-  const grid = Array.from({ length: rows + 1 }, () => Array(w + 1).fill(null));
-
-  const paint = (dr, dc, layer, skip = () => false) => {
-    let col = dc;
-    for (const g of glyphs) {
-      g.forEach((line, r) => {
-        [...line].forEach((ch, i) => {
-          const y = r + dr, x = col + i;
-          if (ch !== " " && !grid[y][x] && !skip(y, x)) grid[y][x] = layer;
-        });
-      });
-      col += g[0].length + 1;
-    }
-  };
-
-  // the letters first: the echo only gets cells they do not want. The other
-  // order eats them — a stroke is two columns wide, so a one-cell offset
-  // overlaps it almost entirely and the word comes out a solid slab.
-  paint(1, 0, "main");
-
-  // and the counters stay hollow. The hole in a B or an O has to stay empty:
-  // filled with echo the letters read as slugs. `inside` is the span each glyph
-  // covers on each row, between its own first and last lit column — never
-  // across the gap to the next letter, which is where the echo has to show.
-  const inside = new Set();
-  let col = 0;
-  for (const g of glyphs) {
-    g.forEach((line, r) => {
-      const lo = line.indexOf("█"), hi = line.lastIndexOf("█");
-      for (let i = lo + 1; i < hi; i++) inside.add(`${r + 1},${col + i}`);
+  const out = [];
+  for (let r = 0; r < GLYPHS.B.length; r += 2) {
+    let line = "";
+    glyphs.forEach((g, i) => {
+      const top = g[r], bot = g[r + 1];
+      for (let x = 0; x < top.length; x++) {
+        const a = top[x] !== " ", b = bot[x] !== " ";
+        line += a && b ? "█" : a ? "▀" : b ? "▄" : " ";
+      }
+      if (i < glyphs.length - 1) line += " ";
     });
-    col += g[0].length + 1;
+    out.push(line);
   }
-  paint(0, 1, "shadow", (y, x) => inside.has(`${y},${x}`));
-  return grid;
+  return out;
 }
 
-// Four tiers and not two: the whole name is ~101 columns and the `STO` block is
-// 25, so between them sits every ordinary 80-column terminal — which with two
-// tiers got the smallest wordmark and two thirds of the row empty.
+// Four tiers: the whole name is ~99 columns and the `STO` block is 23, so
+// between them sits every ordinary 80-column terminal — which with two tiers
+// got the smallest wordmark and two thirds of the row empty.
 const FULL = stamp("BRAINGENT STO");
 const MID = stamp("BRAINGENT");
 const SHORT = stamp("STO");
 const gridWidth = (g) => g[0].length;
-
-function StampRow({ cells, accent }) {
-  const runs = [];
-  for (const cell of cells) {
-    const last = runs[runs.length - 1];
-    // ░ and not █ for the echo: at one cell of offset a solid halo reads as
-    // part of the letter, and a lighter texture reads as behind it
-    const ch = cell === "main" ? "█" : cell === "shadow" ? "░" : " ";
-    if (last && last.layer === cell) last.text += ch;
-    else runs.push({ layer: cell, text: ch });
-  }
-  return (
-    <Text>
-      {runs.map((r, i) =>
-        r.layer === "main" ? <Text key={i} color={accent} bold>{r.text}</Text>
-          : r.layer === "shadow" ? <Text key={i} dimColor>{r.text}</Text>
-          : <Text key={i}>{r.text}</Text>
-      )}
-    </Text>
-  );
-}
 
 export function Wordmark({ width, accent }) {
   // a wordmark cut in half is worse than a smaller wordmark, so the tiers step
@@ -123,7 +83,7 @@ export function Wordmark({ width, accent }) {
   return (
     <Box flexDirection="column" width={gridWidth(grid)}>
       {grid === SHORT && <Text bold>braingent</Text>}
-      {grid.map((cells, i) => <StampRow key={i} cells={cells} accent={accent} />)}
+      {grid.map((line, i) => <Text key={i} color={accent} bold>{line}</Text>)}
       {grid === MID && (
         <Box justifyContent="flex-end"><Text color={accent} bold>S T O</Text></Box>
       )}
@@ -131,43 +91,19 @@ export function Wordmark({ width, accent }) {
   );
 }
 
-// ── text face: three-row digits for the headline numbers ──
-//
-// Heavy box-drawing and not solid blocks: at three rows a block digit has one
-// row per segment and 6 and 8 come out the same shape. These keep the strokes
-// distinct while still reading as bold next to the wordmark. They are a second
-// register on purpose — the wordmark is the product's name, this is a quantity.
-const DIGITS = {
-  "0": ["┏━┓", "┃ ┃", "┗━┛"],
-  "1": ["╺┓ ", " ┃ ", "╺┻╸"],
-  "2": ["╺━┓", "┏━┛", "┗━╸"],
-  "3": ["╺━┓", "╺━┫", "╺━┛"],
-  "4": ["╻ ╻", "┗━┫", "  ╹"],
-  "5": ["┏━╸", "┗━┓", "╺━┛"],
-  "6": ["┏━╸", "┣━┓", "┗━┛"],
-  "7": ["╺━┓", "  ┃", "  ╹"],
-  "8": ["┏━┓", "┣━┫", "┗━┛"],
-  "9": ["┏━┓", "┗━┫", "╺━┛"],
-};
-
-/** A number in the tall face. `muted` draws a zero as what it is: nothing to do. */
-export function BigNum({ value, accent, muted = false, unit = "" }) {
-  const chars = [...String(value)].filter((c) => DIGITS[c]);
-  const colour = muted ? undefined : accent;
+/** A headline number: the value in the accent, its unit and name beside it.
+ *
+ * This used to be drawn in a three-row box-drawing face. It was legible and it
+ * was wrong — the numbers on this screen are read, not admired, and at three
+ * rows each they pushed the actual table off the fold.
+ */
+export function Stat({ n, label, unit = "", accent, muted = false, width }) {
   return (
-    <Box>
-      <Box flexDirection="column">
-        {[0, 1, 2].map((r) => (
-          <Text key={r} color={colour} dimColor={muted} bold={!muted}>
-            {chars.map((c) => DIGITS[c][r]).join(" ")}
-          </Text>
-        ))}
-      </Box>
-      {!!unit && (
-        <Box flexDirection="column" justifyContent="flex-end" marginLeft={1}>
-          <Text color={colour} dimColor={muted}>{unit}</Text>
-        </Box>
-      )}
+    <Box width={width}>
+      <Text color={muted ? undefined : accent} dimColor={muted} bold={!muted}>
+        {String(n) + unit}
+      </Text>
+      <Text dimColor>{" " + label}</Text>
     </Box>
   );
 }
@@ -183,10 +119,16 @@ export function Bar({ pct, width = 20, accent, warn = 100 }) {
   const full = Math.floor(exact);
   const tip = EIGHTHS[Math.floor((exact - full) * 8)];
   const colour = (pct || 0) >= warn ? "red" : accent;
+  const rest = Math.max(0, width - full - (tip ? 1 : 0));
+  // painted with background colour rather than drawn with block characters:
+  // `░` as a track is a field of dots you can see the terminal through, and
+  // the partial tip left a seam where its unlit half fell outside the track.
+  // Backgrounds have no texture and the tip sits on one.
   return (
     <Text>
-      <Text color={colour}>{"█".repeat(full) + tip}</Text>
-      <Text dimColor>{"░".repeat(Math.max(0, width - full - (tip ? 1 : 0)))}</Text>
+      <Text backgroundColor={colour}>{" ".repeat(full)}</Text>
+      {!!tip && <Text color={colour} backgroundColor="gray">{tip}</Text>}
+      <Text backgroundColor="gray">{" ".repeat(rest)}</Text>
     </Text>
   );
 }
@@ -241,7 +183,10 @@ export function Cell({ w, children, align = "flex-start" }) {
 export function Key({ k, label, on = true, accent }) {
   return (
     <Box marginRight={2}>
-      <Text inverse={on} bold={on} dimColor={!on}> {k} </Text>
+      {/* the cap is drawn the same whether or not the key would do something:
+          it is what tells you a key exists, and PUSH with nothing to push had
+          no cap at all — which read as PUSH not being a key on this screen */}
+      <Text inverse bold> {k} </Text>
       <Text color={on ? accent : undefined} dimColor={!on}> {label}</Text>
     </Box>
   );

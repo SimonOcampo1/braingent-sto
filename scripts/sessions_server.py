@@ -2131,6 +2131,16 @@ def home_data(fetch=False):
         },
         "update": ui.update_state(),
         "modules": p["modules"],
+        # what the settings screen of the terminal TUI offers, so a second
+        # front-end can offer the same three without a second source for them
+        "prefs": {
+            "accent": ui.ACCENT, "accents": [[k, c] for k, c in ui.ACCENTS],
+            "lang": ui.i18n.LANG, "langs": ui.i18n.LANGS,
+            "badge": badge_status()["on"],
+        },
+        # (usage, what it does) per `sto` command, read off the CLI registry:
+        # a new command shows up on both front-ends without being listed twice
+        "commands": [list(x) for x in ui.commands()],
         "localOnly": p["local_only"],
         "repoOnly": p["repo_only"],
         "gone": sorted(dropped_skills()),
@@ -2226,6 +2236,18 @@ class Handler(BaseHTTPRequestHandler):
                 r = sync_pull()
             elif self.path == "/api/sync/push":
                 r = sync_push()
+            elif self.path == "/api/prefs":
+                length = int(self.headers.get("Content-Length") or 0)
+                try:
+                    body = json.loads(self.rfile.read(length) or b"{}")
+                except ValueError:
+                    body = {}
+                import ui  # ponytail: lazy — same cycle as home_data
+                if "accent" in body:
+                    ui.set_accent(str(body["accent"]))
+                if "lang" in body:
+                    ui.set_lang(str(body["lang"]))
+                r = set_badge(bool(body["badge"])) if "badge" in body else {"ok": True}
             elif self.path == "/api/config/modules":
                 length = int(self.headers.get("Content-Length") or 0)
                 try:

@@ -43,16 +43,18 @@ function C({ w, on, dim, color, align = "left", children }) {
   );
 }
 
-function Scrollbar({ top, size, total }) {
+/** Painted, not drawn: `│` as a track is a hairline with the terminal showing
+ *  through either side of it, and next to a box border it looks like a
+ *  different kind of line. A background has no texture. */
+function Scrollbar({ top, size, total, accent }) {
   if (total <= size) return <Box width={2} />;
   const h = Math.max(1, Math.round((size * size) / total));
   const at = Math.round((top / (total - size)) * (size - h));
   return (
     <Box flexDirection="column" marginLeft={1} width={1}>
-      {Array.from({ length: size }, (_, i) => {
-        const on = i >= at && i < at + h;
-        return <Text key={i} dimColor={!on}>{on ? "█" : "│"}</Text>;
-      })}
+      {Array.from({ length: size }, (_, i) => (
+        <Text key={i} backgroundColor={i >= at && i < at + h ? accent : "gray"}> </Text>
+      ))}
     </Box>
   );
 }
@@ -106,7 +108,7 @@ export function Sessions({ rows, sel, size, t, accent, width }) {
             })}
             {!rows.length && <Text dimColor>{t("empty")}</Text>}
           </Box>
-          <Scrollbar top={top} size={size} total={rows.length} />
+          <Scrollbar top={top} size={size} total={rows.length} accent={accent} />
         </Box>
       </Panel>
 
@@ -171,7 +173,7 @@ export function Memories({ groups, sel, memSel, size, t, accent, width }) {
             })}
             {!groups.length && <Text dimColor>{t("empty")}</Text>}
           </Box>
-          <Scrollbar top={g.top} size={size} total={groups.length} />
+          <Scrollbar top={g.top} size={size} total={groups.length} accent={accent} />
         </Box>
       </Panel>
 
@@ -199,7 +201,7 @@ export function Memories({ groups, sel, memSel, size, t, accent, width }) {
               })}
               {!mems.length && <Text dimColor>{t("empty")}</Text>}
             </Box>
-            <Scrollbar top={m.top} size={size} total={mems.length} />
+            <Scrollbar top={m.top} size={size} total={mems.length} accent={accent} />
           </Box>
         </Panel>
       )}
