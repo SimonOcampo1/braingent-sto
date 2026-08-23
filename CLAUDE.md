@@ -19,5 +19,13 @@ When a significant thread closes in this repo (a bug solved, a decision taken, r
 ## Tests
 
 ```
-cd scripts && python test_sessions_server.py && python test_dream_extract.py && python test_cli.py && python test_ui.py
+cd scripts && python test_sessions_server.py && python test_dream_extract.py && python test_cli.py && python test_ui.py && python test_tui_app.py
+```
+
+`test_tui_app.py` skips itself when `textual` is missing, which is how the line
+above stays runnable on a machine that never opted into that flavour. To
+actually run it:
+
+```
+uv run --no-project --with textual python scripts/test_tui_app.py
 ```

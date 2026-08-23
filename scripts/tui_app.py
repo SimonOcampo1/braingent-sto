@@ -32,6 +32,10 @@ from textual.widgets import (  # noqa: E402
 
 t = i18n.t
 
+# `[x]` is a tag to Textual's markup parser and disappears; escaped, it is a
+# checkbox again. Named here so no f-string has to carry a backslash.
+BOX_ON, BOX_OFF = r"\[x]", r"\[ ]"
+
 # The accent is a preference of the whole OS, stored as an SGR code; Textual
 # wants a colour it can put in a stylesheet.
 ACCENT_CSS = {"36": "cyan", "32": "green", "35": "magenta",
@@ -55,15 +59,47 @@ def bar(pct, width=24, warn=80):
     eighths = " ▏▎▍▌▋▊▉"
     exact = max(0.0, min(1.0, (pct or 0) / 100)) * width
     full = int(exact)
-    tip = eighths[int((exact - full) * 8)]
+    tip = eighths[int((exact - full) * 8)].strip()
     colour = "$error" if (pct or 0) >= warn else "$accent"
-    rest = max(0, width - full - (1 if tip.strip() else 0))
+    rest = max(0, width - full - len(tip))
     return Content.from_markup(
         f"[{colour}]{'█' * full}{tip}[/][$foreground 20%]{'█' * rest}[/]")
 
 
 def ago(ts):
     return ui.ago(ts)
+
+
+class Table(DataTable):
+    """A `DataTable` that states its own column widths and keeps the last one
+    filling whatever is left.
+
+    Left to itself a `DataTable` sizes a column from its header label and never
+    shrinks it, so a description column pushes the table wider than the card it
+    sits in until the left-hand columns walk off the edge — and the width is not
+    known at mount, only once the layout has run. Both problems belong to the
+    table, not to five screens repeating the fix.
+    """
+
+    def __init__(self, *spec, **kw):
+        super().__init__(cursor_type="row", **kw)
+        self.spec = spec
+
+    def on_mount(self) -> None:
+        for label, width in self.spec:
+            self.add_column(label, width=width or 1)
+
+    def on_resize(self) -> None:
+        self.fit()
+
+    def fit(self) -> None:
+        cols = list(self.columns.values())
+        if not cols or not self.size.width or self.spec[-1][1] is not None:
+            return
+        pad = self.cell_padding * 2
+        fixed = sum(w for _, w in self.spec[:-1])
+        cols[-1].width = max(8, self.size.width - fixed - pad * len(cols) - 1)
+        self.refresh(layout=True)
 
 
 def clip(text, n):
@@ -76,25 +112,63 @@ class Card(Container):
     apart in border, padding or title style — which is what made the hand-laid
     version look uneven."""
 
-    def __init__(self, title, *children, **kw):
+    def __init__(self, title, *children, upper=True, **kw):
         super().__init__(*children, classes="card", **kw)
-        self.border_title = title
+        # section headings are shouted the way the prototype shouts them; a
+        # document's own title is not a heading and keeps its capitals
+        self.border_title = str(title).upper() if upper else str(title)
 
 
 # ── the screens ──
+
+# The wordmark of the prototype, drawn as half blocks: six pixel rows become
+# three character rows — `█` where both halves of the cell are lit, `▀` for the
+# top only, `▄` for the bottom. Seven rows of banner ate half a terminal, and
+# the screen under it is the point of the screen.
+_GLYPHS = {
+    "B": ("██████ ", "██   ██", "██████ ", "██   ██", "██   ██", "██████ "),
+    "R": ("██████ ", "██   ██", "██████ ", "██  ██ ", "██   ██", "██   ██"),
+    "A": (" █████ ", "██   ██", "██   ██", "███████", "██   ██", "██   ██"),
+    "I": ("███████", "  ██   ", "  ██   ", "  ██   ", "  ██   ", "███████"),
+    "N": ("██   ██", "███  ██", "████ ██", "██ ████", "██  ███", "██   ██"),
+    "G": (" █████ ", "██   ██", "██     ", "██  ███", "██   ██", " █████ "),
+    "E": ("███████", "██     ", "█████  ", "██     ", "██     ", "███████"),
+    "T": ("███████", "  ██   ", "  ██   ", "  ██   ", "  ██   ", "  ██   "),
+    "S": (" ██████", "██     ", "██████ ", "     ██", "     ██", "██████ "),
+    "O": (" █████ ", "██   ██", "██   ██", "██   ██", "██   ██", " █████ "),
+    " ": ("   ",) * 6,
+}
+
+
+def wordmark(word):
+    glyphs = [_GLYPHS[ch] for ch in word]
+    out = []
+    for r in range(0, 6, 2):
+        line = []
+        for g in glyphs:
+            top, bot = g[r], g[r + 1]
+            line.append("".join("█" if a != " " and b != " "
+                                else "▀" if a != " " else "▄" if b != " " else " "
+                                for a, b in zip(top, bot)))
+        out.append(" ".join(line))
+    return out
+
+
+WORDMARK = wordmark("BRAINGENT STO")
+WORDMARK_W = len(WORDMARK[0])
+
 
 class Home(Grid):
     """Two columns, two rows, proportions stated in the stylesheet."""
 
     def compose(self) -> ComposeResult:
         yield Card(t("sec_sync"), Static(id="sync-body"))
-        yield Card(t("sec_parity"), DataTable(id="parity", cursor_type="row"))
+        yield Card(t("sec_parity"), Table((t("sec_modules"), 16), (t("local"), 6), (t("in_repo"), 7),
+                                     ("Δ L", 4), ("Δ R", 4), id="t-parity"))
         yield Card(t("sec_usage"), Static(id="usage-body"))
         yield Card(t("sec_general"), Static(id="overall-body"))
 
     def on_mount(self) -> None:
-        table = self.query_one("#parity", DataTable)
-        table.add_columns("", t("local"), t("in_repo"), "Δ L", "Δ R")
         self.refresh_data()
 
     def refresh_data(self) -> None:
@@ -104,7 +178,7 @@ class Home(Grid):
         p = app.parity
 
         drift_l = drift_r = 0
-        table = self.query_one("#parity", DataTable)
+        table = self.query_one("#t-parity", Table)
         table.clear()
         for m in p["modules"]:
             dl, dr = app.deltas(m)
@@ -120,6 +194,7 @@ class Home(Grid):
                 Content.from_markup(f"[$warning]{dl}[/]" if dl else "[$foreground 40%]·[/]"),
                 Content.from_markup(f"[$primary]{dr}[/]" if dr else "[$foreground 40%]·[/]"),
             )
+        table.fit()
 
         synced = not (drift_l or drift_r or app.to_push or app.to_pull
                       or sy["ahead"] or sy["behind"])
@@ -189,9 +264,10 @@ class Reader(Screen):
         self._title, self._body = title, body
 
     def compose(self) -> ComposeResult:
-        yield Static(self.app.topbar_content(), id="topbar")
+        with Container(id="chrome"):
+            yield Static(self.app.topbar_content(), id="topbar")
         with Container(id="reader"):
-            with Card(self._title):
+            with Card(self._title, upper=False):
                 with VerticalScroll():
                     yield Static(self._body, markup=False, id="doc")
         yield Footer()
@@ -199,23 +275,24 @@ class Reader(Screen):
 
 class Sessions(Container):
     def compose(self) -> ComposeResult:
-        yield Card(t("tab_sessions"), DataTable(id="sessions", cursor_type="row"))
+        yield Card(t("tab_sessions"), Table((t("col_when"), 10), (t("col_project"), 20),
+                                        (t("col_prompts"), 7), (t("col_tools"), 6),
+                                        (t("col_title"), None), id="t-sessions"))
         yield Card(t("sec_detail"), Static(id="session-detail"))
 
     def on_mount(self) -> None:
-        table = self.query_one("#sessions", DataTable)
-        table.add_columns(t("col_when"), t("col_project"), t("col_prompts"),
-                          t("col_tools"), t("col_title"))
+        table = self.query_one("#t-sessions", Table)
         self.refresh_data()
 
     def refresh_data(self) -> None:
         rows, _ = cli.cached_sessions()
         self.rows = rows
-        table = self.query_one("#sessions", DataTable)
+        table = self.query_one("#t-sessions", Table)
         table.clear()
         for r in rows:
             table.add_row(ago(r["mtime"]), clip(r["project"], 22), str(r["n_prompts"]),
-                          str(r["n_tools"]), clip(r["title"], 90), key=r["id"])
+                          str(r["n_tools"]), clip(r["title"], 200), key=r["id"])
+        table.fit()
         self.show(0)
 
     def show(self, index) -> None:
@@ -236,7 +313,7 @@ class Sessions(Container):
         self.show(event.cursor_row)
 
     def open(self) -> None:
-        table = self.query_one("#sessions", DataTable)
+        table = self.query_one("#t-sessions", Table)
         if not self.rows:
             return
         r = self.rows[table.cursor_row]
@@ -252,11 +329,11 @@ class Sessions(Container):
 class Memory(Container):
     def compose(self) -> ComposeResult:
         yield Card(t("n_projects"), ListView(id="projects"))
-        yield Card(t("tab_memory"), DataTable(id="memories", cursor_type="row"))
+        yield Card(t("tab_memory"), Table((t("col_slug"), 28), (t("col_when"), 9),
+                                      (t("col_machine"), 14), (t("col_desc"), None), id="t-memories"))
 
     def on_mount(self) -> None:
-        table = self.query_one("#memories", DataTable)
-        table.add_columns(t("col_slug"), t("col_when"), t("col_machine"), t("col_desc"))
+        table = self.query_one("#t-memories", Table)
         self.refresh_data()
 
     def refresh_data(self) -> None:
@@ -269,7 +346,7 @@ class Memory(Container):
         self.fill(0)
 
     def fill(self, index) -> None:
-        table = self.query_one("#memories", DataTable)
+        table = self.query_one("#t-memories", Table)
         table.clear()
         if not self.groups:
             return
@@ -277,14 +354,15 @@ class Memory(Container):
         self.current = g
         for m in g["memories"]:
             table.add_row(clip(m["slug"], 30), ago(m["mtime"]),
-                          clip(m["machine"], 16), clip(m["description"], 120))
+                          clip(m["machine"], 16), clip(m["description"], 200))
+        table.fit()
 
     def on_list_view_highlighted(self, event) -> None:
         if event.list_view.index is not None:
             self.fill(event.list_view.index)
 
     def open(self) -> None:
-        table = self.query_one("#memories", DataTable)
+        table = self.query_one("#t-memories", Table)
         if not getattr(self, "current", None) or not self.current["memories"]:
             return
         m = self.current["memories"][table.cursor_row]
@@ -305,24 +383,24 @@ class Skills(Container):
     """
 
     def compose(self) -> ComposeResult:
-        yield Card(t("tab_skills"), DataTable(id="skills", cursor_type="row"))
+        yield Card(t("tab_skills"), Table((t("col_name"), 34), (t("col_desc"), None), id="t-skills"))
         yield Card(t("sec_detail"), Static(id="skill-detail"))
 
     def on_mount(self) -> None:
-        table = self.query_one("#skills", DataTable)
-        table.add_columns("", t("col_slug"), t("col_desc"))
+        table = self.query_one("#t-skills", Table)
         self.refresh_data()
 
     def refresh_data(self) -> None:
         self.rows = ui.module_items("skills") + ui.module_items("plugins")
-        table = self.query_one("#skills", DataTable)
+        table = self.query_one("#t-skills", Table)
         table.clear()
         for r in self.rows:
-            mark, colour = {"local": ("[L]", "$warning"), "repo": ("[R]", "$success"),
-                            "gone": ("[x]", "$error")}.get(r.get("where"),
-                                                           ("[=]", "$foreground 40%"))
-            table.add_row(Content.from_markup(f"[{colour}]{mark}[/]"),
-                          clip(r["label"], 34), clip(r["desc"], 120))
+            mark, colour = {"local": (r"\[L]", "$warning"), "repo": (r"\[R]", "$success"),
+                            "gone": (r"\[x]", "$error")}.get(r.get("where"),
+                                                             (r"\[=]", "$foreground 40%"))
+            table.add_row(Content.from_markup(f"[{colour}]{mark}[/] {clip(r['label'], 34)}"),
+                          clip(r["desc"], 200))
+        table.fit()
         self.show(0)
 
     def show(self, index) -> None:
@@ -340,7 +418,7 @@ class Skills(Container):
         self.show(event.cursor_row)
 
     def open(self) -> None:
-        table = self.query_one("#skills", DataTable)
+        table = self.query_one("#t-skills", Table)
         if not self.rows:
             return
         r = self.rows[table.cursor_row]
@@ -355,15 +433,14 @@ class Skills(Container):
 
 class Config(Container):
     def compose(self) -> ComposeResult:
-        yield Card(t("tab_config"), DataTable(id="config", cursor_type="row"))
+        yield Card(t("tab_config"), Table(("", 26), ("", 14), ("", None), id="t-config", show_header=False))
 
     def on_mount(self) -> None:
-        table = self.query_one("#config", DataTable)
-        table.add_columns("", "", "")
+        table = self.query_one("#t-config", Table)
         self.refresh_data()
 
     def refresh_data(self) -> None:
-        table = self.query_one("#config", DataTable)
+        table = self.query_one("#t-config", Table)
         keep = table.cursor_row
         table.clear()
         self.rows = []
@@ -386,7 +463,7 @@ class Config(Container):
         on = srv.badge_status()["on"]
         self.rows.append(("badge", None))
         table.add_row(t("badge_row"),
-                      Content.from_markup(f"[$accent]{'[x]' if on else '[ ]'}[/]"),
+                      Content.from_markup(f"[$accent]{BOX_ON if on else BOX_OFF}[/]"),
                       Content.from_markup(
                           f"[$foreground 60%]{t('badge_on') if on else t('badge_off')}[/]"))
 
@@ -401,17 +478,18 @@ class Config(Container):
             self.rows.append(("module", m["id"]))
             table.add_row(
                 m["id"],
-                Content.from_markup(f"[$accent]{'[x]' if m['enabled'] else '[ ]'}[/]"),
+                Content.from_markup(f"[$accent]{BOX_ON if m['enabled'] else BOX_OFF}[/]"),
                 Content.from_markup(
                     f"[$foreground 60%]{t('syncing') if m['enabled'] else t('not_syncing')}"
                     f"   {m['localFiles']} {t('local')} · {m['repoFiles']} {t('in_repo')}[/]"))
+        table.fit()
         if 0 <= keep < len(self.rows):
             table.move_cursor(row=keep)
 
     def open(self) -> None:
         """`↵` on the selected row. Headings and the always-synced rows are not
         actions, so landing on one does nothing rather than something odd."""
-        table = self.query_one("#config", DataTable)
+        table = self.query_one("#t-config", Table)
         row = self.rows[table.cursor_row] if table.cursor_row < len(self.rows) else None
         if row is None:
             return
@@ -434,14 +512,14 @@ class Config(Container):
 
 class Help(Container):
     def compose(self) -> ComposeResult:
-        yield Card(t("sec_commands"), DataTable(id="help", cursor_type="row"))
+        yield Card(t("sec_commands"), Table((t("sec_commands"), 34), ("", None), id="t-help", show_header=False))
 
     def on_mount(self) -> None:
-        table = self.query_one("#help", DataTable)
-        table.add_columns(t("sec_commands"), "")
+        table = self.query_one("#t-help", Table)
         for usage, what in ui.commands():
             table.add_row(Content.from_markup(f"[$accent]{usage}[/]"),
                           Content.from_markup(f"[$foreground 60%]{what}[/]"))
+        table.fit()
 
 
 # ── the app ──
@@ -520,8 +598,13 @@ class StoApp(App):
         return Content.from_markup("   ".join(out))
 
     def compose(self) -> ComposeResult:
-        yield Static(self.topbar_content(), id="topbar")
-        yield Static(self.tabbar_content(), id="tabs")
+        # one container docked to the top and not two widgets each docked to it:
+        # docking is to an edge, so two of them land on the same row and the
+        # second draws over the first
+        with Container(id="chrome"):
+            yield Static(self.topbar_content(), id="topbar")
+            yield Static(self.tabbar_content(), id="tabs")
+        yield Static(id="wordmark")
         yield Home(id="home")
         yield Sessions(id="sessions", classes="split")
         yield Memory(id="memory", classes="split-even")
@@ -532,6 +615,7 @@ class StoApp(App):
 
     def on_mount(self) -> None:
         self.apply_accent()
+        self.query_one("#topbar", Static).update(self.topbar_content())
         self.show_tab(HOME)
 
     def apply_accent(self) -> None:
@@ -548,11 +632,19 @@ class StoApp(App):
 
     def show_tab(self, index) -> None:
         self.tab = index % len(TABS)
+        # the banner belongs to the home and only when the terminal can spare
+        # the rows: on a short window the table under it is worth more
+        mark = self.query_one("#wordmark", Static)
+        room = self.size.height >= 30 and self.size.width >= WORDMARK_W + 4
+        mark.display = self.tab == HOME and room
+        if mark.display:
+            mark.update(Content.from_markup(
+                "\n".join(f"[$accent b]{line}[/]" for line in WORDMARK)))
         for i, pane in enumerate(self.panes):
             pane.display = i == self.tab
         self.query_one("#tabs", Static).update(self.tabbar_content())
         pane = self.panes[self.tab]
-        focusable = pane.query(DataTable).first() if pane.query(DataTable) else None
+        focusable = pane.query(Table).first() if pane.query(Table) else None
         if focusable is not None:
             focusable.focus()
 

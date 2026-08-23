@@ -12,21 +12,23 @@ Screen {
 
 /* ── chrome: pinned top and bottom, never scrolls ── */
 
-#topbar {
+#chrome {
     dock: top;
+    height: auto;
+    background: $panel;
+}
+
+#topbar {
     height: 1;
     padding: 0 1;
-    background: $panel;
     color: $text-muted;
 }
 #topbar .name { color: $accent; text-style: bold; }
 #topbar .sep  { color: $foreground 30%; }
 
 #tabs {
-    dock: top;
     height: 1;
     padding: 0 1;
-    background: $panel;
 }
 #tabs .tab     { color: $text-muted; }
 #tabs .key     { background: $foreground; color: $background; text-style: bold; }
@@ -34,6 +36,12 @@ Screen {
 #tabs .on-key  { background: $accent; color: $background; text-style: bold; }
 
 Footer { dock: bottom; }
+
+#wordmark {
+    height: 3;
+    padding: 0 1;
+    margin-top: 1;
+}
 
 /* ── cards: one definition, so every panel is the same object ── */
 
@@ -81,7 +89,7 @@ Footer { dock: bottom; }
     padding: 1;
 }
 
-DataTable {
+DataTable, Table {
     height: 1fr;
     scrollbar-size-vertical: 1;
 }
@@ -104,10 +112,10 @@ ListView > ListItem.--highlight { background: $accent; color: $background; }
 
 /* ── the single-pane screens ── */
 
-#one {
+.one {
     padding: 1;
 }
-#one > .card { height: 1fr; }
+.one > .card { height: 1fr; }
 
 /* ── a reader: one document, scrolled ── */
 
