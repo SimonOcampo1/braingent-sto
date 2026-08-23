@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).parent))  # scripts/ is not a package
 import i18n  # noqa: E402
 import ui  # noqa: E402
 
+from textual.binding import Binding  # noqa: E402
 from textual.containers import Container  # noqa: E402
 from textual.content import Content  # noqa: E402
 from textual.theme import Theme  # noqa: E402
@@ -134,6 +135,17 @@ class Table(DataTable):
     def on_resize(self) -> None:
         self.fit()
 
+    def action_cursor_up(self) -> None:
+        """At the top of the list, `↑` leaves it for the tab bar.
+
+        Only at the top: holding `↑` to reach the first row has to reach the
+        first row, and a hatch that opens one press early is a hatch you fall
+        through every time you use the list normally.
+        """
+        if self.cursor_row <= 0:
+            return self.app.focus_tabs()
+        super().action_cursor_up()
+
     def fit(self) -> None:
         cols = list(self.columns.values())
         if not cols or not self.size.width or self.spec[-1][1] is not None:
@@ -166,6 +178,13 @@ class Search(Input):
     finds, and one docked under the rows it filters is one you cannot watch
     them narrow into. It sits on top of its own list, with its own label.
     """
+
+    # a one-line box has no vertical cursor for `↑` to consume, so unlike a
+    # table there is no top to reach first
+    BINDINGS = [Binding("up", "to_tabs", "", show=False)]
+
+    def action_to_tabs(self) -> None:
+        self.app.focus_tabs()
 
     def __init__(self, **kw):
         # the label is the border title, not a placeholder: with both, the word

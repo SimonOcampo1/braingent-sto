@@ -45,6 +45,12 @@ Screen { background: $background; }
 }
 .tab:hover { color: $accent; }
 
+/* a bar that is taking your arrow keys and a bar that is not have to look
+ * different, the same rule the cards already follow */
+TabBar:focus { background: $surface; }
+TabBar:focus .tab { color: $foreground 80%; }
+TabBar:focus .tab.on { background: $accent; color: $background; }
+
 /* the two rows above the keys: what is running now and what the last thing
  * that ran had to say, plus the arrow that says the pane goes on below.
  * Docked as one container, because dock is to an edge and three widgets

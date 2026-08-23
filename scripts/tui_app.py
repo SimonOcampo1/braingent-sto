@@ -882,6 +882,27 @@ class Help(Container):
 
 # ── the app ──
 
+class TabBar(Container):
+    """The row of tabs, and a place the keyboard can stand.
+
+    `Tab` is the natural key for walking the panels inside a screen and it was
+    spent on walking the screens themselves, which left the panels reachable
+    only with a mouse. Moving it means the bar needs its own way in, so it
+    takes focus like anything else: from `Tab` wrapping round the end of the
+    pane, or from `↑` at the top of the first list.
+    """
+    can_focus = True
+
+    BINDINGS = [
+        Binding("left", "app.prev_tab", "", show=False),
+        Binding("right", "app.next_tab", "", show=False),
+        Binding("down,enter,escape", "leave", "", show=False),
+    ]
+
+    def action_leave(self) -> None:
+        self.app.action_panel_next()
+
+
 class StoApp(App):
     CSS_PATH = "tui_app.tcss"
     TITLE = "braingent STO"
@@ -891,10 +912,10 @@ class StoApp(App):
 
     BINDINGS = [
         *[Binding(str(i + 1), f"tab({i})", "", show=False) for i in range(len(TABS))],
-        # priority: Tab is the library's focus-next by default, and it ate the
-        # one key that is supposed to walk the tab bar everywhere
-        Binding("tab", "next_tab", "", show=False, priority=True),
-        Binding("shift+tab", "prev_tab", "", show=False, priority=True),
+        # priority: Tab is the library's focus-next by default, and ours has to
+        # wrap through the tab bar rather than wander the whole DOM
+        Binding("tab", "panel_next", "panel", priority=True),
+        Binding("shift+tab", "panel_prev", "", show=False, priority=True),
         Binding("enter", "open", "", show=False, priority=True),
         Binding("escape", "back", "", show=False),
         Binding("p", "sync('push')", "PUSH"),
@@ -1009,7 +1030,7 @@ class StoApp(App):
         # second draws over the first
         with Container(id="chrome"):
             yield Static(self.topbar_content(), id="topbar")
-            with Container(id="tabs"):
+            with TabBar(id="tabs"):
                 for i, key in enumerate(TABS):
                     yield Static(f" {t(key)} ", classes="tab", id=f"tab-{i}")
         yield Home(id="home", classes="home")
@@ -1106,7 +1127,10 @@ class StoApp(App):
             # a hidden pane has no size, so its columns were never fitted; the
             # width is only knowable once the pane is the one on screen
             table.call_after_refresh(table.fit)
-        if tables:
+        # not while the bar itself has the focus: changing tab from up there is
+        # how you look around, and being dropped into the content every time
+        # means you can only ever move one tab
+        if tables and not self.query_one("#tabs", TabBar).has_focus:
             tables[0].focus()
         self.call_after_refresh(self._more_check)
 
@@ -1233,6 +1257,48 @@ class StoApp(App):
 
     def action_next_tab(self) -> None:
         self.show_tab(self.tab + 1)
+
+    def focus_ring(self):
+        """The tab bar, then every panel of the pane on screen, in DOM order.
+
+        Written out rather than left to `focus_next`: the library walks the
+        whole screen, and a widget's `focusable` asks about `visibility`, not
+        `display` — so a pane switched off with `display` still offers its
+        tables to `Tab`, and the Sessions screen handed the focus to a table
+        belonging to the home. Walking from the pane and honouring `display` at
+        every level is what keeps `Tab` inside the screen you are looking at,
+        which is also what makes it work for the narrow levels for free.
+        """
+        def panels(node):
+            for child in node.children:
+                if not child.display:
+                    continue
+                if child.focusable:
+                    yield child
+                yield from panels(child)
+
+        return [self.query_one("#tabs", TabBar)] + list(panels(self.panes[self.tab]))
+
+    def _step(self, delta: int) -> None:
+        ring = self.focus_ring()
+        # not in the ring (a tab just changed, a modal just closed): the first
+        # panel is a better landing than the bar you were trying to leave
+        index = ring.index(self.focused) if self.focused in ring else 0
+        ring[(index + delta) % len(ring)].focus()
+
+    def action_panel_next(self) -> None:
+        """The next panel of the pane you are on.
+
+        The tab bar is the first stop of the ring, so wrapping past the last
+        panel lands on it — which is what makes it reachable at all.
+        """
+        self._step(1)
+
+    def action_panel_prev(self) -> None:
+        self._step(-1)
+
+    def focus_tabs(self) -> None:
+        self.query_one("#tabs", TabBar).focus()
 
     def action_open(self) -> None:
         if isinstance(self.focused, Input):

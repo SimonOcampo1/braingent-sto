@@ -79,11 +79,8 @@ def test_a_screen_renders_with_its_chrome_pinned():
     asyncio.run(go())
 
 
-def test_tab_walks_the_tab_bar_and_a_document_has_its_own_keys():
-    """`tab` is the library's focus-next by default, and it ate the one key
-    that is supposed to mean the same thing on every screen.
-
-    And a reader shadows the keys that act on the repo: reading a transcript
+def test_a_document_has_its_own_keys():
+    """A reader shadows the keys that act on the repo: reading a transcript
     with PUSH one keystroke away is an accident, and hiding them also stops the
     footer offering keys the screen cannot use.
     """
@@ -92,14 +89,6 @@ def test_tab_walks_the_tab_bar_and_a_document_has_its_own_keys():
         async with app.run_test(size=(124, 30)) as pilot:
             await app.workers.wait_for_complete()
             await pilot.pause()
-            for expected in (1, 2, 3):
-                await pilot.press("tab")
-                await pilot.pause()
-                assert app.tab == expected, (app.tab, expected)
-            await pilot.press("shift+tab")
-            await pilot.pause()
-            assert app.tab == 2, app.tab
-
             await pilot.press("2")
             await pilot.pause()
             await pilot.press("enter")        # the project hands over its rows
@@ -409,11 +398,93 @@ def test_a_wide_split_shows_every_level_at_once():
     asyncio.run(go())
 
 
+def test_tab_walks_panels_and_the_tab_bar_is_somewhere_you_can_stand():
+    """`Tab` used to cycle the six tabs, which left nothing for the panels
+    inside one — so half the interface could only be reached with a mouse.
+
+    Now it walks the panels of the pane you are on and wraps through the tab
+    bar, which is focusable: standing there the arrows change tab and `↓` drops
+    back into the content. `1`-`6` still jump directly, from anywhere.
+    """
+    async def go():
+        app = tui_app.StoApp()
+        async with app.run_test(size=(140, 30)) as pilot:
+            await app.workers.wait_for_complete()
+            await pilot.press("2")
+            await pilot.pause()
+            seen = set()
+            for _ in range(6):
+                await pilot.press("tab")
+                await pilot.pause()
+                assert app.tab == 1, "tab changed the pestana, not the panel"
+                if app.focused is not None:
+                    seen.add(app.focused.id)
+            assert {"t-groups", "t-rows"} <= seen, seen
+            assert "tabs" in seen, seen
+
+            app.query_one("#tabs").focus()
+            await pilot.pause()
+            await pilot.press("right")
+            await pilot.pause()
+            assert app.tab == 2, app.tab
+            await pilot.press("left")
+            await pilot.pause()
+            assert app.tab == 1, app.tab
+            await pilot.press("down")
+            await pilot.pause()
+            assert app.focused is not None and app.focused.id != "tabs"
+
+            # `↓` lands on the first panel, which is the search box, and there
+            # a digit is a digit — that is what the box is for. `↑` is the way
+            # back out of it, and one `Tab` is the way on to the list
+            assert app.focused.id == "search", app.focused.id
+            await pilot.press("5")
+            await pilot.pause()
+            assert app.tab == 1, "a digit typed in the search box changed tab"
+            app.query_one("#sessions").query_one("#search").value = ""
+
+            await pilot.press("tab")
+            await pilot.pause()
+            await pilot.press("5")
+            await pilot.pause()
+            assert app.tab == 4, app.tab
+
+    asyncio.run(go())
+
+
+def test_up_leaves_a_list_only_from_its_first_row():
+    """The escape hatch upward cannot eat ordinary navigation: holding `↑` to
+    reach the top of a list has to reach the top of the list."""
+    async def go():
+        app = tui_app.StoApp()
+        async with app.run_test(size=(140, 30)) as pilot:
+            await app.workers.wait_for_complete()
+            await pilot.press("2")
+            await pilot.pause()
+            table = app.query_one("#t-groups", tui_app.Table)
+            table.focus()
+            table.move_cursor(row=3)
+            await pilot.pause()
+            await pilot.press("up")
+            await pilot.pause()
+            assert app.focused is table, "up left the list from row 3"
+            assert table.cursor_row == 2, table.cursor_row
+            for _ in range(2):
+                await pilot.press("up")
+                await pilot.pause()
+            assert table.cursor_row == 0, table.cursor_row
+            await pilot.press("up")
+            await pilot.pause()
+            assert app.focused is app.query_one("#tabs"), app.focused
+
+    asyncio.run(go())
+
+
 if __name__ == "__main__":
     test_the_wordmark_is_a_rectangle()
     test_the_accent_and_the_ground_are_one_theme_each()
     test_a_screen_renders_with_its_chrome_pinned()
-    test_tab_walks_the_tab_bar_and_a_document_has_its_own_keys()
+    test_a_document_has_its_own_keys()
     test_focus_starts_on_the_left_and_a_project_hands_it_to_the_right()
     test_the_last_column_takes_the_width_the_others_leave()
     test_the_search_box_is_on_screen_and_narrows_the_list()
@@ -427,4 +498,6 @@ if __name__ == "__main__":
     test_every_card_of_the_home_is_reachable_in_one_column()
     test_a_narrow_split_shows_one_level_and_walks_between_them()
     test_a_wide_split_shows_every_level_at_once()
+    test_tab_walks_panels_and_the_tab_bar_is_somewhere_you_can_stand()
+    test_up_leaves_a_list_only_from_its_first_row()
     print("OK")
