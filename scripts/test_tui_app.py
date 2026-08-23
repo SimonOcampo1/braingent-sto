@@ -25,13 +25,14 @@ def test_the_wordmark_is_a_rectangle():
     """Pasted art goes crooked the moment somebody edits one line of it.
 
     Every row has to be the same width or the block leans, and it has to stay
-    small: the whole point of spelling only `STO` is that the banner is a mark
-    beside the name and not a wall across the top of the home.
+    small: the same name in the face of the prototype is 103 columns of banner
+    across the top of every home, which is most of the screen spent saying what
+    the screen already is.
     """
     rows = tui_app.WORDMARK
     assert len({len(r) for r in rows}) == 1, [len(r) for r in rows]
-    assert len(rows) == 6, len(rows)
-    assert len(rows[0]) < 30, len(rows[0])
+    assert len(rows) == 4, len(rows)          # two lines, two rows each
+    assert len(rows[0]) < 44, len(rows[0])
 
 
 def test_a_screen_renders_with_its_chrome_pinned():
@@ -118,9 +119,63 @@ def test_the_last_column_takes_the_width_the_others_leave():
     asyncio.run(go())
 
 
+def test_search_filters_the_list_and_esc_puts_it_back():
+    """`/` is the key the stdlib TUI uses on every list, and the box is docked
+    rather than floating: a search that covers the rows it filters is a search
+    you cannot watch narrow."""
+    async def go():
+        app = tui_app.StoApp()
+        async with app.run_test(size=(130, 30)) as pilot:
+            await pilot.press("4")            # skills
+            await pilot.pause()
+            before = len(app.query_one("#skills").rows)
+            await pilot.press("slash")
+            await pilot.pause()
+            for ch in "caveman":
+                await pilot.press(ch)
+            await pilot.pause()
+            during = len(app.query_one("#skills").rows)
+            assert 0 < during < before, (before, during)
+            await pilot.press("escape")
+            await pilot.pause()
+            assert len(app.query_one("#skills").rows) == before
+
+    asyncio.run(go())
+
+
+def test_nothing_that_writes_runs_before_the_manifest_is_on_screen():
+    """PUSH and the three skill verbs all go through the same confirmation.
+
+    They are the same question, and four differently worded boxes for it is
+    four chances to phrase the dangerous one gently.
+    """
+    async def go():
+        app = tui_app.StoApp()
+        async with app.run_test(size=(130, 30)) as pilot:
+            await pilot.pause()
+            await pilot.press("p")
+            await pilot.pause()
+            assert type(app.screen).__name__ == "Confirm", app.screen
+            await pilot.press("escape")
+            await pilot.pause()
+
+            await pilot.press("4")
+            await pilot.pause()
+            await pilot.press("d")            # delete this skill from here
+            await pilot.pause()
+            assert type(app.screen).__name__ == "Confirm", app.screen
+            await pilot.press("escape")
+            await pilot.pause()
+            assert type(app.screen).__name__ == "Screen"
+
+    asyncio.run(go())
+
+
 if __name__ == "__main__":
     test_the_wordmark_is_a_rectangle()
     test_a_screen_renders_with_its_chrome_pinned()
     test_tab_walks_the_tab_bar_and_a_document_has_its_own_keys()
     test_the_last_column_takes_the_width_the_others_leave()
+    test_search_filters_the_list_and_esc_puts_it_back()
+    test_nothing_that_writes_runs_before_the_manifest_is_on_screen()
     print("OK")

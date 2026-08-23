@@ -25,10 +25,10 @@ from textual.app import App, ComposeResult  # noqa: E402
 from textual.binding import Binding  # noqa: E402
 from textual.containers import Container, Grid, Horizontal, VerticalScroll  # noqa: E402
 from textual.content import Content  # noqa: E402
-from textual.screen import Screen
+from textual.screen import ModalScreen, Screen
 from textual.theme import Theme  # noqa: E402
 from textual.widgets import (  # noqa: E402
-    DataTable, Footer, ListItem, ListView, Static,
+    DataTable, Footer, Input, ListItem, ListView, Static,
 )
 
 t = i18n.t
@@ -131,8 +131,10 @@ class Card(Container):
     apart in border, padding or title style — which is what made the hand-laid
     version look uneven."""
 
-    def __init__(self, title, *children, upper=True, **kw):
-        super().__init__(*children, classes="card", **kw)
+    def __init__(self, title, *children, upper=True, classes="", **kw):
+        # merged, not overwritten: a caller asking for one more class was
+        # handing Textual two `classes=` and getting a TypeError
+        super().__init__(*children, classes=f"card {classes}".strip(), **kw)
         # section headings are shouted the way the prototype shouts them; a
         # document's own title is not a heading and keeps its capitals
         self.border_title = str(title).upper() if upper else str(title)
@@ -140,35 +142,31 @@ class Card(Container):
 
 # ── the screens ──
 
-# The wordmark, in figlet's `ansi_shadow` — solid blocks with the thin drawn
-# edge down the right and the bottom, which is the face the prototype uses.
-# Pasted rather than generated: it is six strings, and a whole dependency to
-# produce six strings is a dependency to keep working forever. To change it:
+# The wordmark, in figlet's `double_blocky`: solid `█▀▄` at two rows a line, so
+# the whole name fits on two lines in four rows and thirty-eight columns. The
+# same name in `ansi_shadow` — the face of the prototype — is 103 columns of
+# banner across the top of every home, which is most of the screen spent on
+# saying what the screen already is.
+#
+# Pasted rather than generated: it is four strings, and a dependency to produce
+# four strings is a dependency to keep working forever. To change the face:
 #     uv run --no-project --with pyfiglet python -c
-#       "import pyfiglet; print(pyfiglet.Figlet(font='ansi_shadow').renderText('STO'))"
+#       "import pyfiglet; print(pyfiglet.Figlet(font='double_blocky').renderText('BRAINGENT'))"
 WORDMARK = [
-    "███████╗████████╗ ██████╗ ",
-    "██╔════╝╚══██╔══╝██╔═══██╗",
-    "███████╗   ██║   ██║   ██║",
-    "╚════██║   ██║   ██║   ██║",
-    "███████║   ██║   ╚██████╔╝",
-    "╚══════╝   ╚═╝    ╚═════╝ ",
+    "██▄ █▀█ ▄▀█ ▀█▀ █▄░█ █▀▀ █▀▀ █▄░█ ▀█▀",
+    "█▄█ █▀▄ █▀█ ▄█▄ █░▀█ █▄█ ██▄ █░▀█ ░█░",
+    "                         ▄▀▀ ▀█▀ █▀█ ",
+    "                         ▄██ ░█░ █▄█ ",
 ]
-WORDMARK_W = len(WORDMARK[0]) + 12          # plus the name beside it
+WORDMARK_W = max(len(line) for line in WORDMARK)
 
 
-class Wordmark(Horizontal):
-    """`braingent` beside `STO`, and not the whole name in blocks.
+class Wordmark(Static):
+    """The name, twice as wide as it is tall, in the accent."""
 
-    The full name in this face is 103 columns of banner across the top of every
-    home. The mark is the three letters; the name reads fine at text size next
-    to them, and the screen underneath is the point of the screen.
-    """
-
-    def compose(self) -> ComposeResult:
-        yield Static(Content.from_markup("[b]braingent[/]"), id="mark-name")
+    def on_mount(self) -> None:
         block = "\n".join(f"[$accent]{line}[/]" for line in WORDMARK)
-        yield Static(Content.from_markup(block), id="mark-block")
+        self.update(Content.from_markup(block))
 
 
 class Home(Grid):
@@ -264,6 +262,71 @@ class Home(Grid):
             f"[$foreground 60%]{'agent':<16}[/]{srv.agents.label()}"))
 
 
+class Confirm(ModalScreen[bool]):
+    """Nothing that writes runs before this screen says what it will write.
+
+    One modal for the four verbs — push, pull, and bringing or dropping a
+    skill — because they are the same question, and four differently worded
+    boxes for it is four chances to phrase the dangerous one gently.
+    """
+    BINDINGS = [
+        Binding("y,enter", "yes", ""),
+        Binding("escape,n,q", "no", ""),
+    ]
+
+    def __init__(self, title, lines, danger=False):
+        super().__init__()
+        self._title, self._lines, self._danger = title, lines, danger
+
+    def compose(self) -> ComposeResult:
+        with Container(id="confirm-wrap"):
+            with Card(self._title, upper=False,
+                      classes="danger" if self._danger else ""):
+                with VerticalScroll():
+                    yield Static(Content.from_markup(
+                        "\n".join(self._lines) or t("nothing")), id="confirm-body")
+                yield Static(Content.from_markup(
+                    f"[$accent b] y [/] {t('confirm_go')}"
+                    f"[$foreground 50%]     esc {t('confirm_no')}[/]"), id="confirm-keys")
+
+    def action_yes(self) -> None:
+        self.dismiss(True)
+
+    def action_no(self) -> None:
+        self.dismiss(False)
+
+
+def manifest(data):
+    """What a push or a pull would move, by kind, in the order it matters.
+
+    The same numbers the home shows, spelled out: the count on the key cap
+    answers "how much" and this answers "of what", which is the question you
+    actually have with a finger over the key.
+    """
+    out = []
+    if data["skills"]:
+        shown = ", ".join(data["skills"][:8])
+        rest = len(data["skills"]) - min(8, len(data["skills"]))
+        out.append(f"[$accent]{'skills':<12}[/]{len(data['skills']):>4}   "
+                   f"[$foreground 60%]{shown}{f'  …+{rest}' if rest else ''}[/]")
+    memories = max(sum(data["memories"].values()), data.get("pending_memories", 0))
+    if memories:
+        detail = " · ".join(f"{p} ({n})" for p, n in sorted(data["memories"].items()))
+        out.append(f"[$accent]{'memories':<12}[/]{memories:>4}   "
+                   f"[$foreground 60%]{clip(detail, 90)}[/]")
+    if data["config"]:
+        out.append(f"[$accent]{'config':<12}[/]{len(data['config']):>4}   "
+                   f"[$foreground 60%]{', '.join(data['config'])}[/]")
+    if data["sessions"]:
+        out.append(f"[$accent]{'sessions':<12}[/]{data['sessions']:>4}")
+    if data["vault"]:
+        out.append(f"[$accent]{'vault':<12}[/]{data['vault']:>4}")
+    if data.get("activate"):
+        out.append(f"[$accent]{t('n_activate'):<12}[/]{data['activate']:>4}   "
+                   f"[$foreground 60%]{t('activate_hint')}[/]")
+    return out or [f"[$foreground 60%]{t('nothing_to_sync')}[/]"]
+
+
 class Reader(Screen):
     """One document, scrolled. `Esc` goes back.
 
@@ -323,46 +386,85 @@ class Reader(Screen):
 
 
 class Sessions(Container):
+    """Projects on the left, that project's sessions on the right.
+
+    A flat list of two hundred sessions is a scroll, not a screen. The stdlib
+    TUI groups them by project for the same reason, and `a` opens the whole
+    pile for when you do not know which project it was in.
+    """
+
     def compose(self) -> ComposeResult:
-        yield Card(t("tab_sessions"), Table((t("col_when"), 10), (t("col_project"), 20),
-                                        (t("col_prompts"), 7), (t("col_tools"), 6),
-                                        (t("col_title"), None), id="t-sessions"))
-        yield Card(t("sec_detail"), Static(id="session-detail"))
+        yield Card(t("n_projects"), ListView(id="s-projects"))
+        yield Card(t("tab_sessions"),
+                   Table((t("col_when"), 10), (t("col_project"), 18),
+                         (t("col_prompts"), 7), (t("col_tools"), 6),
+                         (t("col_errors"), 7), (t("col_title"), None),
+                         id="t-sessions"))
 
     def on_mount(self) -> None:
-        table = self.query_one("#t-sessions", Table)
+        self.q = ""   # the search text; `self.query` is the DOM query
+        self.all = False
         self.refresh_data()
 
     def refresh_data(self) -> None:
         rows, _ = cli.cached_sessions()
-        self.rows = rows
+        self.all_rows = rows
+        groups = {}
+        for r in rows:
+            groups.setdefault(r["project"], []).append(r)
+        self.groups = sorted(groups.items(), key=lambda kv: -kv[1][0]["mtime"])
+        lv = self.query_one("#s-projects", ListView)
+        keep = lv.index or 0
+        lv.clear()
+        lv.append(ListItem(Static(Content.from_markup(
+            f"[$accent b]{t('show_all'):<22}[/][$foreground 60%]{len(rows):>4}[/]"))))
+        for name, items in self.groups:
+            lv.append(ListItem(Static(Content.from_markup(
+                f"[$accent]{clip(name, 22):<22}[/][$foreground 60%]{len(items):>4}[/]"))))
+        lv.index = min(keep, len(self.groups))
+        self.fill(lv.index)
+
+    def visible(self):
+        rows = self.all_rows if self.all else self.rows_of_group
+        if self.q:
+            q = self.q.lower()
+            rows = [r for r in rows
+                    if q in f"{r['project']} {r['title']}".lower()]
+        return rows
+
+    @property
+    def rows_of_group(self):
+        if self.index == 0 or self.index > len(self.groups):
+            return self.all_rows
+        return self.groups[self.index - 1][1]
+
+    def fill(self, index) -> None:
+        self.index = index or 0
+        self.all = self.index == 0
         table = self.query_one("#t-sessions", Table)
         table.clear()
-        for r in rows:
-            table.add_row(ago(r["mtime"]), clip(r["project"], 22), str(r["n_prompts"]),
-                          str(r["n_tools"]), clip(r["title"], 200), key=r["id"])
+        self.rows = self.visible()
+        for r in self.rows:
+            table.add_row(ago(r["mtime"]), clip(r["project"], 18), str(r["n_prompts"]),
+                          str(r["n_tools"]),
+                          Content.from_markup(f"[$error]{r['errors']}[/]"
+                                              if r["errors"] else "0"),
+                          clip(r["title"], 200), key=r["id"])
         table.fit()
-        self.show(0)
 
-    def show(self, index) -> None:
-        if not self.rows:
-            return
-        r = self.rows[max(0, min(index, len(self.rows) - 1))]
-        self.query_one("#session-detail", Static).update(Content.from_markup(
-            f"[$foreground 60%]{t('col_project'):<10}[/][$accent]{r['project']}[/]\n"
-            f"[$foreground 60%]{t('col_machine'):<10}[/]{r['machine'] or t('this_one')}\n"
-            f"[$foreground 60%]{t('col_when'):<10}[/]{ago(r['mtime'])}\n\n"
-            f"[$foreground 60%]{t('col_prompts'):<10}[/]{r['n_prompts']}\n"
-            f"[$foreground 60%]{t('col_tools'):<10}[/]{r['n_tools']}\n"
-            f"[$foreground 60%]{t('col_errors'):<10}[/]"
-            + (f"[$error]{r['errors']}[/]" if r["errors"] else "0")
-            + f"\n\n{clip(r['title'], 400)}"))
+    def set_query(self, text) -> None:
+        self.q = text
+        self.fill(self.index)
 
-    def on_data_table_row_highlighted(self, event) -> None:
-        self.show(event.cursor_row)
+    def on_list_view_highlighted(self, event) -> None:
+        if event.list_view.index is not None:
+            self.fill(event.list_view.index)
+
+    def on_list_view_selected(self, event) -> None:
+        self.query_one("#t-sessions", Table).focus()
 
     def on_data_table_row_selected(self, event) -> None:
-        self.open()          # a click on a row is the same as pressing it
+        self.open()
 
     def open(self) -> None:
         table = self.query_one("#t-sessions", Table)
@@ -385,7 +487,7 @@ class Memory(Container):
                                       (t("col_machine"), 14), (t("col_desc"), None), id="t-memories"))
 
     def on_mount(self) -> None:
-        table = self.query_one("#t-memories", Table)
+        self.q = ""   # the search text; `self.query` is the DOM query
         self.refresh_data()
 
     def refresh_data(self) -> None:
@@ -404,7 +506,7 @@ class Memory(Container):
             return
         g = self.groups[max(0, min(index, len(self.groups) - 1))]
         self.current = g
-        for m in g["memories"]:
+        for m in self.visible(g):
             table.add_row(clip(m["slug"], 30), ago(m["mtime"]),
                           clip(m["machine"], 16), clip(m["description"], 200))
         table.fit()
@@ -412,6 +514,18 @@ class Memory(Container):
     def on_list_view_highlighted(self, event) -> None:
         if event.list_view.index is not None:
             self.fill(event.list_view.index)
+
+    def visible(self, group):
+        if not self.q:
+            return group["memories"]
+        q = self.q.lower()
+        return [m for m in group["memories"]
+                if q in f"{m['slug']} {m['type']} {m['description']}".lower()]
+
+    def set_query(self, text) -> None:
+        self.q = text
+        lv = self.query_one("#projects", ListView)
+        self.fill(lv.index or 0)
 
     def on_list_view_selected(self, event) -> None:
         # clicking a project moves to its memories rather than opening one:
@@ -423,9 +537,12 @@ class Memory(Container):
 
     def open(self) -> None:
         table = self.query_one("#t-memories", Table)
-        if not getattr(self, "current", None) or not self.current["memories"]:
+        if not getattr(self, "current", None):
             return
-        m = self.current["memories"][table.cursor_row]
+        rows = self.visible(self.current)
+        if not rows:
+            return
+        m = rows[table.cursor_row]
         row = dict(m, project=self.current["project"])
         # `ui.detail_memory` already reads the file and appends the one level of
         # graph around it; re-reading it here would be a second answer to the
@@ -447,12 +564,17 @@ class Skills(Container):
         yield Card(t("sec_detail"), Static(id="skill-detail"))
 
     def on_mount(self) -> None:
-        table = self.query_one("#t-skills", Table)
+        self.q = ""   # the search text; `self.query` is the DOM query
         self.refresh_data()
 
     def refresh_data(self) -> None:
-        self.rows = ui.module_items("skills") + ui.module_items("plugins")
+        rows = ui.module_items("skills") + ui.module_items("plugins")
+        if self.q:
+            q = self.q.lower()
+            rows = [r for r in rows if q in f"{r['label']} {r['desc']}".lower()]
+        self.rows = rows
         table = self.query_one("#t-skills", Table)
+        keep = table.cursor_row
         table.clear()
         for r in self.rows:
             mark, colour = {"local": (r"\[L]", "$warning"), "repo": (r"\[R]", "$success"),
@@ -461,10 +583,18 @@ class Skills(Container):
             table.add_row(Content.from_markup(f"[{colour}]{mark}[/] {clip(r['label'], 34)}"),
                           clip(r["desc"], 200))
         table.fit()
-        self.show(0)
+        if 0 <= keep < len(self.rows):
+            table.move_cursor(row=keep)
+        self.show(min(keep, max(0, len(self.rows) - 1)))
+
+    def set_query(self, text) -> None:
+        self.q = text
+        self.refresh_data()
 
     def show(self, index) -> None:
         if not self.rows:
+            self.query_one("#skill-detail", Static).update(
+                Content.from_markup(f"[$foreground 60%]{t('empty')}[/]"))
             return
         r = self.rows[max(0, min(index, len(self.rows) - 1))]
         state = {"local": "st_local", "repo": "st_repo",
@@ -492,6 +622,67 @@ class Skills(Container):
             self.app.notify(t("empty"))
             return
         self.app.push_screen(Reader(skill["name"], skill["content"]))
+
+    # ── the three verbs of the module screen of the stdlib TUI ──
+    #
+    # `a` brings what the repo has, `d` removes it from this machine, `R` drops
+    # it from the repo. There is no fourth for "push this one": `export_config`
+    # carries everything local on the next push anyway.
+
+    def selected(self):
+        table = self.query_one("#t-skills", Table)
+        if not self.rows:
+            return None
+        r = self.rows[table.cursor_row]
+        if r["what"] not in ("skill", "plugin"):
+            self.app.notify(t("not_deletable", id=r["what"]), severity="warning")
+            return None
+        return r
+
+    def act(self, verb) -> None:
+        row = self.selected()
+        if row is None:
+            return
+        name = row["label"] if row["what"] == "skill" else row["id"]
+        target = f"{row['what']}:{name}"
+
+        if verb == "delete":
+            lines = [f"[$error b]{t('delete_title', what=row['what'])}[/]  {row['label']}",
+                     f"[$foreground 60%]{t('delete_warning')}[/]"]
+            return self.ask(t("k_delete"), lines, True,
+                            lambda: self._delete(row))
+
+        # bring and forget both dry-run first: the manifest is the file list the
+        # engine itself is about to touch, not a summary written here
+        paths, err = (srv.bring(target) if verb == "bring" else srv.forget(target))
+        if err:
+            return self.app.notify(err, severity="error")
+        lines = [f"[$accent]{p}[/]" for p in list(paths)[:14]]
+        if len(paths) > 14:
+            lines.append(f"[$foreground 60%]…+{len(paths) - 14}[/]")
+        self.ask(t("k_bring") if verb == "bring" else t("k_forget"), lines,
+                 verb == "forget",
+                 lambda: self._apply(verb, target, row["label"]))
+
+    def ask(self, title, lines, danger, run) -> None:
+        def answered(yes):
+            if yes:
+                run()
+                self.app.action_reload()
+        self.app.push_screen(Confirm(title, lines, danger), answered)
+
+    def _apply(self, verb, target, label) -> None:
+        fn = srv.bring if verb == "bring" else srv.forget
+        _, err = fn(target, apply=True)
+        self.app.done(err or t("brought" if verb == "bring" else "forgotten", id=label),
+                      bool(err))
+
+    def _delete(self, row) -> None:
+        if row["what"] == "skill":
+            err = srv.delete_skill(row["id"])
+        else:
+            err = srv.plugin_cmd("uninstall", row["id"]).get("error")
+        self.app.done(err or t("deleted", id=row["label"]), bool(err))
 
 
 class Config(Container):
@@ -626,6 +817,10 @@ class StoApp(App):
         Binding("g", "graph", "GRAPH"),
         Binding("r", "reload", "reload"),
         Binding("q", "quit", "quit"),
+        Binding("slash", "search", "", show=False),
+        Binding("a", "verb('bring')", "", show=False),
+        Binding("d", "verb('delete')", "", show=False),
+        Binding("R", "verb('forget')", "", show=False),
     ]
 
     def __init__(self):
@@ -689,13 +884,20 @@ class StoApp(App):
                     yield Static(f" {t(key)} ", classes="tab", id=f"tab-{i}")
         yield Wordmark(id="wordmark")
         yield Home(id="home")
-        yield Sessions(id="sessions", classes="split")
+        yield Sessions(id="sessions", classes="split-even")
         yield Memory(id="memory", classes="split-even")
         yield Skills(id="skills", classes="split")
         yield Config(id="config", classes="one")
         yield Help(id="help", classes="one")
+        yield Input(placeholder=t("k_search"), id="search")
         yield Static("", id="status")
         yield Footer(show_command_palette=False)
+
+    def on_resize(self) -> None:
+        # Textual CSS has no media query, so the breakpoint is a class the app
+        # puts on itself and the stylesheet answers
+        self.set_class(self.size.width < 100, "narrow")
+        self.show_tab(self.tab)
 
     def on_mount(self) -> None:
         self.apply_theme()
@@ -728,7 +930,7 @@ class StoApp(App):
         # the banner belongs to the home and only when the terminal can spare
         # the rows: on a short window the table under it is worth more
         mark = self.query_one("#wordmark", Wordmark)
-        mark.display = (self.tab == HOME and self.size.height >= 28
+        mark.display = (self.tab == HOME and self.size.height >= 26
                         and self.size.width >= WORDMARK_W + 4)
         for i, pane in enumerate(self.panes):
             pane.display = i == self.tab
@@ -758,6 +960,53 @@ class StoApp(App):
         # screen is how the one key that should mean the same thing everywhere
         # stops meaning it two screens in.
         self.show_tab(self.tab + 1)
+
+    # ── search ──
+
+    def action_search(self) -> None:
+        """`/` on any screen that has a list. The box is docked rather than
+        floating: a search that covers the rows it is filtering is a search you
+        cannot watch narrow."""
+        pane = self.panes[self.tab]
+        if not hasattr(pane, "set_query"):
+            return
+        box = self.query_one("#search", Input)
+        box.display = True
+        box.focus()
+
+    def on_input_changed(self, event) -> None:
+        pane = self.panes[self.tab]
+        if hasattr(pane, "set_query"):
+            pane.set_query(event.value)
+
+    def on_input_submitted(self, event) -> None:
+        self.close_search(keep=True)
+
+    def close_search(self, keep=False) -> None:
+        box = self.query_one("#search", Input)
+        if not keep:
+            box.value = ""
+            pane = self.panes[self.tab]
+            if hasattr(pane, "set_query"):
+                pane.set_query("")
+        box.display = False
+        pane = self.panes[self.tab]
+        target = pane.query(Table).first() if pane.query(Table) else None
+        if target is not None:
+            target.focus()
+
+    def on_key(self, event) -> None:
+        if event.key == "escape" and self.query_one("#search", Input).display:
+            self.close_search()
+            event.stop()
+
+    def action_verb(self, verb: str) -> None:
+        """`a` / `d` / `R` belong to whichever screen can do them. Bound at the
+        app so the footer can name them, dispatched to the pane so a screen
+        that has no such verb simply does not have one."""
+        pane = self.panes[self.tab]
+        if hasattr(pane, "act"):
+            pane.act(verb)
 
     def action_open(self) -> None:
         pane = self.panes[self.tab]
@@ -827,11 +1076,25 @@ class StoApp(App):
         self.done(res.get("error") or res.get("message") or "", bool(res.get("error")))
 
     def action_sync(self, what: str) -> None:
-        self.busy(what.upper())
-        fn = srv.sync_push if what == "push" else srv.sync_pull
-        res = fn()
-        self.done(res.get("error") or res.get("message") or "", bool(res.get("error")))
-        self.action_reload()
+        """Nothing moves before the manifest is on screen.
+
+        The count on the key cap says how much; this says of what, which is the
+        question you actually have with a finger over the key.
+        """
+        data = self.preview[0 if what == "push" else 1]
+        title = f"{'▲' if what == 'push' else '▼'} {what.upper()}"
+
+        def answered(yes):
+            if not yes:
+                return
+            self.busy(what.upper())
+            fn = srv.sync_push if what == "push" else srv.sync_pull
+            res = fn()
+            self.done(res.get("error") or res.get("message") or "",
+                      bool(res.get("error")))
+            self.action_reload()
+
+        self.push_screen(Confirm(title, manifest(data)), answered)
 
 
 def run():
