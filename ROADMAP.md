@@ -214,9 +214,21 @@ reserved.
 
 ## 8. `sto find` — one search across everything
 
-Three corpora, three commands, three rankings (`sto search` for sessions, `sto
-memory search`, nothing for the vault). One command over all three, grouped by
-source. [basic-memory](https://github.com/basicmachines-co/basic-memory)'s design
+**Half done.** The ranking function exists: `ui.search_all(q)` searches
+sessions, memories, tools and vault notes and returns one ranked list where
+every hit says which corpus it came from. The Textual TUI's home box is its
+first caller. What is left of this item is the **CLI command** and the durable
+index — not the design.
+
+The remembered numbers, because they are the reason the rest of this item still
+matters: an uncached pass over a real repo is 0.83 s, most of it reading the
+vault. `search_all` keeps an in-process index keyed by mtime, which turns that
+into 0.07 s — but it dies with the process, so `sto find` from a shell would
+pay the 0.83 s every time. That is what the FTS5 cache below is for.
+
+Three corpora used to mean three commands and three rankings (`sto search` for
+sessions, `sto memory search`, nothing for the vault). One command over all
+three, grouped by source. [basic-memory](https://github.com/basicmachines-co/basic-memory)'s design
 is the one to copy: **markdown stays the source of truth, the index is derived** —
 a `sqlite3` FTS5 table under `.sto-cache/`, rebuilt from files, deletable at any
 time without losing anything. `sqlite3` with FTS5 is in the standard library, so
