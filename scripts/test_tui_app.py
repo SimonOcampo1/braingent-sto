@@ -26,6 +26,22 @@ def screen_text(app):
     return [strip.text for strip in app.screen._compositor.render_strips()]
 
 
+async def on_kind(app, pilot, kind="skills"):
+    """Put the Tools cursor on one kind and hand back that pane.
+
+    The tab used to be skills and nothing else; now the rows are whichever kind
+    you are standing on, so a test about the row list has to say which.
+    """
+    await pilot.press("4")
+    await pilot.pause()
+    pane = app.query_one("#tools")
+    kinds = pane.query_one("#t-kinds", tui_app.Table)
+    kinds.move_cursor(row=pane.modules.index(kind))
+    pane.fill()
+    await pilot.pause()
+    return pane
+
+
 def test_the_wordmark_is_a_rectangle():
     """Pasted art goes crooked the moment somebody edits one line of it.
 
@@ -137,10 +153,9 @@ def test_the_last_column_takes_the_width_the_others_leave():
     async def go():
         app = tui_app.StoApp()
         async with app.run_test(size=(140, 30)) as pilot:
-            await pilot.press("4")            # skills: name + description
+            pane = await on_kind(app, pilot)  # skills: name + description
             await pilot.pause()
-            await pilot.pause()
-            table = app.query_one("#skills").query_one("#t-rows", tui_app.Table)
+            table = pane.query_one("#t-rows", tui_app.Table)
             widths = [c.width for c in table.columns.values()]
             assert widths[0] == 34, widths
             assert widths[-1] > 20, widths
@@ -156,9 +171,7 @@ def test_the_search_box_is_on_screen_and_narrows_the_list():
     async def go():
         app = tui_app.StoApp()
         async with app.run_test(size=(130, 30)) as pilot:
-            await pilot.press("4")
-            await pilot.pause()
-            pane = app.query_one("#skills")
+            pane = await on_kind(app, pilot)
             box = pane.query_one("#search", tui_app.Search)
             assert box.display, "the search box is not on screen"
             before = len(pane.rows)
@@ -188,7 +201,8 @@ def test_nothing_that_writes_runs_before_the_manifest_is_on_screen():
             await pilot.press("escape")
             await pilot.pause()
 
-            await pilot.press("4")
+            pane = await on_kind(app, pilot)
+            pane.query_one("#t-rows", tui_app.Table).focus()
             await pilot.pause()
             await pilot.press("d")            # delete this skill from here
             await pilot.pause()
@@ -604,6 +618,36 @@ def test_a_memory_renders_as_markdown_and_a_transcript_does_not():
     asyncio.run(go())
 
 
+def test_tools_reaches_every_config_module_and_reads_one():
+    """The tab used to be skills only, so `settings.json` and `CLAUDE.md` --
+    which sync carries and the parity table counts -- could be seen as a number
+    and never as a file.
+
+    The kinds come from `CONFIG_MODULES` itself, so the tab cannot drift from
+    what push actually moves.
+    """
+    async def go():
+        app = tui_app.StoApp()
+        async with app.run_test(size=(150, 30)) as pilot:
+            await app.workers.wait_for_complete()
+            await pilot.press("4")
+            await pilot.pause()
+            pane = app.query_one("#tools")
+            assert pane.modules == list(tui_app.srv.CONFIG_MODULES), pane.modules
+
+            pane = await on_kind(app, pilot, "claude-md")
+            assert pane.rows, "claude-md listed nothing"
+            assert pane.content(pane.rows[0]) is not None, "the file did not read"
+
+            # a plugin is a manifest entry with no document behind it, and that
+            # is an answer rather than a crash
+            plugins = tui_app.ui.module_items("plugins")
+            if plugins:
+                assert pane.content(plugins[0]) is None, plugins[0]
+
+    asyncio.run(go())
+
+
 if __name__ == "__main__":
     test_the_wordmark_is_a_rectangle()
     test_the_accent_and_the_ground_are_one_theme_each()
@@ -628,4 +672,5 @@ if __name__ == "__main__":
     test_a_column_whose_only_correct_order_is_the_default_is_not_in_the_cycle()
     test_the_marquee_runs_only_where_text_is_cut_and_only_with_focus()
     test_a_memory_renders_as_markdown_and_a_transcript_does_not()
+    test_tools_reaches_every_config_module_and_reads_one()
     print("OK")

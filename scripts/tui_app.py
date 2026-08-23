@@ -37,9 +37,9 @@ from tui_widgets import (  # noqa: E402
 
 t = i18n.t
 
-TABS = ["tab_home", "tab_sessions", "tab_memory", "tab_skills",
+TABS = ["tab_home", "tab_sessions", "tab_memory", "tab_tools",
         "tab_config", "tab_help"]
-HOME, SESSIONS, MEMORY, SKILLS, CONFIG, HELP = range(6)
+HOME, SESSIONS, MEMORY, TOOLS, CONFIG, HELP = range(6)
 
 
 # ── a transcript, as a conversation ──
@@ -509,19 +509,29 @@ class Memory(Split):
         self.app.open_memory(m["project"], m["slug"], m["machine"])
 
 
-class Skills(Levels, Container):
-    """The skills and plugins of this machine and of the repo, together.
+class Tools(Levels, Container):
+    """Everything the agent runs with, on this machine and in the repo.
 
-    This is the drill-down the terminal TUI does inside a config module, and it
-    carries the same four states — the point of the screen is the rows that are
-    only on one side.
+    It was the skills tab, which meant `settings.json` and `CLAUDE.md` — things
+    push carries and the parity table counts — could be seen as a number and
+    never as a file. The kinds are the keys of `CONFIG_MODULES` itself, so the
+    tab cannot drift from what sync actually moves.
+
+    Every row still carries the same four states, which is the point of the
+    screen: the ones that are only on one side.
     """
 
-    LEVELS = ("rows", "detail")
+    LEVELS = ("kinds", "rows", "detail")
 
     def compose(self) -> ComposeResult:
         yield Search(id="search")
-        yield Card(t("tab_skills"),
+        # one column, with the count in the text: two columns in a rail this
+        # narrow leaves the number nowhere to go, and a header that repeats the
+        # card's own title is a row pretending to be a heading
+        yield Card(t("sec_kinds"),
+                   Table(("", None), id="t-kinds", show_header=False),
+                   id="kinds")
+        yield Card(t("tab_tools"),
                    Table((t("col_name"), 34, "text"), (t("col_desc"), None, "text"),
                          id="t-rows"),
                    id="rows")
@@ -537,10 +547,28 @@ class Skills(Levels, Container):
         self.level = 0
         self.refresh_data()
         self.set_level(0)
-        self.query_one("#t-rows", Table).focus()
+        self.query_one("#t-kinds", Table).focus()
 
     def refresh_data(self) -> None:
-        rows = ui.module_items("skills") + ui.module_items("plugins")
+        """The kinds, which are the modules, and then the list of the one you
+        are on. No query changes the kinds -- they are what sync carries."""
+        table = self.query_one("#t-kinds", Table)
+        keep = table.cursor_row
+        table.clear()
+        self.modules = list(srv.CONFIG_MODULES)
+        for mod in self.modules:
+            n = len(ui.module_items(mod))
+            table.add_row(Content.from_markup(
+                f"{mod}  [$foreground 50%]{n}[/]" if n else
+                f"[$foreground 50%]{mod}  0[/]"))
+        table.fit()
+        if 0 < keep < table.row_count:
+            table.move_cursor(row=keep)
+        self.fill()
+
+    def fill(self) -> None:
+        index = self.query_one("#t-kinds", Table).cursor_row
+        rows = ui.module_items(self.modules[max(0, min(index, len(self.modules) - 1))])
         if self.q:
             q = self.q.lower()
             rows = [r for r in rows if q in f"{r['label']} {r['desc']}".lower()]
@@ -559,12 +587,13 @@ class Skills(Levels, Container):
             table.move_cursor(row=keep)
         if not rows:
             self.app.empty(table, t("cli_no_hits", q=self.q) if self.q
-                           else t("cli_no_skills"))
+                           else t("empty"))
         self.preview(min(keep, max(0, len(rows) - 1)))
 
     def on_input_changed(self, event) -> None:
+        # only the rows: the kinds are the modules and no query changes those
         self.q = event.value
-        self.refresh_data()
+        self.fill()
 
     def on_input_submitted(self, event) -> None:
         self.query_one("#t-rows", Table).focus()
@@ -582,24 +611,59 @@ class Skills(Levels, Container):
             f"{esc(clip(r['desc'], 600))}"))
 
     def on_data_table_row_highlighted(self, event) -> None:
-        self.preview(event.cursor_row)
+        if event.data_table.id == "t-kinds":
+            self.fill()
+        else:
+            self.preview(event.cursor_row)
 
     def on_data_table_row_selected(self, event) -> None:
         self.open()
 
+    def content(self, row):
+        """What this row has to read, or `None` when it is not a document.
+
+        A skill is its `SKILL.md`, a config row is the file itself, and a
+        plugin is a manifest entry with nothing behind it — a real answer and
+        not a failure, so it is said rather than raised. A skill the repo
+        carries and this machine never installed has nothing here either.
+        """
+        if row["what"] == "skill":
+            skill = srv.get_skill(row["id"])
+            return skill["content"] if skill else None
+        if row["what"] == "file":
+            try:
+                return Path(row["id"]).read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                return None
+        return None
+
+    def show(self, module, item_id) -> None:
+        """Land on one tool, from somewhere else. Used by the home's search."""
+        if module in self.modules:
+            self.query_one("#t-kinds", Table).move_cursor(
+                row=self.modules.index(module))
+            self.fill()
+        table = self.query_one("#t-rows", Table)
+        for i, row in enumerate(self.rows):
+            if row["id"] == item_id:
+                table.move_cursor(row=i)
+                break
+        self.set_level(1)
+
     def open(self) -> None:
         if self.drill():
             return
-        table = self.query_one("#t-rows", Table)
         if not self.rows:
             return
-        r = self.rows[table.cursor_row]
-        skill = srv.get_skill(r["id"]) if r["what"] == "skill" else None
-        if skill is None:
-            # a plugin has no SKILL.md to read, and neither does a skill the
-            # repo has but this machine never installed
+        row = self.rows[self.query_one("#t-rows", Table).cursor_row]
+        body = self.content(row)
+        if body is None:
             return self.app.notify(t("empty"))
-        self.app.push_screen(Reader(skill["name"], skill["content"], markdown=True))
+        # markdown only where the file is markdown: json inside a markdown
+        # renderer is worse json, not better
+        self.app.push_screen(Reader(
+            row["label"], body,
+            markdown=row["what"] == "skill" or row["label"].lower().endswith(".md")))
 
     # ── the three verbs of the module screen of the stdlib TUI ──
     #
@@ -1065,7 +1129,7 @@ class StoApp(App):
         yield Home(id="home", classes="home")
         yield Sessions(id="sessions", classes="split")
         yield Memory(id="memory", classes="split")
-        yield Skills(id="skills", classes="split wide-left")
+        yield Tools(id="tools", classes="split three-way")
         yield Config(id="config", classes="three")
         yield Help(id="help", classes="two")
         # one container docked to the bottom and not three widgets each docked
@@ -1134,7 +1198,7 @@ class StoApp(App):
     @property
     def panes(self):
         return [self.query_one(f"#{name}") for name in
-                ("home", "sessions", "memory", "skills", "config", "help")]
+                ("home", "sessions", "memory", "tools", "config", "help")]
 
     def show_tab(self, index) -> None:
         self.tab = index % len(TABS)

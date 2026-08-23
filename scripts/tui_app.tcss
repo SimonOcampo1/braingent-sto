@@ -102,9 +102,12 @@ Search:focus { border: round $accent; border-title-color: $accent; }
 
 /* sessions, memories and skills: the box on top, then the two lists */
 .split { layout: grid; grid-size: 2 2; grid-columns: 1fr 2fr; grid-rows: 3 1fr; grid-gutter: 1 1; }
-/* skills is the same shape the other way round: the list is what you read and
- * the panel beside it is the footnote */
-.split.wide-left { grid-columns: 2fr 1fr; }
+/* tools is three panels: the kinds stay put on the left and the two on the
+ * right are what changes as you walk in */
+/* the list gets more room than the detail beside it: the list is what you
+ * read and the panel next to it is the footnote */
+.split.three-way { grid-size: 3 2; grid-columns: 18 3fr 2fr; }
+.split.three-way > Search { column-span: 3; }
 .split > Search { column-span: 2; margin-bottom: 0; }
 .three { layout: grid; grid-size: 2 2; grid-columns: 1fr 1fr; grid-rows: 1fr 1fr; grid-gutter: 1 1; }
 #prefs { column-span: 1; }
