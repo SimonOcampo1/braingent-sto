@@ -23,9 +23,10 @@ import ui  # noqa: E402
 
 from textual.app import App, ComposeResult  # noqa: E402
 from textual.binding import Binding  # noqa: E402
-from textual.containers import Container, Grid, VerticalScroll  # noqa: E402
+from textual.containers import Container, Grid, Horizontal, VerticalScroll  # noqa: E402
 from textual.content import Content  # noqa: E402
-from textual.screen import Screen  # noqa: E402
+from textual.screen import Screen
+from textual.theme import Theme  # noqa: E402
 from textual.widgets import (  # noqa: E402
     DataTable, Footer, ListItem, ListView, Static,
 )
@@ -38,8 +39,26 @@ BOX_ON, BOX_OFF = r"\[x]", r"\[ ]"
 
 # The accent is a preference of the whole OS, stored as an SGR code; Textual
 # wants a colour it can put in a stylesheet.
-ACCENT_CSS = {"36": "cyan", "32": "green", "35": "magenta",
-              "34": "dodgerblue", "33": "orange", "31": "tomato"}
+ACCENT_CSS = {"36": "#22d3ee", "32": "#4ade80", "35": "#c084fc",
+              "34": "#60a5fa", "33": "#fbbf24", "31": "#f87171"}
+
+# Three grounds, ours and not the library's. Textual ships a dozen themes and
+# every one of them brings its own accent, which then fights the accent the OS
+# already has a setting for — two places deciding one colour. These take the
+# accent from `sto ui` and only decide how dark the room is.
+GROUNDS = {
+    "dark":  ("#12141a", "#171a21", "#1d212a", "#e6e8ee", False),
+    "light": ("#f6f7f9", "#ffffff", "#eceef2", "#1b1e26", True),
+    "black": ("#000000", "#0a0a0a", "#121212", "#e6e8ee", False),
+}
+
+
+def make_theme(name, accent):
+    background, surface, panel, foreground, light = GROUNDS[name]
+    return Theme(name=f"sto-{name}", primary=accent, secondary=accent,
+                 accent=accent, background=background, surface=surface,
+                 panel=panel, foreground=foreground, dark=not light,
+                 success="#4ade80", warning="#fbbf24", error="#f87171")
 
 TABS = ["tab_home", "tab_sessions", "tab_memory", "tab_skills",
         "tab_config", "tab_help"]
@@ -121,41 +140,35 @@ class Card(Container):
 
 # ── the screens ──
 
-# The wordmark of the prototype, drawn as half blocks: six pixel rows become
-# three character rows — `█` where both halves of the cell are lit, `▀` for the
-# top only, `▄` for the bottom. Seven rows of banner ate half a terminal, and
-# the screen under it is the point of the screen.
-_GLYPHS = {
-    "B": ("██████ ", "██   ██", "██████ ", "██   ██", "██   ██", "██████ "),
-    "R": ("██████ ", "██   ██", "██████ ", "██  ██ ", "██   ██", "██   ██"),
-    "A": (" █████ ", "██   ██", "██   ██", "███████", "██   ██", "██   ██"),
-    "I": ("███████", "  ██   ", "  ██   ", "  ██   ", "  ██   ", "███████"),
-    "N": ("██   ██", "███  ██", "████ ██", "██ ████", "██  ███", "██   ██"),
-    "G": (" █████ ", "██   ██", "██     ", "██  ███", "██   ██", " █████ "),
-    "E": ("███████", "██     ", "█████  ", "██     ", "██     ", "███████"),
-    "T": ("███████", "  ██   ", "  ██   ", "  ██   ", "  ██   ", "  ██   "),
-    "S": (" ██████", "██     ", "██████ ", "     ██", "     ██", "██████ "),
-    "O": (" █████ ", "██   ██", "██   ██", "██   ██", "██   ██", " █████ "),
-    " ": ("   ",) * 6,
-}
+# The wordmark, in figlet's `ansi_shadow` — solid blocks with the thin drawn
+# edge down the right and the bottom, which is the face the prototype uses.
+# Pasted rather than generated: it is six strings, and a whole dependency to
+# produce six strings is a dependency to keep working forever. To change it:
+#     uv run --no-project --with pyfiglet python -c
+#       "import pyfiglet; print(pyfiglet.Figlet(font='ansi_shadow').renderText('STO'))"
+WORDMARK = [
+    "███████╗████████╗ ██████╗ ",
+    "██╔════╝╚══██╔══╝██╔═══██╗",
+    "███████╗   ██║   ██║   ██║",
+    "╚════██║   ██║   ██║   ██║",
+    "███████║   ██║   ╚██████╔╝",
+    "╚══════╝   ╚═╝    ╚═════╝ ",
+]
+WORDMARK_W = len(WORDMARK[0]) + 12          # plus the name beside it
 
 
-def wordmark(word):
-    glyphs = [_GLYPHS[ch] for ch in word]
-    out = []
-    for r in range(0, 6, 2):
-        line = []
-        for g in glyphs:
-            top, bot = g[r], g[r + 1]
-            line.append("".join("█" if a != " " and b != " "
-                                else "▀" if a != " " else "▄" if b != " " else " "
-                                for a, b in zip(top, bot)))
-        out.append(" ".join(line))
-    return out
+class Wordmark(Horizontal):
+    """`braingent` beside `STO`, and not the whole name in blocks.
 
+    The full name in this face is 103 columns of banner across the top of every
+    home. The mark is the three letters; the name reads fine at text size next
+    to them, and the screen underneath is the point of the screen.
+    """
 
-WORDMARK = wordmark("BRAINGENT STO")
-WORDMARK_W = len(WORDMARK[0])
+    def compose(self) -> ComposeResult:
+        yield Static(Content.from_markup("[b]braingent[/]"), id="mark-name")
+        block = "\n".join(f"[$accent]{line}[/]" for line in WORDMARK)
+        yield Static(Content.from_markup(block), id="mark-block")
 
 
 class Home(Grid):
@@ -254,10 +267,28 @@ class Home(Grid):
 class Reader(Screen):
     """One document, scrolled. `Esc` goes back.
 
-    A screen and not a panel: a transcript is hundreds of lines and squeezing
-    it beside the list it came from gives two things too narrow to read.
+    A screen and not a panel: a transcript is hundreds of lines and squeezing it
+    beside the list it came from gives two things too narrow to read. It carries
+    the same top bar and the same footer as everything else — a screen you can
+    reach and then cannot tell where you are is worse than no screen.
     """
-    BINDINGS = [Binding("escape,q", "app.pop_screen", "back", show=True)]
+    BINDINGS = [
+        Binding("escape", "app.pop_screen", "back"),
+        Binding("up", "scroll(-1)", "", show=False),
+        Binding("down", "scroll(1)", "", show=False),
+        Binding("pageup", "scroll(-20)", "↑↓ PgUp PgDn"),
+        Binding("pagedown", "scroll(20)", "", show=False),
+        Binding("home", "top", "", show=False),
+        Binding("end", "bottom", "", show=False),
+        Binding("q", "app.quit", "quit"),
+        # a screen binding shadows the app's. Reading a transcript with PUSH one
+        # keystroke away is an accident waiting to happen, and hidden they also
+        # stop being offered in the footer of a screen that cannot use them.
+        *[Binding(k, "nothing", "", show=False) for k in "plfgr"],
+    ]
+
+    def action_nothing(self) -> None:
+        pass
 
     def __init__(self, title, body):
         super().__init__()
@@ -268,9 +299,27 @@ class Reader(Screen):
             yield Static(self.app.topbar_content(), id="topbar")
         with Container(id="reader"):
             with Card(self._title, upper=False):
-                with VerticalScroll():
+                with VerticalScroll(id="doc-scroll"):
                     yield Static(self._body, markup=False, id="doc")
-        yield Footer()
+        yield Footer(show_command_palette=False)
+
+    def on_mount(self) -> None:
+        # the scroll container has to hold focus or the arrows go nowhere: the
+        # keys are bound to the screen, and the screen is not what scrolls
+        self.query_one("#doc-scroll", VerticalScroll).focus()
+
+    @property
+    def doc(self):
+        return self.query_one("#doc-scroll", VerticalScroll)
+
+    def action_scroll(self, lines: int) -> None:
+        self.doc.scroll_relative(y=lines, animate=False)
+
+    def action_top(self) -> None:
+        self.doc.scroll_home(animate=False)
+
+    def action_bottom(self) -> None:
+        self.doc.scroll_end(animate=False)
 
 
 class Sessions(Container):
@@ -311,6 +360,9 @@ class Sessions(Container):
 
     def on_data_table_row_highlighted(self, event) -> None:
         self.show(event.cursor_row)
+
+    def on_data_table_row_selected(self, event) -> None:
+        self.open()          # a click on a row is the same as pressing it
 
     def open(self) -> None:
         table = self.query_one("#t-sessions", Table)
@@ -360,6 +412,14 @@ class Memory(Container):
     def on_list_view_highlighted(self, event) -> None:
         if event.list_view.index is not None:
             self.fill(event.list_view.index)
+
+    def on_list_view_selected(self, event) -> None:
+        # clicking a project moves to its memories rather than opening one:
+        # the project is a folder, and a folder opens into its contents
+        self.query_one("#t-memories", Table).focus()
+
+    def on_data_table_row_selected(self, event) -> None:
+        self.open()
 
     def open(self) -> None:
         table = self.query_one("#t-memories", Table)
@@ -417,6 +477,9 @@ class Skills(Container):
     def on_data_table_row_highlighted(self, event) -> None:
         self.show(event.cursor_row)
 
+    def on_data_table_row_selected(self, event) -> None:
+        self.open()
+
     def open(self) -> None:
         table = self.query_one("#t-skills", Table)
         if not self.rows:
@@ -450,12 +513,17 @@ class Config(Container):
             table.add_row(Content.from_markup(f"[$accent b]{t(key).upper()}[/]"), "", "")
 
         head("sec_prefs")
-        swatch = " ".join(
-            f"[{ACCENT_CSS.get(code, 'white')}]{'██' if code == ui.ACCENT else '──'}[/]"
-            for _, code in ui.ACCENTS)
+        # no swatch strip beside the name: six squares of which one meant
+        # "current" was a legend nobody could read, and the row is already
+        # painted in the colour it names
         self.rows.append(("accent", None))
         table.add_row(t("accent_color"), Content.from_markup(f"[$accent]{ui.accent_name()}[/]"),
-                      Content.from_markup(swatch))
+                      Content.from_markup(f"[$foreground 60%]{t('k_change')}[/]"))
+        ground = i18n.get_prefs().get("tui_ground", "dark")
+        self.rows.append(("ground", None))
+        table.add_row(t("tui_ground"), Content.from_markup(
+            "  ".join(f"[$accent b]{t('ground_' + g)}[/]" if g == ground
+                      else f"[$foreground 50%]{t('ground_' + g)}[/]" for g in GROUNDS)), "")
         self.rows.append(("lang", None))
         table.add_row(t("language"), Content.from_markup(
             "  ".join(f"[$accent b]{c}[/]" if c == i18n.LANG else f"[$foreground 50%]{c}[/]"
@@ -486,6 +554,9 @@ class Config(Container):
         if 0 <= keep < len(self.rows):
             table.move_cursor(row=keep)
 
+    def on_data_table_row_selected(self, event) -> None:
+        self.open()
+
     def open(self) -> None:
         """`↵` on the selected row. Headings and the always-synced rows are not
         actions, so landing on one does nothing rather than something odd."""
@@ -497,7 +568,14 @@ class Config(Container):
         if kind == "accent":
             codes = [c for _, c in ui.ACCENTS]
             ui.set_accent(codes[(codes.index(ui.ACCENT) + 1) % len(codes)])
-            self.app.apply_accent()
+            self.app.apply_theme()
+        elif kind == "ground":
+            names = list(GROUNDS)
+            now = i18n.get_prefs().get("tui_ground", "dark")
+            i18n.set_pref("tui_ground",
+                          names[(names.index(now) + 1) % len(names)]
+                          if now in names else "light")
+            self.app.apply_theme()
         elif kind == "lang":
             ui.set_lang(i18n.LANGS[(i18n.LANGS.index(i18n.LANG) + 1) % len(i18n.LANGS)])
             self.app.notify(t("tab_config"))
@@ -527,6 +605,9 @@ class Help(Container):
 class StoApp(App):
     CSS_PATH = "tui_app.tcss"
     TITLE = "braingent STO"
+    # the palette is the library's own screen, in the library's own idiom, and
+    # it puts a button in our footer that leads out of the product
+    ENABLE_COMMAND_PALETTE = False
     BINDINGS = [
         Binding("1", "tab(0)", "", show=False),
         Binding("2", "tab(1)", "", show=False),
@@ -534,7 +615,10 @@ class StoApp(App):
         Binding("4", "tab(3)", "", show=False),
         Binding("5", "tab(4)", "", show=False),
         Binding("6", "tab(5)", "", show=False),
-        Binding("tab", "next_tab", "", show=False),
+        # priority: Tab is the library's focus-next by default, and it ate the
+        # one key that is supposed to walk the tab bar everywhere
+        Binding("tab", "next_tab", "", show=False, priority=True),
+        Binding("shift+tab", "prev_tab", "", show=False, priority=True),
         Binding("enter", "open", "open", show=False, priority=True),
         Binding("p", "sync('push')", "PUSH"),
         Binding("l", "sync('pull')", "PULL"),
@@ -588,14 +672,11 @@ class StoApp(App):
             f"[$foreground 60%]agent [/]{srv.agents.label()}{sep}"
             f"[$foreground 60%]{t('col_machine')} [/]{srv.LOCAL_MACHINE}")
 
-    def tabbar_content(self) -> Content:
-        out = []
-        for i, key in enumerate(TABS):
-            on = i == self.tab
-            cap = f"[$accent on $background b]" if on else "[$background on $foreground b]"
-            colour = "[$accent b]" if on else "[$foreground 50%]"
-            out.append(f"{cap} {i + 1} [/]{colour} {t(key)}[/]")
-        return Content.from_markup("   ".join(out))
+    def paint_tabs(self) -> None:
+        """The active tab is a filled rectangle in the accent colour, the way
+        `sto ui` draws it — same product, same chip."""
+        for i, chip in enumerate(self.query(".tab")):
+            chip.set_class(i == self.tab, "on")
 
     def compose(self) -> ComposeResult:
         # one container docked to the top and not two widgets each docked to it:
@@ -603,26 +684,38 @@ class StoApp(App):
         # second draws over the first
         with Container(id="chrome"):
             yield Static(self.topbar_content(), id="topbar")
-            yield Static(self.tabbar_content(), id="tabs")
-        yield Static(id="wordmark")
+            with Horizontal(id="tabs"):
+                for i, key in enumerate(TABS):
+                    yield Static(f" {t(key)} ", classes="tab", id=f"tab-{i}")
+        yield Wordmark(id="wordmark")
         yield Home(id="home")
         yield Sessions(id="sessions", classes="split")
         yield Memory(id="memory", classes="split-even")
         yield Skills(id="skills", classes="split")
         yield Config(id="config", classes="one")
         yield Help(id="help", classes="one")
-        yield Footer()
+        yield Static("", id="status")
+        yield Footer(show_command_palette=False)
 
     def on_mount(self) -> None:
-        self.apply_accent()
+        self.apply_theme()
         self.query_one("#topbar", Static).update(self.topbar_content())
         self.show_tab(HOME)
 
-    def apply_accent(self) -> None:
-        """The accent picked in `sto ui` drives the whole stylesheet, so the two
-        flavours look like the same product with the same setting."""
-        self.theme_variables["accent"] = ACCENT_CSS.get(ui.ACCENT, "cyan")
-        self.refresh_css()
+    def apply_theme(self) -> None:
+        """One accent, one ground, both ours.
+
+        The accent comes from `sto ui` — the same setting drives both flavours,
+        so they are the same product with the same colour. The ground is this
+        flavour's own preference: a terminal TUI cannot ask the terminal what
+        its background is, so which of the three it is has to be said.
+        """
+        accent = ACCENT_CSS.get(ui.ACCENT, "#22d3ee")
+        ground = i18n.get_prefs().get("tui_ground", "dark")
+        if ground not in GROUNDS:
+            ground = "dark"
+        self.register_theme(make_theme(ground, accent))
+        self.theme = f"sto-{ground}"
 
     @property
     def panes(self):
@@ -634,15 +727,12 @@ class StoApp(App):
         self.tab = index % len(TABS)
         # the banner belongs to the home and only when the terminal can spare
         # the rows: on a short window the table under it is worth more
-        mark = self.query_one("#wordmark", Static)
-        room = self.size.height >= 30 and self.size.width >= WORDMARK_W + 4
-        mark.display = self.tab == HOME and room
-        if mark.display:
-            mark.update(Content.from_markup(
-                "\n".join(f"[$accent b]{line}[/]" for line in WORDMARK)))
+        mark = self.query_one("#wordmark", Wordmark)
+        mark.display = (self.tab == HOME and self.size.height >= 28
+                        and self.size.width >= WORDMARK_W + 4)
         for i, pane in enumerate(self.panes):
             pane.display = i == self.tab
-        self.query_one("#tabs", Static).update(self.tabbar_content())
+        self.paint_tabs()
         pane = self.panes[self.tab]
         focusable = pane.query(Table).first() if pane.query(Table) else None
         if focusable is not None:
@@ -652,6 +742,16 @@ class StoApp(App):
 
     def action_tab(self, index: int) -> None:
         self.show_tab(index)
+
+    def on_click(self, event) -> None:
+        """A tab chip is a button. Nothing on this bar looked like it could be
+        clicked and everything on it can be."""
+        node = event.widget
+        if node is not None and node.id and node.id.startswith("tab-"):
+            self.show_tab(int(node.id.removeprefix("tab-")))
+
+    def action_prev_tab(self) -> None:
+        self.show_tab(self.tab - 1)
 
     def action_next_tab(self) -> None:
         # Tab always walks the tab bar. Letting it mean something else inside a
@@ -664,14 +764,57 @@ class StoApp(App):
         if hasattr(pane, "open"):
             pane.open()
 
+    # ── the status strip ──
+
+    SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+
+    def busy(self, message) -> None:
+        """Say what is running, in the strip above the keys.
+
+        `fetch`, `reload`, `push` and `pull` all go to the network or to git and
+        all of them used to look like a key that did nothing until they were
+        done. A spinner beside the sentence is the difference between "working"
+        and "broken".
+        """
+        self._busy = message
+        self._frame = 0
+        self.query_one("#status", Static).update(Content.from_markup(
+            f"[$accent]{self.SPINNER[0]}[/] [$foreground 70%]{message}[/]"))
+        if getattr(self, "_spin", None) is None:
+            self._spin = self.set_interval(0.08, self._tick)
+        self.refresh()
+
+    def _tick(self) -> None:
+        self._frame += 1
+        self.query_one("#status", Static).update(Content.from_markup(
+            f"[$accent]{self.SPINNER[self._frame % len(self.SPINNER)]}[/]"
+            f" [$foreground 70%]{self._busy}[/]"))
+
+    def done(self, message="", error=False) -> None:
+        if getattr(self, "_spin", None) is not None:
+            self._spin.stop()
+            self._spin = None
+        colour = "$error" if error else "$success"
+        mark = "✕" if error else "✓"
+        self.query_one("#status", Static).update(
+            Content.from_markup(f"[{colour}]{mark}[/] [$foreground 70%]{message}[/]")
+            if message else Content(""))
+        if message:
+            # the strip is glanceable and the toast is unmissable; a push that
+            # failed should not be a line you might have looked away from
+            self.notify(message, severity="error" if error else "information")
+
     def action_reload(self) -> None:
+        self.busy(t("k_reload"))
         self.reload_data()
         for pane in self.panes:
             if hasattr(pane, "refresh_data"):
                 pane.refresh_data()
         self.query_one("#topbar", Static).update(self.topbar_content())
+        self.done()
 
     def action_fetch(self) -> None:
+        self.busy("FETCH")
         self.sync = srv.sync_status(fetch=True, force=True)
         self.action_reload()
 
@@ -679,16 +822,15 @@ class StoApp(App):
         """The classic window. `cli.open_memory_graph` already knows how to
         build it and how to find a chrome-less browser, and its answer — the
         one that says what is missing when it fails — is what gets shown."""
-        self.notify(t("graph_opening"))
+        self.busy(t("graph_opening"))
         res = cli.open_memory_graph()
-        self.notify(res.get("error") or res.get("message") or "",
-                    severity="error" if res.get("error") else "information")
+        self.done(res.get("error") or res.get("message") or "", bool(res.get("error")))
 
     def action_sync(self, what: str) -> None:
+        self.busy(what.upper())
         fn = srv.sync_push if what == "push" else srv.sync_pull
         res = fn()
-        self.notify(res.get("error") or res.get("message") or "",
-                    severity="error" if res.get("error") else "information")
+        self.done(res.get("error") or res.get("message") or "", bool(res.get("error")))
         self.action_reload()
 
 

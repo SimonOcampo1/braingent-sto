@@ -21,19 +21,17 @@ except ImportError:
 import tui_app  # noqa: E402
 
 
-def test_the_wordmark_folds_six_pixel_rows_into_three():
-    """`█` when both halves of the cell are lit, `▀` and `▄` when one is.
+def test_the_wordmark_is_a_rectangle():
+    """Pasted art goes crooked the moment somebody edits one line of it.
 
-    The letterforms are the prototype's, drawn on a 6-row pixel grid; the whole
-    point of the fold is that the banner costs three rows instead of six. Get
-    the pairing wrong and it still renders — as letters with holes in them.
+    Every row has to be the same width or the block leans, and it has to stay
+    small: the whole point of spelling only `STO` is that the banner is a mark
+    beside the name and not a wall across the top of the home.
     """
-    rows = tui_app.wordmark("STO")
-    assert len(rows) == 3, rows
-    assert len({len(r) for r in rows}) == 1, "the rows are not the same width"
-    # the O is closed on both sides: every row of it has ink at the far left
-    assert all(set(r) <= set(" █▀▄") for r in rows), rows
-    assert "█" in rows[1], rows[1]
+    rows = tui_app.WORDMARK
+    assert len({len(r) for r in rows}) == 1, [len(r) for r in rows]
+    assert len(rows) == 6, len(rows)
+    assert len(rows[0]) < 30, len(rows[0])
 
 
 def test_a_screen_renders_with_its_chrome_pinned():
@@ -51,6 +49,8 @@ def test_a_screen_renders_with_its_chrome_pinned():
             assert "braingent STO" in lines[0], lines[0]
             assert "Home" in lines[1] and "Config" in lines[1], lines[1]
             assert "PUSH" in lines[-1], lines[-1]
+            # the library's own way out of the product is not in our footer
+            assert "palette" not in lines[-1], lines[-1]
 
             # and every tab paints without falling over
             for key in "23456":
@@ -59,6 +59,43 @@ def test_a_screen_renders_with_its_chrome_pinned():
                 painted = [s.text for s in app.screen._compositor.render_strips()]
                 assert "braingent STO" in painted[0], key
                 assert "PUSH" in painted[-1], key
+
+    asyncio.run(go())
+
+
+def test_tab_walks_the_tab_bar_and_a_document_has_its_own_keys():
+    """`tab` is the library's focus-next by default, and it ate the one key
+    that is supposed to mean the same thing on every screen.
+
+    And a reader shadows the keys that act on the repo: reading a transcript
+    with PUSH one keystroke away is an accident, and hiding them also stops the
+    footer offering keys the screen cannot use.
+    """
+    async def go():
+        app = tui_app.StoApp()
+        async with app.run_test(size=(124, 34)) as pilot:
+            await pilot.pause()
+            for expected in (1, 2, 3):
+                await pilot.press("tab")
+                await pilot.pause()
+                assert app.tab == expected, (app.tab, expected)
+            await pilot.press("shift+tab")
+            await pilot.pause()
+            assert app.tab == 2, app.tab
+
+            await pilot.press("2")
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            foot = [s.text for s in app.screen._compositor.render_strips()][-1]
+            assert "back" in foot and "PUSH" not in foot, foot
+            doc = app.screen.query_one("#doc-scroll")
+            await pilot.press("pagedown")
+            await pilot.pause()
+            assert doc.scroll_offset.y > 0, "the document did not scroll"
+            await pilot.press("escape")
+            await pilot.pause()
+            assert app.tab == 1, app.tab
 
     asyncio.run(go())
 
@@ -82,7 +119,8 @@ def test_the_last_column_takes_the_width_the_others_leave():
 
 
 if __name__ == "__main__":
-    test_the_wordmark_folds_six_pixel_rows_into_three()
+    test_the_wordmark_is_a_rectangle()
     test_a_screen_renders_with_its_chrome_pinned()
+    test_tab_walks_the_tab_bar_and_a_document_has_its_own_keys()
     test_the_last_column_takes_the_width_the_others_leave()
     print("OK")

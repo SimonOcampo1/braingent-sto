@@ -4,10 +4,13 @@
  * every panel width by hand (`RAIL = 38`, `main = width - 40`), which is why
  * its cards never quite lined up; here the grid states the proportion once and
  * every card inherits the same border, the same padding and the same gutter.
+ *
+ * Every colour is a token. `$accent` is whatever `sto ui` › Config is set to,
+ * and the ground comes from the same screen, so nothing here names a colour.
  */
 
 Screen {
-    background: $surface;
+    background: $background;
 }
 
 /* ── chrome: pinned top and bottom, never scrolls ── */
@@ -21,36 +24,91 @@ Screen {
 #topbar {
     height: 1;
     padding: 0 1;
-    color: $text-muted;
+    color: $foreground 60%;
 }
-#topbar .name { color: $accent; text-style: bold; }
-#topbar .sep  { color: $foreground 30%; }
 
 #tabs {
     height: 1;
     padding: 0 1;
 }
-#tabs .tab     { color: $text-muted; }
-#tabs .key     { background: $foreground; color: $background; text-style: bold; }
-#tabs .on      { color: $accent; text-style: bold; }
-#tabs .on-key  { background: $accent; color: $background; text-style: bold; }
 
-Footer { dock: bottom; }
+/* the active tab is a filled rectangle in the accent, the way `sto ui` draws
+ * it — same product, same chip. The rest are quiet and unframed: a box around
+ * every tab is six boxes and no answer to which one you are on. */
+.tab {
+    width: auto;
+    height: 1;
+    margin-right: 2;
+    color: $foreground 50%;
+}
+.tab.on {
+    background: $accent;
+    color: $background;
+    text-style: bold;
+}
+.tab:hover {
+    color: $accent;
+}
+
+/* the status strip sits between the screen and the keys: what is running now,
+ * and what the last thing that ran had to say */
+#status {
+    dock: bottom;
+    height: 1;
+    padding: 0 1;
+    background: $panel;
+}
+
+/* a key cap is the key in the accent, not a filled block: reversed, six of them
+ * across the foot read as a row of buttons and drown their own labels */
+Footer {
+    dock: bottom;
+    background: $panel;
+}
+FooterKey {
+    background: $panel;
+    color: $foreground 60%;
+}
+FooterKey > .footer-key--key {
+    background: $panel;
+    color: $accent;
+    text-style: bold;
+}
+FooterKey > .footer-key--description {
+    color: $foreground 60%;
+}
+FooterKey:hover {
+    background: $surface;
+}
+FooterKey:hover > .footer-key--key {
+    background: $surface;
+    color: $accent;
+}
+
+/* ── the wordmark: the mark, beside the name, once ── */
 
 #wordmark {
-    height: 3;
+    height: 6;
     padding: 0 1;
     margin-top: 1;
 }
+#mark-name {
+    width: 11;
+    height: 6;
+    content-align: left middle;
+    color: $foreground;
+}
+#mark-block { width: auto; height: 6; }
 
 /* ── cards: one definition, so every panel is the same object ── */
 
 .card {
-    border: round $foreground 40%;
+    border: round $foreground 30%;
     border-title-color: $accent;
     border-title-style: bold;
     padding: 0 1;
     height: 1fr;
+    background: $surface;
 }
 .card:focus-within { border: round $accent; }
 
@@ -64,13 +122,6 @@ Footer { dock: bottom; }
     grid-gutter: 1 1;
     padding: 1;
 }
-
-.big     { color: $accent; text-style: bold; }
-.muted   { color: $text-muted; }
-.ok      { color: $success; text-style: bold; }
-.warn    { color: $warning; }
-.bad     { color: $error; }
-.label   { color: $text-muted; }
 
 /* ── lists: table on the left, what the row holds on the right ── */
 
@@ -88,45 +139,49 @@ Footer { dock: bottom; }
     grid-gutter: 1 1;
     padding: 1;
 }
+.one { padding: 1; }
+.one > .card { height: 1fr; }
 
 DataTable, Table {
     height: 1fr;
+    background: $surface;
     scrollbar-size-vertical: 1;
 }
 DataTable > .datatable--header {
-    background: $panel;
-    color: $text-muted;
+    background: $surface;
+    color: $foreground 50%;
     text-style: none;
 }
 DataTable > .datatable--cursor {
     background: $accent;
     color: $background;
 }
+DataTable > .datatable--hover {
+    background: $panel;
+}
 
 ListView {
     height: 1fr;
-    background: transparent;
+    background: $surface;
 }
-ListView > ListItem { padding: 0 1; }
+ListView > ListItem { padding: 0 1; background: $surface; }
 ListView > ListItem.--highlight { background: $accent; color: $background; }
-
-/* ── the single-pane screens ── */
-
-.one {
-    padding: 1;
-}
-.one > .card { height: 1fr; }
+ListView:focus > ListItem.--highlight { background: $accent; }
 
 /* ── a reader: one document, scrolled ── */
 
-#reader {
-    padding: 1;
-}
+#reader { padding: 1; }
 #reader > .card { height: 1fr; }
-VerticalScroll { scrollbar-size-vertical: 1; }
+VerticalScroll {
+    scrollbar-size-vertical: 1;
+    scrollbar-background: $panel;
+    scrollbar-color: $accent 60%;
+    scrollbar-color-hover: $accent;
+}
+#doc { padding: 0 1; }
 
-/* ── bars ── */
+/* ── toasts: the library's, in our colours ── */
 
-.bar-track { color: $foreground 20%; }
-.bar-fill  { color: $accent; }
-.bar-warn  { color: $error; }
+Toast { background: $panel; }
+Toast.-information { border-left: outer $accent; }
+Toast.-error { border-left: outer $error; }
