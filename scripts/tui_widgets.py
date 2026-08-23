@@ -129,8 +129,11 @@ class Table(DataTable):
         super().__init__(**kw)
         self.spec = spec
         # a third field says how a column sorts, and its absence says it does
-        # not. Declared and not guessed: `when` renders `2 h` and `5 d`, and a
-        # heuristic that sorts that as text interleaves hours with weeks
+        # not. Declared and not guessed -- and `data` is the important one:
+        # `when` renders `2 h` and `5 d`, which sorted as text interleaves
+        # hours with weeks, and `errors` renders markup that is neither a
+        # number nor comparable text. Those columns sort the row behind the
+        # cell, which the pane holds and the table never sees.
         self.sortable = [i for i, col in enumerate(spec) if len(col) > 2]
         self.sort_by = None
         self._labels = [col[0] for col in spec]
@@ -298,11 +301,25 @@ class Table(DataTable):
         # `Column.label` is a plain dataclass field: assigning it changes
         # nothing on screen by itself
         self.refresh()
+        owner = self._owner()
+        if owner is not None and hasattr(owner, "sort_rows"):
+            # the pane holds the rows the cells were rendered from, so it can
+            # sort by a timestamp while the cell says "5 d". A table that has
+            # no pane behind it -- the kinds rail, the preferences -- falls
+            # through and sorts what it can see.
+            return owner.sort_rows(self.sort_by)
         if self.sort_by is None:
             return self.refill()
         index, reverse = self.sort_by
         self.sort(list(self.columns.keys())[index],
                   key=self._key(self.spec[index][2]), reverse=reverse)
+
+    def _owner(self):
+        """The pane this table belongs to, if it sorts its own rows."""
+        for node in self.ancestors_with_self:
+            if node is not self and hasattr(node, "sort_rows"):
+                return node
+        return None
 
     def refill(self) -> None:
         """Back to the order the pane wrote the rows in.

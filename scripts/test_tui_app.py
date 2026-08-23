@@ -514,21 +514,25 @@ def test_s_cycles_the_sort_and_comes_back_to_the_natural_order():
             await pilot.pause()
             if table.row_count < 3:
                 return                      # a machine with almost no sessions
-            natural = [table.get_row_at(i)[5] for i in range(table.row_count)]
+            pane = app.query_one("#sessions")
+            natural = [r["id"] for r in pane.rows]
 
             await pilot.press("s")
             await pilot.pause()
             assert table.sort_by is not None, "s did not sort"
             col, reverse = table.sort_by
             assert reverse is False, table.sort_by
-            up = [table.get_row_at(i)[col] for i in range(table.row_count)]
-            assert up == sorted(up, key=str.lower), up
+            # the rows, not the cells: a cell is a rendering and `5 d` sorted
+            # as text puts weeks among hours
+            field = pane.SORT_FIELDS[col]
+            up = [r[field] for r in pane.rows]
+            assert up == sorted(up), up
 
             await pilot.press("s")
             await pilot.pause()
             assert table.sort_by == (col, True), table.sort_by
-            down = [table.get_row_at(i)[col] for i in range(table.row_count)]
-            assert down == list(reversed(up)), (up, down)
+            down = [r[field] for r in pane.rows]
+            assert down == sorted(up, reverse=True), (up, down)
 
             for _ in range(20):
                 await pilot.press("s")
@@ -536,20 +540,54 @@ def test_s_cycles_the_sort_and_comes_back_to_the_natural_order():
                 if table.sort_by is None:
                     break
             assert table.sort_by is None, "the cycle never returned to unsorted"
-            after = [table.get_row_at(i)[5] for i in range(table.row_count)]
-            assert after == natural, "unsorted is not the order the pane wrote"
+            assert [r["id"] for r in pane.rows] == natural, \
+                "unsorted is not the order the pane wrote"
 
     asyncio.run(go())
 
 
-def test_a_column_whose_only_correct_order_is_the_default_is_not_in_the_cycle():
-    """`when` renders `2 h`, `5 d`, `3 w`. Sorted as text that interleaves
-    hours with weeks; sorted correctly it is `mtime`, which is already the
-    order the pane arrives in."""
-    table = tui_app.Table((tui_app.t("col_when"), 10),
-                          (tui_app.t("col_project"), 18, "text"),
-                          (tui_app.t("col_prompts"), 7, "num"))
-    assert table.sortable == [1, 2], table.sortable
+def test_a_column_sorts_the_datum_and_not_the_cell():
+    """`when` renders `2 h`, `5 d`, `3 w` and `errors` renders markup. Sorted
+    as text the first interleaves hours with weeks and the second is not
+    comparable at all -- so both sort the row behind the cell.
+
+    Leaving them out of the cycle was the first answer and it was wrong: they
+    are exactly the columns somebody wants sorted.
+    """
+    table = tui_app.Table((tui_app.t("col_when"), 10, "data"),
+                          (tui_app.t("col_project"), 18, "data"),
+                          ("", 7))
+    assert table.sortable == [0, 1], table.sortable
+
+    async def go():
+        app = tui_app.StoApp()
+        async with app.run_test(size=(150, 30)) as pilot:
+            await app.workers.wait_for_complete()
+            await pilot.press("2")
+            await pilot.pause()
+            pane = app.query_one("#sessions")
+            if len(pane.rows) < 3:
+                return
+            rows = pane.query_one("#t-rows", tui_app.Table)
+            rows.focus()
+            await pilot.pause()
+
+            # `when` is column 0 and the first step of the cycle
+            await pilot.press("s")
+            await pilot.pause()
+            assert rows.sort_by == (0, False), rows.sort_by
+            stamps = [r["mtime"] for r in pane.rows]
+            assert stamps == sorted(stamps), "when did not sort by time"
+
+            # walk to `errors` and check it sorts by the count, not the markup
+            while rows.sort_by is not None and rows.sort_by[0] != 4:
+                await pilot.press("s")
+                await pilot.pause()
+            assert rows.sort_by is not None, "errors never came up in the cycle"
+            counts = [r["errors"] for r in pane.rows]
+            assert counts == sorted(counts), counts
+
+    asyncio.run(go())
 
 
 def test_the_marquee_runs_only_where_text_is_cut_and_only_with_focus():
@@ -680,6 +718,52 @@ def test_the_home_search_finds_things_that_are_not_sessions():
     asyncio.run(go())
 
 
+def test_a_memory_shows_its_body_and_its_neighbours():
+    """A memory opened blank: only its links, no text.
+
+    `#reader` was a grid whose first row was `1fr` and whose second was `auto`,
+    and a `1fr` card inside an `auto` row resolves to its own natural height --
+    so the neighbours strip took the screen and the document was laid out at
+    zero. `enter` on one of those links opened the next memory just as blank,
+    which is what read as a loop.
+
+    Sessions and skills were never affected: they have no neighbours, so the
+    strip is never composed and the document is the only child. That is why
+    this asserts on the one shape that has both.
+    """
+    async def go():
+        real_list = tui_app.srv.list_memory
+        real_nb = tui_app.srv.memory_neighbours
+        real_detail = tui_app.ui.detail_memory
+        tui_app.srv.list_memory = lambda *a, **k: [
+            {"project": "demo", "machines": ["BoxA"], "count": 1,
+             "memories": [{"slug": "una", "type": "project", "machine": "BoxA",
+                           "mtime": 1.0, "description": "d"}]}]
+        tui_app.srv.memory_neighbours = lambda p, s: (["demo/otra"], ["demo/cita"])
+        tui_app.ui.detail_memory = lambda row: ["# una memoria", "",
+                                                "el cuerpo que se tiene que ver"]
+        try:
+            app = tui_app.StoApp()
+            async with app.run_test(size=(96, 26)) as pilot:
+                await app.workers.wait_for_complete()
+                app.open_memory("demo", "una", "BoxA")
+                await pilot.pause()
+                await pilot.pause()
+                doc = app.screen.query_one("#doc-scroll")
+                links = app.screen.query_one("#links")
+                assert doc.size.height > 3, (doc.size, "the document has no room")
+                assert links.size.height > 3, (links.size, "the neighbours vanished")
+                painted = "\n".join(screen_text(app))
+                assert "el cuerpo que se tiene que ver" in painted, painted
+                assert "demo/otra" in painted and "demo/cita" in painted, painted
+        finally:
+            tui_app.srv.list_memory = real_list
+            tui_app.srv.memory_neighbours = real_nb
+            tui_app.ui.detail_memory = real_detail
+
+    asyncio.run(go())
+
+
 if __name__ == "__main__":
     test_the_wordmark_is_a_rectangle()
     test_the_accent_and_the_ground_are_one_theme_each()
@@ -701,9 +785,10 @@ if __name__ == "__main__":
     test_tab_walks_panels_and_the_tab_bar_is_somewhere_you_can_stand()
     test_up_leaves_a_list_only_from_its_first_row()
     test_s_cycles_the_sort_and_comes_back_to_the_natural_order()
-    test_a_column_whose_only_correct_order_is_the_default_is_not_in_the_cycle()
+    test_a_column_sorts_the_datum_and_not_the_cell()
     test_the_marquee_runs_only_where_text_is_cut_and_only_with_focus()
     test_a_memory_renders_as_markdown_and_a_transcript_does_not()
     test_tools_reaches_every_config_module_and_reads_one()
     test_the_home_search_finds_things_that_are_not_sessions()
+    test_a_memory_shows_its_body_and_its_neighbours()
     print("OK")

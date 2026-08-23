@@ -68,7 +68,11 @@ TabBar:focus .tab.on { background: $accent; color: $background; }
 
 /* a key cap is the key in the accent, not a filled block: reversed, six of them
  * across the foot read as a row of buttons and drown their own labels */
-Footer { dock: bottom; background: $panel; }
+/* not docked: it lives inside `#bottom`, which is the one thing docked to
+ * that edge. Left docked it claimed the edge for itself and painted over the
+ * status strip sharing it. */
+Footer { dock: initial; height: 1; background: $panel; }
+#reader Footer, ModalScreen Footer { dock: bottom; }
 FooterKey { background: $panel; color: $foreground 60%; }
 FooterKey > .footer-key--key { background: $panel; color: $accent; text-style: bold; }
 FooterKey > .footer-key--description { color: $foreground 60%; }
@@ -157,9 +161,25 @@ DataTable > .datatable--hover { background: $panel; }
 
 /* ── a reader: one document, scrolled ── */
 
-#reader { padding: 1; layout: grid; grid-size: 1 2; grid-rows: 1fr auto; grid-gutter: 1; }
-#reader > .card { height: 1fr; }
-#links { height: 8; }
+/* A stack and not a grid. The grid put the document in a `1fr` row and the
+ * neighbours in an `auto` one, and a `1fr` card inside an `auto` row resolves
+ * to its own natural height: the strip took the screen and the document was
+ * laid out at zero. A memory opened blank with only its links, and `enter` on
+ * one of those opened another blank memory -- which is what read as a loop.
+ * Sessions and skills were never affected because they have no neighbours and
+ * the strip is never composed at all. */
+#reader { padding: 1; layout: vertical; }
+#reader > .card { height: 1fr; margin-bottom: 1; }
+/* The neighbours are a fixed strip under the document, not half the screen.
+ *
+ * At least as specific as `#reader > .card` above -- an id plus a class beats
+ * a bare `#links`, so without this the strip also asks for `1fr`, and a `1fr`
+ * inside an `auto` grid row resolves to its own natural height. The strip took
+ * the screen and the document was laid out at zero: a memory opened blank with
+ * only its links, and `enter` on one of those opened another blank memory,
+ * which is what read as a loop. Sessions and skills were fine because they
+ * have no neighbours and the strip is never composed. */
+#reader #links { height: 10; }
 VerticalScroll {
     scrollbar-size-vertical: 1;
     scrollbar-background: $surface;

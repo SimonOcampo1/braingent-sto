@@ -290,6 +290,41 @@ class Levels:
     # the panels, outermost first, by widget id
     LEVELS = ()
 
+    # which key of a row each column of the row table is rendered from. `None`
+    # means the column is not sortable and never enters the cycle.
+    SORT_FIELDS = ()
+
+    def sort_rows(self, sort_by) -> None:
+        """`s` on the row table. The pane sorts the rows, not the cells.
+
+        A cell is a rendering -- `5 d`, a coloured count, a clipped title --
+        and sorting renderings gives the wrong answer for exactly the columns
+        somebody wants sorted. `None` is the pane's own order, which `fill()`
+        restores by rebuilding from the source.
+        """
+        self.order = sort_by
+        self.fill()
+
+    def ordered(self, pool):
+        """`pool`, in whatever order `s` last asked for."""
+        order = getattr(self, "order", None)
+        if not order or not self.SORT_FIELDS:
+            return pool
+        column, reverse = order
+        field = self.SORT_FIELDS[column] if column < len(self.SORT_FIELDS) else None
+        if not field:
+            return pool
+
+        def key(row):
+            value = row.get(field)
+            # one list, mixed types: a missing count and a missing title have
+            # to sort somewhere rather than raise
+            if isinstance(value, (int, float)):
+                return (0, value, "")
+            return (1, 0, str(value or "").lower())
+
+        return sorted(pool, key=key, reverse=reverse)
+
     def set_level(self, n) -> None:
         """Which panel is on screen when only one fits.
 
@@ -357,8 +392,10 @@ class Split(Levels, Container):
     def compose(self) -> ComposeResult:
         yield Search(id="search")
         yield Card(t("n_projects"),
-                   Table((t("col_project"), self.GROUP_W - 14, "text"),
-                         (t("col_total"), None, "num"), id="t-groups"), id="groups")
+                   Table((t("col_project"), self.GROUP_W - 16, "text"),
+                         (t("col_total"), 5, "num"),
+                         (t("col_machine"), None, "text"), id="t-groups"),
+                   id="groups")
         yield Card(self.TITLE, self.make_table(), id="rows")
 
     def on_mount(self) -> None:
@@ -373,12 +410,25 @@ class Split(Levels, Container):
         self.query_one("#t-groups", Table).focus()
 
     def set_groups(self, pairs, total) -> None:
+        """The projects, how much each holds, and which machines wrote it.
+
+        The third column is the answer to "who has been working on this" --
+        one machine today, and more than one the moment a second machine syncs
+        into the same repo. Reading it off the rows rather than off a config
+        means it is true by construction.
+        """
         table = self.query_one("#t-groups", Table)
         keep = table.cursor_row
         table.clear()
-        table.add_row(Content.from_markup(f"[$accent b]{t('show_all')}[/]"), str(total))
-        for name, n in pairs:
-            table.add_row(clip(name, self.GROUP_W - 15), str(n))
+        every = sorted({m for _, _, ms in pairs for m in ms})
+        table.add_row(Content.from_markup(f"[$accent b]{t('show_all')}[/]"),
+                      str(total), clip(" ".join(every), 40))
+        for name, n, machines in pairs:
+            table.add_row(clip(name, self.GROUP_W - 17), str(n),
+                          Content.from_markup(
+                              " ".join(f"[$accent]{m}[/]" if m == srv.LOCAL_MACHINE
+                                       else f"[$foreground 60%]{m}[/]"
+                                       for m in sorted(machines))))
         table.fit()
         if 0 < keep < table.row_count:
             table.move_cursor(row=keep)
@@ -421,16 +471,17 @@ class Split(Levels, Container):
 
 class Sessions(Split):
     TITLE = t("tab_sessions")
+    SORT_FIELDS = ("mtime", "project", "n_prompts", "n_tools", "errors",
+                   "machine", "title")
 
     def make_table(self):
-        # `col_when` has no third field and so is not in the cycle: it renders
-        # `2 h` and `5 d`, and its correct order is `mtime`, which is the one
-        # the rows already arrive in. `col_errors` is a `Content` with markup,
-        # which is neither a number nor comparable text.
-        return Table((t("col_when"), 10), (t("col_project"), 18, "text"),
-                     (t("col_prompts"), 7, "num"), (t("col_tools"), 6, "num"),
-                     (t("col_errors"), 7), (t("col_title"), None, "text"),
-                     id="t-rows")
+        # every column sorts, including the two whose cell is not the datum:
+        # `when` renders `5 d` and sorts by `mtime`, `errors` renders markup
+        # and sorts by the count behind it
+        return Table((t("col_when"), 10, "data"), (t("col_project"), 18, "data"),
+                     (t("col_prompts"), 7, "data"), (t("col_tools"), 6, "data"),
+                     (t("col_errors"), 7, "data"), (t("col_machine"), 12, "data"),
+                     (t("col_title"), None, "data"), id="t-rows")
 
     def refresh_data(self) -> None:
         rows, _ = cli.cached_sessions()
@@ -439,15 +490,21 @@ class Sessions(Split):
         for r in rows:
             groups.setdefault(r["project"], []).append(r)
         self.groups = sorted(groups.items(), key=lambda kv: -kv[1][0]["mtime"])
-        self.set_groups([(name, len(items)) for name, items in self.groups], len(rows))
+        self.set_groups([(name, len(items),
+                          {i.get("machine") or srv.LOCAL_MACHINE for i in items})
+                         for name, items in self.groups], len(rows))
         self.fill()
 
     def fill(self) -> None:
         pool = (self.all_rows if self.index == 0 or self.index > len(self.groups)
                 else self.groups[self.index - 1][1])
         if self.q:
+            # the machine is searchable too: "which of my machines had this
+            # session" is the question the column was added for
             q = self.q.lower()
-            pool = [r for r in pool if q in f"{r['project']} {r['title']}".lower()]
+            pool = [r for r in pool
+                    if q in f"{r['project']} {r['title']} {r.get('machine') or ''}".lower()]
+        pool = self.ordered(pool)
         self.rows = pool
         table = self.query_one("#t-rows", Table)
         table.clear()
@@ -456,6 +513,7 @@ class Sessions(Split):
                           str(r["n_tools"]),
                           Content.from_markup(f"[$error]{r['errors']}[/]"
                                               if r["errors"] else "0"),
+                          clip(r.get("machine") or srv.LOCAL_MACHINE, 12),
                           clip(r["title"], 200), key=r["id"])
         table.fit()
         if not pool:
@@ -472,10 +530,11 @@ class Sessions(Split):
 
 class Memory(Split):
     TITLE = t("tab_memory")
+    SORT_FIELDS = ("slug", "mtime", "machine", "description")
 
     def make_table(self):
-        return Table((t("col_slug"), 28, "text"), (t("col_when"), 9),
-                     (t("col_machine"), 14, "text"), (t("col_desc"), None, "text"),
+        return Table((t("col_slug"), 28, "data"), (t("col_when"), 9, "data"),
+                     (t("col_machine"), 14, "data"), (t("col_desc"), None, "data"),
                      id="t-rows")
 
     def refresh_data(self) -> None:
@@ -483,8 +542,8 @@ class Memory(Split):
         self.all_rows = [dict(m, project=p["project"])
                          for p in self.projects for m in p["memories"]]
         self.all_rows.sort(key=lambda m: -m["mtime"])
-        self.set_groups([(p["project"], p["count"]) for p in self.projects],
-                        len(self.all_rows))
+        self.set_groups([(p["project"], p["count"], set(p["machines"]))
+                         for p in self.projects], len(self.all_rows))
         self.fill()
 
     def fill(self) -> None:
@@ -494,7 +553,9 @@ class Memory(Split):
         if self.q:
             q = self.q.lower()
             pool = [m for m in pool
-                    if q in f"{m['project']} {m['slug']} {m['description']}".lower()]
+                    if q in f"{m['project']} {m['slug']} {m['description']} "
+                            f"{m['machine']}".lower()]
+        pool = self.ordered(pool)
         self.rows = pool
         table = self.query_one("#t-rows", Table)
         table.clear()
@@ -1218,14 +1279,16 @@ class StoApp(App):
         yield Tools(id="tools", classes="split three-way")
         yield Config(id="config", classes="three")
         yield Help(id="help", classes="two")
-        # one container docked to the bottom and not three widgets each docked
-        # to it. The same lesson the chrome learned at the top edge: docking is
-        # to an *edge*, not a stack, so the third one lands on the footer's row
-        # and the two draw over each other.
+        # One container docked to the bottom, with the footer inside it. The
+        # same lesson the chrome learned at the top edge, and it has to include
+        # the footer: docking is to an *edge*, not a stack, so a second docked
+        # widget lands on the footer's own row and the footer draws over it.
+        # That is why the status strip never appeared -- not while pushing, not
+        # while fetching, not once. It was rendering, underneath.
         with Container(id="bottom"):
             yield Static("", id="more")
             yield Static("", id="status")
-        yield Footer(show_command_palette=False)
+            yield Footer(show_command_palette=False)
 
     def on_mount(self) -> None:
         self.apply_theme()
