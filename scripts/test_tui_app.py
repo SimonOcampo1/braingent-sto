@@ -353,6 +353,62 @@ def test_every_card_of_the_home_is_reachable_in_one_column():
     asyncio.run(go())
 
 
+def test_a_narrow_split_shows_one_level_and_walks_between_them():
+    """Picking a project and reading what it holds is a hierarchy, and in one
+    column a hierarchy is one panel at a time.
+
+    The level is state on the pane, not a screen stack: the widgets stay
+    mounted, so coming back is coming back to where you were.
+    """
+    async def go():
+        app = tui_app.StoApp()
+        async with app.run_test(size=(70, 30)) as pilot:
+            await app.workers.wait_for_complete()
+            await pilot.press("2")
+            await pilot.pause()
+            pane = app.query_one("#sessions")
+            assert pane.level == 0, pane.level
+            assert app.query_one("#groups").display
+            assert not app.query_one("#rows").display
+
+            groups = app.query_one("#t-groups", tui_app.Table)
+            groups.move_cursor(row=2)
+            await pilot.pause()
+            picked = groups.cursor_row
+
+            await pilot.press("enter")            # into the project
+            await pilot.pause()
+            assert pane.level == 1, pane.level
+            assert app.query_one("#rows").display, "the session list is not on screen"
+            assert not app.query_one("#groups").display
+
+            await pilot.press("escape")           # back out
+            await pilot.pause()
+            assert pane.level == 0, pane.level
+            assert app.query_one("#groups").display
+            assert groups.cursor_row == picked, (groups.cursor_row, picked)
+
+    asyncio.run(go())
+
+
+def test_a_wide_split_shows_every_level_at_once():
+    """The wide behaviour does not change: `level` only says who holds the
+    focus. Widening is not supposed to unwind anything."""
+    async def go():
+        app = tui_app.StoApp()
+        async with app.run_test(size=(140, 30)) as pilot:
+            await app.workers.wait_for_complete()
+            await pilot.press("2")
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            assert app.query_one("#groups").display
+            assert app.query_one("#rows").display
+            assert app.query_one("#t-rows", tui_app.Table).has_focus
+
+    asyncio.run(go())
+
+
 if __name__ == "__main__":
     test_the_wordmark_is_a_rectangle()
     test_the_accent_and_the_ground_are_one_theme_each()
@@ -369,4 +425,6 @@ if __name__ == "__main__":
     test_a_pane_off_screen_is_rebuilt_when_you_reach_it_and_not_before()
     test_the_wordmark_goes_when_it_does_not_fit_and_not_before()
     test_every_card_of_the_home_is_reachable_in_one_column()
+    test_a_narrow_split_shows_one_level_and_walks_between_them()
+    test_a_wide_split_shows_every_level_at_once()
     print("OK")

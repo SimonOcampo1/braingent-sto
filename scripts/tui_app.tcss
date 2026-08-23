@@ -199,8 +199,12 @@ Toast.-error { border-left: outer $error; }
  * belongs to the grid, which has no scrollbar and no keys pointed at it, so
  * the cards past the fold are cut off exactly as before. */
 .narrow #home-grid { grid-size: 1 4; grid-columns: 1fr; grid-rows: auto auto auto auto; height: auto; }
-.narrow .split { grid-size: 1 3; grid-columns: 1fr; grid-rows: 3 auto auto; }
-.narrow .split > Search { column-span: 1; }
+/* not a grid here: a grid keeps a row for a panel that is hidden, so the one
+ * panel on screen inherited the three rows reserved for the search box and
+ * the list vanished under its own header. A vertical stack only lays out what
+ * is displayed. */
+.narrow .split { layout: vertical; }
+.narrow .split > Search { width: 100%; margin-bottom: 1; }
 .narrow .three { grid-size: 1 3; grid-columns: 1fr; grid-rows: auto auto auto; }
 .narrow #prefs, .narrow #remote { column-span: 1; }
 .narrow .two { grid-size: 1 2; grid-columns: 1fr; grid-rows: auto auto; }
@@ -212,6 +216,17 @@ Toast.-error { border-left: outer $error; }
  * screenful. */
 .narrow .card DataTable { height: auto; max-height: 14; }
 .narrow .card VerticalScroll { height: auto; max-height: 14; }
+
+/* A split in one column shows one panel at a time, and one panel takes the
+ * screen -- there is nothing under it to leave room for. So these keep `1fr`
+ * while the stacking panes go to `auto`, and they scroll inside the table the
+ * way they always did rather than scrolling the pane.
+ *
+ * `height: auto` on a `DataTable` is not the answer here: it measures to one
+ * row and the list disappears under its own header. */
+.narrow .split > .card { height: 1fr; min-height: 6; }
+.narrow .split DataTable { height: 1fr; max-height: 100%; }
+.narrow .split VerticalScroll { height: 1fr; max-height: 100%; }
 
 /* the pane itself is what scrolls: no extra container, so the widget tree is
  * the same at every width and a resize moves nothing */

@@ -252,7 +252,70 @@ class Reader(Screen):
 
 # ── the panes ──
 
-class Split(Container):
+class Levels:
+    """Panels that are a hierarchy: in one column, one of them at a time.
+
+    Sessions, memories and skills ask the same shape of question — pick the
+    group, then the item, then read it — and the only thing that differs is how
+    deep it goes. `LEVELS` says that, and the rest is the same for all three,
+    so it is written once here instead of three times below.
+    """
+
+    # the panels, outermost first, by widget id
+    LEVELS = ()
+
+    def set_level(self, n) -> None:
+        """Which panel is on screen when only one fits.
+
+        A number on the pane and not a `push_screen` per level: the widgets
+        stay mounted either way, so the cursor, the search text and the loaded
+        rows survive both a drill-down and a resize. Widen the terminal in the
+        middle of one and every panel appears with everything where you left
+        it — a screen stack would have had to unwind, and a resize that unwinds
+        a stack is a resize that loses your place.
+        """
+        self.level = max(0, min(n, len(self.LEVELS) - 1))
+        narrow = self.app.has_class("narrow")
+        for i, name in enumerate(self.LEVELS):
+            self.query_one(f"#{name}").display = not narrow or i == self.level
+        # the search box belongs to the outermost level: it filters the list
+        # you are about to pick from, and over a document it is a box that does
+        # nothing
+        self.query_one("#search", Search).display = not narrow or self.level == 0
+        if narrow:
+            # the first thing in the panel that can take keys, whatever it is:
+            # a list is a table and a document is a scroll, and a level nobody
+            # can focus is a level where no key does anything
+            panel = self.query_one(f"#{self.LEVELS[self.level]}")
+            target = next((w for w in panel.walk_children() if w.focusable), None)
+            if target is not None:
+                # after the refresh, not now: the panel was hidden a line ago
+                # and the focus chain is built from what the layout says is on
+                # screen, so focusing it in the same breath is asking for a
+                # widget that does not exist yet and getting silence
+                self.app.call_after_refresh(target.focus)
+        self.app._more_check()
+
+    def back(self) -> bool:
+        """`Esc`. True if it moved, so the app knows the key was used."""
+        if self.app.has_class("narrow") and self.level > 0:
+            self.set_level(self.level - 1)
+            return True
+        return False
+
+    def drill(self) -> bool:
+        """`↵` going one panel deeper. True if it moved.
+
+        Only in one column: in a wide window every panel is already on screen
+        and `↵` means what it has always meant.
+        """
+        if self.app.has_class("narrow") and self.level < len(self.LEVELS) - 1:
+            self.set_level(self.level + 1)
+            return True
+        return False
+
+
+class Split(Levels, Container):
     """A screen made of a search box, a list of groups and a list of rows.
 
     Sessions and memories are the same shape because they answer the same kind
@@ -261,6 +324,9 @@ class Split(Container):
     highlighted, hovered and took focus differently, on one screen.
     """
     GROUP_W = 30
+    # two panels: the third thing you look at is a whole document and it has
+    # its own screen
+    LEVELS = ("groups", "rows")
 
     def compose(self) -> ComposeResult:
         yield Search(id="search")
@@ -273,9 +339,11 @@ class Split(Container):
         self.q = ""          # the search text; `self.query` is the DOM query
         self.index = 0
         self.rows = []
+        self.level = 0
         self.refresh_data()
         # focus starts on the left: you pick the project first, and the
         # right-hand list is what you move to once you have
+        self.set_level(0)
         self.query_one("#t-groups", Table).focus()
 
     def set_groups(self, pairs, total) -> None:
@@ -306,8 +374,11 @@ class Split(Container):
         and the other screens lose their opener — so the routing has to happen
         here rather than in a per-table handler.
         """
+        # a project is a folder, and in one column a folder opens into the
+        # panel that holds its contents
+        if self.drill():
+            return
         if self.query_one("#t-groups", Table).has_focus:
-            # a project is a folder, and a folder opens into its contents
             return self.query_one("#t-rows", Table).focus()
         self.open_row()
 
@@ -411,7 +482,7 @@ class Memory(Split):
         self.app.open_memory(m["project"], m["slug"], m["machine"])
 
 
-class Skills(Container):
+class Skills(Levels, Container):
     """The skills and plugins of this machine and of the repo, together.
 
     This is the drill-down the terminal TUI does inside a config module, and it
@@ -419,17 +490,25 @@ class Skills(Container):
     only on one side.
     """
 
+    LEVELS = ("rows", "detail")
+
     def compose(self) -> ComposeResult:
         yield Search(id="search")
         yield Card(t("tab_skills"),
                    Table((t("col_name"), 34), (t("col_desc"), None), id="t-rows"),
                    id="rows")
-        yield Card(t("sec_detail"), Static(id="skill-detail"), id="detail")
+        # inside a `VerticalScroll` because a six-hundred-character description
+        # in seventy columns is a document, and because a level you drill into
+        # has to be able to take the focus -- a `Static` cannot
+        yield Card(t("sec_detail"), VerticalScroll(Static(id="skill-detail")),
+                   id="detail")
 
     def on_mount(self) -> None:
         self.q = ""
         self.rows = []
+        self.level = 0
         self.refresh_data()
+        self.set_level(0)
         self.query_one("#t-rows", Table).focus()
 
     def refresh_data(self) -> None:
@@ -481,6 +560,8 @@ class Skills(Container):
         self.open()
 
     def open(self) -> None:
+        if self.drill():
+            return
         table = self.query_one("#t-rows", Table)
         if not self.rows:
             return
@@ -815,6 +896,7 @@ class StoApp(App):
         Binding("tab", "next_tab", "", show=False, priority=True),
         Binding("shift+tab", "prev_tab", "", show=False, priority=True),
         Binding("enter", "open", "", show=False, priority=True),
+        Binding("escape", "back", "", show=False),
         Binding("p", "sync('push')", "PUSH"),
         Binding("l", "sync('pull')", "PULL"),
         Binding("f", "fetch", "FETCH"),
@@ -970,6 +1052,13 @@ class StoApp(App):
         self.set_class(self.size.width < 100, "narrow")
         self.set_class(self.size.width < WORDMARK_W + 5, "tiny")
         self.set_class(self.size.height < 24, "short")
+        # re-applied because which panels are displayed depends on `narrow`,
+        # and this is the moment it changed. Toggling `display` on three
+        # widgets, not recomposing a screen: that was tried, and it made
+        # dragging a window feel like mud.
+        for pane in self.panes:
+            if hasattr(pane, "set_level"):
+                pane.set_level(pane.level)
         self.call_after_refresh(self._more_check)
 
     def apply_theme(self) -> None:
@@ -1151,6 +1240,12 @@ class StoApp(App):
         pane = self.panes[self.tab]
         if hasattr(pane, "open"):
             pane.open()
+
+    def action_back(self) -> None:
+        """`Esc` climbs one level, and does nothing at the top."""
+        pane = self.panes[self.tab]
+        if hasattr(pane, "back"):
+            pane.back()
 
     def action_verb(self, verb: str) -> None:
         """`a` / `d` / `R` belong to whichever screen can do them. Bound at the
