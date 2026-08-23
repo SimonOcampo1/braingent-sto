@@ -673,49 +673,37 @@ def cmd_memory(*args):
 
 
 def cmd_ui(*args):
-    """`sto ui`, and `sto ui --ink` for the optional Ink flavour.
+    """`sto ui`, and `sto ui --textual` for the optional Textual flavour.
 
-    Two front-ends over one home. The default one is `ui.py`: Python stdlib,
-    always there, no runtime to install. `--ink` is a Node app under `app-tui/`
-    that reads `GET /api/home` — the same numbers, laid out with a real flexbox
-    instead of column arithmetic done by hand.
+    Two front-ends over one engine. The default is `ui.py`: Python stdlib,
+    always there, nothing to install. `--textual` is `tui_app.py`, which imports
+    the same `cli` and `sessions_server` — no HTTP in between, no second copy of
+    any rule — and spends a library on the parts a TUI framework is actually
+    good at: grid layout, scrollable tables, real widgets.
 
-    It is opt-in and it stays opt-in. Without Node this says so and falls back
-    rather than failing: the flavour is a preference, and the OS has to run on
-    a machine that never installs one.
+    It is opt-in and it stays opt-in. `uv` runs it in a throwaway environment so
+    nothing lands in the user's Python; without `uv` and without `textual`, this
+    says how to get it and opens the usual screen rather than failing.
     """
     if not args:
         return __import__("ui").run()   # ponytail: lazy — ui imports cli
-    if args != ("--ink",):
+    if args != ("--textual",):
         return _no_args("ui")
-    node = shutil.which("node")
-    if node is None:
-        print(t("ink_no_node"))
-        return __import__("ui").run()
-    app = srv.REPO_ROOT / "app-tui"
-    if not (app / "node_modules").exists():
-        print(t("ink_installing"))
-        if subprocess.run(["npm", "install"], cwd=app, shell=True).returncode:
-            print(t("ink_install_failed"))
-            return __import__("ui").run()
-    # the Ink app talks HTTP, so unlike the stdlib TUI it needs the server up.
-    # A daemon thread and not a subprocess: it dies with this process, and a
-    # server orphaned by a crashed front-end is a port nobody can rebind.
-    _serve_in_background()
-    subprocess.run(["npx", "tsx", "src/app.jsx"], cwd=app, shell=True)
-    return {"message": ""}
-
-
-def _serve_in_background():
-    """Start the API server here unless something already answers on the port."""
-    import socket
-    import threading
-    port = int(os.environ.get("STO_SESSIONS_PORT", "8765"))
-    with socket.socket() as probe:
-        if probe.connect_ex(("127.0.0.1", port)) == 0:
-            return                      # somebody is already serving it
-    httpd = srv.ThreadingHTTPServer(("127.0.0.1", port), srv.Handler)
-    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    try:
+        import textual  # noqa: F401
+    except ImportError:
+        pass
+    else:
+        return __import__("tui_app").run()
+    if shutil.which("uv"):
+        # --no-project: this is a script in a repo that is not a uv project, and
+        # without it uv goes looking for a pyproject.toml and gives up
+        here = Path(__file__).parent
+        subprocess.run(["uv", "run", "--no-project", "--with", "textual",
+                        "python", str(here / "tui_app.py")], cwd=here.parent)
+        return {"message": ""}
+    print(t("textual_missing"))
+    return __import__("ui").run()
 
 
 def _no_args(cmd):

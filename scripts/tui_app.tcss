@@ -1,0 +1,124 @@
+/* braingent STO — the optional Textual flavour.
+ *
+ * The layout lives here and nowhere else. The Ink version it replaces computed
+ * every panel width by hand (`RAIL = 38`, `main = width - 40`), which is why
+ * its cards never quite lined up; here the grid states the proportion once and
+ * every card inherits the same border, the same padding and the same gutter.
+ */
+
+Screen {
+    background: $surface;
+}
+
+/* ── chrome: pinned top and bottom, never scrolls ── */
+
+#topbar {
+    dock: top;
+    height: 1;
+    padding: 0 1;
+    background: $panel;
+    color: $text-muted;
+}
+#topbar .name { color: $accent; text-style: bold; }
+#topbar .sep  { color: $foreground 30%; }
+
+#tabs {
+    dock: top;
+    height: 1;
+    padding: 0 1;
+    background: $panel;
+}
+#tabs .tab     { color: $text-muted; }
+#tabs .key     { background: $foreground; color: $background; text-style: bold; }
+#tabs .on      { color: $accent; text-style: bold; }
+#tabs .on-key  { background: $accent; color: $background; text-style: bold; }
+
+Footer { dock: bottom; }
+
+/* ── cards: one definition, so every panel is the same object ── */
+
+.card {
+    border: round $foreground 40%;
+    border-title-color: $accent;
+    border-title-style: bold;
+    padding: 0 1;
+    height: 1fr;
+}
+.card:focus-within { border: round $accent; }
+
+/* ── home: two columns, two rows, stated once ── */
+
+#home {
+    layout: grid;
+    grid-size: 2 2;
+    grid-columns: 1fr 2fr;
+    grid-rows: 1fr 1fr;
+    grid-gutter: 1 1;
+    padding: 1;
+}
+
+.big     { color: $accent; text-style: bold; }
+.muted   { color: $text-muted; }
+.ok      { color: $success; text-style: bold; }
+.warn    { color: $warning; }
+.bad     { color: $error; }
+.label   { color: $text-muted; }
+
+/* ── lists: table on the left, what the row holds on the right ── */
+
+.split {
+    layout: grid;
+    grid-size: 2 1;
+    grid-columns: 2fr 1fr;
+    grid-gutter: 1 1;
+    padding: 1;
+}
+.split-even {
+    layout: grid;
+    grid-size: 2 1;
+    grid-columns: 1fr 2fr;
+    grid-gutter: 1 1;
+    padding: 1;
+}
+
+DataTable {
+    height: 1fr;
+    scrollbar-size-vertical: 1;
+}
+DataTable > .datatable--header {
+    background: $panel;
+    color: $text-muted;
+    text-style: none;
+}
+DataTable > .datatable--cursor {
+    background: $accent;
+    color: $background;
+}
+
+ListView {
+    height: 1fr;
+    background: transparent;
+}
+ListView > ListItem { padding: 0 1; }
+ListView > ListItem.--highlight { background: $accent; color: $background; }
+
+/* ── the single-pane screens ── */
+
+#one {
+    padding: 1;
+}
+#one > .card { height: 1fr; }
+
+/* ── a reader: one document, scrolled ── */
+
+#reader {
+    padding: 1;
+}
+#reader > .card { height: 1fr; }
+VerticalScroll { scrollbar-size-vertical: 1; }
+
+/* ── bars ── */
+
+.bar-track { color: $foreground 20%; }
+.bar-fill  { color: $accent; }
+.bar-warn  { color: $error; }

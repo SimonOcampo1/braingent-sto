@@ -551,12 +551,12 @@ def test_graph_open_launches_a_chromeless_window():
     _con_html(caso)
 
 
-def test_ui_ink_falls_back_to_the_stdlib_tui_when_node_is_missing():
-    """The Ink flavour is a preference, not a requirement.
+def test_ui_textual_falls_back_to_the_stdlib_tui_without_a_way_to_run_it():
+    """The Textual flavour is a preference, not a requirement.
 
-    A machine without Node still has to get a TUI when it asks for one, so the
-    missing runtime is a printed line and the usual screen — not an error that
-    leaves the user with nothing.
+    A machine with neither `textual` nor `uv` still has to get a TUI when it
+    asks for one, so what is missing is a printed line and the usual screen —
+    not an error that leaves the user with nothing.
     """
     import sys
     import types
@@ -566,11 +566,13 @@ def test_ui_ink_falls_back_to_the_stdlib_tui_when_node_is_missing():
     sys.modules["ui"] = fake_ui
     try:
         cli.shutil.which = lambda name: None
-        cli.cmd_ui("--ink")
+        sys.modules["textual"] = None      # import textual -> ImportError
+        cli.cmd_ui("--textual")
         assert abierto == ["stdlib"], abierto
     finally:
         cli.shutil.which = real_which
         sys.modules.pop("ui", None)
+        sys.modules.pop("textual", None)
 
 
 def test_ui_takes_no_flag_it_does_not_know():
@@ -783,7 +785,7 @@ if __name__ == "__main__":
     test_graph_command_without_file()
     test_graph_open_launches_a_chromeless_window()
     test_graph_open_falls_back_to_the_browser_without_chromium()
-    test_ui_ink_falls_back_to_the_stdlib_tui_when_node_is_missing()
+    test_ui_textual_falls_back_to_the_stdlib_tui_without_a_way_to_run_it()
     test_ui_takes_no_flag_it_does_not_know()
     test_graph_open_without_the_html()
     test_cached_sessions_hides_subagent_sessions_by_default()
