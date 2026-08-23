@@ -29,7 +29,7 @@ from textual.binding import Binding  # noqa: E402
 from textual.containers import Container, Grid, VerticalScroll  # noqa: E402
 from textual.content import Content  # noqa: E402
 from textual.screen import ModalScreen, Screen  # noqa: E402
-from textual.widgets import Footer, Input, Static  # noqa: E402
+from textual.widgets import Footer, Input, Markdown, Static  # noqa: E402
 
 from tui_widgets import (  # noqa: E402
     BOX_OFF, BOX_ON, GROUNDS, WORDMARK, WORDMARK_W, Card,
@@ -192,15 +192,30 @@ class Reader(Screen):
         # a screen binding shadows the app's. Reading a transcript with PUSH
         # one keystroke away is an accident waiting to happen, and hidden they
         # also stop being offered in the footer of a screen that cannot use them
-        *[Binding(k, "nothing", "", show=False) for k in "plfgru"],
+        *[Binding(k, "nothing", "", show=False) for k in "plfgrus"],
+        # Tab belongs to this screen's own two panels -- the document and the
+        # neighbours -- not to the panes of the screen underneath it
+        Binding("tab", "next_panel", "", show=False, priority=True),
+        Binding("shift+tab", "prev_panel", "", show=False, priority=True),
     ]
 
-    def __init__(self, title, body, links=()):
+    def action_next_panel(self) -> None:
+        self.focus_next()
+
+    def action_prev_panel(self) -> None:
+        self.focus_previous()
+
+    def __init__(self, title, body, links=(), markdown=False):
         super().__init__()
         self._title = title
         # a string is one plain block; a list is `(css class, markup)` turns
         self._blocks = body if isinstance(body, list) else [("plain", body)]
         self._links = list(links)
+        # a memory and a SKILL.md are documents and `**bold**` on screen as
+        # four asterisks is this screen failing at its one job. A transcript is
+        # not a document -- it is a conversation, and its own renderer carries
+        # more than markdown can -- so the flag is per caller, not per screen
+        self._markdown = markdown and isinstance(body, str)
 
     def compose(self) -> ComposeResult:
         with Container(id="chrome"):
@@ -208,10 +223,16 @@ class Reader(Screen):
         with Container(id="reader"):
             with Card(self._title, upper=False):
                 with VerticalScroll(id="doc-scroll"):
-                    for css, text in self._blocks:
-                        yield Static(text if css == "plain"
-                                     else Content.from_markup(text),
-                                     markup=False, classes=f"blk {css}")
+                    if self._markdown:
+                        # `Markdown.can_focus` is False, so the scroll around
+                        # it stays what takes the keys and the reader's
+                        # ↑↓/PgUp/PgDn bindings are untouched
+                        yield Markdown(self._blocks[0][1])
+                    else:
+                        for css, text in self._blocks:
+                            yield Static(text if css == "plain"
+                                         else Content.from_markup(text),
+                                         markup=False, classes=f"blk {css}")
             if self._links:
                 yield Card(t("mem_links"),
                            Table((t("col_slug"), None), id="t-links"), id="links")
@@ -578,7 +599,7 @@ class Skills(Levels, Container):
             # a plugin has no SKILL.md to read, and neither does a skill the
             # repo has but this machine never installed
             return self.app.notify(t("empty"))
-        self.app.push_screen(Reader(skill["name"], skill["content"]))
+        self.app.push_screen(Reader(skill["name"], skill["content"], markdown=True))
 
     # ── the three verbs of the module screen of the stdlib TUI ──
     #
@@ -1367,7 +1388,7 @@ class StoApp(App):
         except Exception:
             out, inc = [], []            # a memory reads fine without its edges
         links = [("→", mid) for mid in out] + [("←", mid) for mid in inc]
-        self.push_screen(Reader(f"{project}/{slug}", body, links))
+        self.push_screen(Reader(f"{project}/{slug}", body, links, markdown=True))
 
     def action_reload(self) -> None:
         self.load_all()

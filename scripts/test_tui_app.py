@@ -19,6 +19,7 @@ except ImportError:
     raise SystemExit(0)
 
 import tui_app  # noqa: E402
+from textual.widgets import Markdown  # noqa: E402
 
 
 def screen_text(app):
@@ -574,6 +575,35 @@ def test_the_marquee_runs_only_where_text_is_cut_and_only_with_focus():
     asyncio.run(go())
 
 
+def test_a_memory_renders_as_markdown_and_a_transcript_does_not():
+    """A memory and a SKILL.md are documents; `**bold**` on screen as four
+    asterisks is the reader failing at its one job.
+
+    A transcript is not a document, it is a conversation, and its own renderer
+    -- who spoke with their gutter, code on the panel, tools in amber --
+    carries what markdown cannot. That one keeps its blocks.
+    """
+    async def go():
+        app = tui_app.StoApp()
+        async with app.run_test(size=(124, 30)) as pilot:
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            app.push_screen(tui_app.Reader("note", "# Title\n\n**bold** text",
+                                           markdown=True))
+            await pilot.pause()
+            assert app.screen.query(Markdown), "the document is not markdown"
+            painted = "\n".join(screen_text(app))
+            assert "**bold**" not in painted, painted
+            await pilot.press("escape")
+            await pilot.pause()
+
+            app.push_screen(tui_app.Reader("plain", [("user", "hello")]))
+            await pilot.pause()
+            assert not app.screen.query(Markdown), "a transcript went to markdown"
+
+    asyncio.run(go())
+
+
 if __name__ == "__main__":
     test_the_wordmark_is_a_rectangle()
     test_the_accent_and_the_ground_are_one_theme_each()
@@ -597,4 +627,5 @@ if __name__ == "__main__":
     test_s_cycles_the_sort_and_comes_back_to_the_natural_order()
     test_a_column_whose_only_correct_order_is_the_default_is_not_in_the_cycle()
     test_the_marquee_runs_only_where_text_is_cut_and_only_with_focus()
+    test_a_memory_renders_as_markdown_and_a_transcript_does_not()
     print("OK")
