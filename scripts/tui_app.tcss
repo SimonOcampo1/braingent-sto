@@ -9,9 +9,7 @@
  * and the ground comes from the same screen, so nothing here names a colour.
  */
 
-Screen {
-    background: $background;
-}
+Screen { background: $background; }
 
 /* ── chrome: pinned top and bottom, never scrolls ── */
 
@@ -20,14 +18,13 @@ Screen {
     height: auto;
     background: $panel;
 }
-
 #topbar {
     height: 1;
     padding: 0 1;
     color: $foreground 60%;
 }
-
 #tabs {
+    layout: horizontal;
     height: 1;
     padding: 0 1;
 }
@@ -46,12 +43,9 @@ Screen {
     color: $background;
     text-style: bold;
 }
-.tab:hover {
-    color: $accent;
-}
+.tab:hover { color: $accent; }
 
-/* the status strip sits between the screen and the keys: what is running now,
- * and what the last thing that ran had to say */
+/* what is running now, and what the last thing that ran had to say */
 #status {
     dock: bottom;
     height: 1;
@@ -61,123 +55,100 @@ Screen {
 
 /* a key cap is the key in the accent, not a filled block: reversed, six of them
  * across the foot read as a row of buttons and drown their own labels */
-Footer {
-    dock: bottom;
-    background: $panel;
-}
-FooterKey {
-    background: $panel;
-    color: $foreground 60%;
-}
-FooterKey > .footer-key--key {
-    background: $panel;
-    color: $accent;
-    text-style: bold;
-}
-FooterKey > .footer-key--description {
-    color: $foreground 60%;
-}
-FooterKey:hover {
-    background: $surface;
-}
-FooterKey:hover > .footer-key--key {
-    background: $surface;
-    color: $accent;
-}
+Footer { dock: bottom; background: $panel; }
+FooterKey { background: $panel; color: $foreground 60%; }
+FooterKey > .footer-key--key { background: $panel; color: $accent; text-style: bold; }
+FooterKey > .footer-key--description { color: $foreground 60%; }
+FooterKey:hover { background: $surface; }
+FooterKey:hover > .footer-key--key { background: $surface; color: $accent; }
 
-/* ── the wordmark: the mark, beside the name, once ── */
+/* ── the panes ── */
 
-#wordmark {
-    height: 4;
-    padding: 0 1;
-    margin-top: 1;
-}
+.home, .split, .three, .two { padding: 1; }
 
-/* ── cards: one definition, so every panel is the same object ── */
+#wordmark { height: 2; margin-bottom: 1; }
 
-.card {
+/* the search box is part of the screen, not a thing a key summons */
+Search {
+    height: 3;
+    margin-bottom: 1;
     border: round $foreground 30%;
-    border-title-color: $accent;
-    border-title-style: bold;
-    padding: 0 1;
-    height: 1fr;
+    border-title-color: $foreground 50%;
     background: $surface;
 }
-.card:focus-within { border: round $accent; }
+Search:focus { border: round $accent; border-title-color: $accent; }
 
-/* ── home: two columns, two rows, stated once ── */
-
-#home {
+.home { layout: vertical; }
+#home-grid {
     layout: grid;
     grid-size: 2 2;
     grid-columns: 1fr 2fr;
     grid-rows: 1fr 1fr;
     grid-gutter: 1 1;
-    padding: 1;
 }
 
-/* ── lists: table on the left, what the row holds on the right ── */
+/* sessions, memories and skills: the box on top, then the two lists */
+.split { layout: grid; grid-size: 2 2; grid-columns: 1fr 2fr; grid-rows: 3 1fr; grid-gutter: 1 1; }
+/* skills is the same shape the other way round: the list is what you read and
+ * the panel beside it is the footnote */
+.split.wide-left { grid-columns: 2fr 1fr; }
+.split > Search { column-span: 2; margin-bottom: 0; }
+.three { layout: grid; grid-size: 2 2; grid-columns: 1fr 1fr; grid-rows: 1fr 1fr; grid-gutter: 1 1; }
+#prefs { column-span: 1; }
+#remote { column-span: 2; }
+.two { layout: grid; grid-size: 2 1; grid-columns: 2fr 1fr; grid-gutter: 1 1; }
 
-.split {
-    layout: grid;
-    grid-size: 2 1;
-    grid-columns: 2fr 1fr;
-    grid-gutter: 1 1;
-    padding: 1;
+/* ── cards: one definition, so every panel is the same object ── */
+
+.card {
+    border: round $foreground 30%;
+    border-title-color: $foreground 60%;
+    border-title-style: bold;
+    padding: 0 1;
+    height: 1fr;
+    background: $surface;
 }
-.split-even {
-    layout: grid;
-    grid-size: 2 1;
-    grid-columns: 1fr 2fr;
-    grid-gutter: 1 1;
-    padding: 1;
+/* the card that holds the focus says so: a table that is taking your arrow
+ * keys and a table that is not have to look different from across the screen */
+.card:focus-within {
+    border: round $accent;
+    border-title-color: $accent;
+    background: $surface;
 }
-.one { padding: 1; }
-.one > .card { height: 1fr; }
+
+/* ── tables ── */
 
 DataTable, Table {
     height: 1fr;
     background: $surface;
     scrollbar-size-vertical: 1;
+    scrollbar-background: $surface;
+    scrollbar-color: $foreground 30%;
+    scrollbar-color-hover: $accent;
 }
 DataTable > .datatable--header {
     background: $surface;
     color: $foreground 50%;
     text-style: none;
 }
-DataTable > .datatable--cursor {
-    background: $accent;
-    color: $background;
-}
-DataTable > .datatable--hover {
-    background: $panel;
-}
-
-ListView {
-    height: 1fr;
-    background: $surface;
-}
-ListView > ListItem { padding: 0 1; background: $surface; }
-ListView > ListItem.--highlight { background: $accent; color: $background; }
-ListView:focus > ListItem.--highlight { background: $accent; }
+/* the cursor is bright only where the keys are going; elsewhere it is a
+ * remembered place, not an active one */
+DataTable > .datatable--cursor { background: $panel; color: $foreground; }
+DataTable:focus > .datatable--cursor { background: $accent; color: $background; }
+DataTable > .datatable--hover { background: $panel; }
 
 /* ── a reader: one document, scrolled ── */
 
-#reader { padding: 1; }
+#reader { padding: 1; layout: grid; grid-size: 1 2; grid-rows: 1fr auto; grid-gutter: 1; }
 #reader > .card { height: 1fr; }
+#links { height: 8; }
 VerticalScroll {
     scrollbar-size-vertical: 1;
-    scrollbar-background: $panel;
-    scrollbar-color: $accent 60%;
+    scrollbar-background: $surface;
+    scrollbar-color: $foreground 30%;
     scrollbar-color-hover: $accent;
 }
 #doc { padding: 0 1; }
-
-/* ── toasts: the library's, in our colours ── */
-
-Toast { background: $panel; }
-Toast.-information { border-left: outer $accent; }
-Toast.-error { border-left: outer $error; }
 
 /* ── the confirmation: one modal for everything that writes ── */
 
@@ -193,33 +164,46 @@ Toast.-error { border-left: outer $error; }
     height: auto;
     max-height: 70%;
     background: $surface;
+    border: round $accent;
+    border-title-color: $accent;
 }
 #confirm-wrap > .card.danger { border: round $error; border-title-color: $error; }
 #confirm-body { padding: 1 0; }
 #confirm-keys { padding-top: 1; }
 
-/* ── search: docked, not floating over the rows it is filtering ── */
+/* ── toasts: the library's, in our colours ── */
 
-#search {
-    dock: bottom;
-    display: none;
-    height: 3;
-    border: round $accent;
-    background: $surface;
-}
-#search:focus { border: round $accent; }
+Toast { background: $panel; }
+Toast.-information { border-left: outer $accent; }
+Toast.-error { border-left: outer $error; }
 
-/* ── narrow: one column, no banner, no side panel ── */
+/* ── narrow: one column, no banner ── */
 
-.narrow #home {
-    grid-size: 1 4;
-    grid-columns: 1fr;
-    grid-rows: auto auto auto auto;
+.narrow #home-grid { grid-size: 1 4; grid-columns: 1fr; grid-rows: auto auto auto auto; }
+.narrow .split { grid-size: 1 3; grid-columns: 1fr; grid-rows: 3 auto 1fr; }
+.narrow .split > Search { column-span: 1; }
+.narrow .three { grid-size: 1 3; grid-columns: 1fr; grid-rows: auto 1fr auto; }
+.narrow #prefs, .narrow #remote { column-span: 1; }
+.narrow .two { grid-size: 1 2; grid-columns: 1fr; }
+.narrow #wordmark { display: none; }
+.narrow #detail { display: none; }
+
+/* ── a transcript, as the conversation it was ── */
+
+.blk { width: 100%; height: auto; }
+.blk.meta  { color: $foreground 50%; margin-bottom: 1; }
+.blk.who   { text-style: bold; margin-top: 1; padding-left: 1; }
+.blk.user  { padding-left: 2; border-left: outer $accent; }
+.blk.claude{ padding-left: 2; border-left: outer $success; }
+.blk.who.user   { color: $accent; border-left: none; padding-left: 1; }
+.blk.who.claude { color: $success; border-left: none; padding-left: 1; }
+.blk.code {
+    background: $panel;
+    color: $secondary;
+    padding: 0 2;
+    margin: 1 0;
+    border-left: outer $foreground 30%;
 }
-.narrow .split, .narrow .split-even {
-    grid-size: 1 1;
-    grid-columns: 1fr;
-}
-/* the banner is hidden by the app, not here: it already decides on height as
- * well as width, and two places deciding one thing is one place too many */
-.narrow #skill-detail { display: none; }
+.blk.tool { color: $foreground 50%; padding-left: 2; }
+.blk.bad  { color: $error; padding-left: 2; }
+.blk.plain { padding: 0 1; }

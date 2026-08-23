@@ -11,6 +11,8 @@ are decided once, in Python, and this file only decides how they look.
 Every user-facing string comes from `i18n`. Nothing here is written in Spanish
 or in English.
 """
+import os
+import re
 import sys
 from pathlib import Path
 
@@ -21,15 +23,14 @@ import i18n  # noqa: E402
 import sessions_server as srv  # noqa: E402
 import ui  # noqa: E402
 
+from textual import work  # noqa: E402
 from textual.app import App, ComposeResult  # noqa: E402
 from textual.binding import Binding  # noqa: E402
-from textual.containers import Container, Grid, Horizontal, VerticalScroll  # noqa: E402
+from textual.containers import Container, Grid, VerticalScroll  # noqa: E402
 from textual.content import Content  # noqa: E402
-from textual.screen import ModalScreen, Screen
+from textual.screen import ModalScreen, Screen  # noqa: E402
 from textual.theme import Theme  # noqa: E402
-from textual.widgets import (  # noqa: E402
-    DataTable, Footer, Input, ListItem, ListView, Static,
-)
+from textual.widgets import DataTable, Footer, Input, Static  # noqa: E402
 
 t = i18n.t
 
@@ -47,22 +48,30 @@ ACCENT_CSS = {"36": "#22d3ee", "32": "#4ade80", "35": "#c084fc",
 # already has a setting for — two places deciding one colour. These take the
 # accent from `sto ui` and only decide how dark the room is.
 GROUNDS = {
-    "dark":  ("#12141a", "#171a21", "#1d212a", "#e6e8ee", False),
-    "light": ("#f6f7f9", "#ffffff", "#eceef2", "#1b1e26", True),
-    "black": ("#000000", "#0a0a0a", "#121212", "#e6e8ee", False),
+    "dark":  ("#12141a", "#171a21", "#1d212a", "#e6e8ee"),
+    "light": ("#f4f5f7", "#ffffff", "#e9ebef", "#1b1e26"),
+    "black": ("#000000", "#0a0a0a", "#141414", "#e6e8ee"),
 }
-
-
-def make_theme(name, accent):
-    background, surface, panel, foreground, light = GROUNDS[name]
-    return Theme(name=f"sto-{name}", primary=accent, secondary=accent,
-                 accent=accent, background=background, surface=surface,
-                 panel=panel, foreground=foreground, dark=not light,
-                 success="#4ade80", warning="#fbbf24", error="#f87171")
 
 TABS = ["tab_home", "tab_sessions", "tab_memory", "tab_skills",
         "tab_config", "tab_help"]
 HOME, SESSIONS, MEMORY, SKILLS, CONFIG, HELP = range(6)
+
+
+def theme_for(ground, accent_code):
+    """One theme per (ground, accent) pair, named after both.
+
+    Named after both on purpose: Textual repaints when the *name* of the theme
+    changes, so re-registering `sto-dark` with a new accent left the old
+    colours on screen. A new name is a new theme, and the screen follows.
+    """
+    background, surface, panel, foreground = GROUNDS[ground]
+    accent = ACCENT_CSS.get(accent_code, "#22d3ee")
+    return Theme(name=f"sto-{ground}-{accent_code}", primary=accent,
+                 secondary=accent, accent=accent, background=background,
+                 surface=surface, panel=panel, foreground=foreground,
+                 dark=ground != "light", success="#4ade80",
+                 warning="#fbbf24", error="#f87171")
 
 
 # ── small renderers ──
@@ -81,12 +90,39 @@ def bar(pct, width=24, warn=80):
     tip = eighths[int((exact - full) * 8)].strip()
     colour = "$error" if (pct or 0) >= warn else "$accent"
     rest = max(0, width - full - len(tip))
-    return Content.from_markup(
-        f"[{colour}]{'█' * full}{tip}[/][$foreground 20%]{'█' * rest}[/]")
+    return f"[{colour}]{'█' * full}{tip}[/][$foreground 20%]{'█' * rest}[/]"
+
+
+def spark(values, width=24):
+    """A sparkline of the last `width` values, one column each.
+
+    Eight heights of block, scaled to the biggest value in the window — an
+    absolute scale would flatten an ordinary week against one heavy day.
+    """
+    if not values:
+        return ""
+    tail = values[-width:]
+    top = max(tail) or 1
+    blocks = "▁▂▃▄▅▆▇█"
+    return "".join(blocks[min(7, int(v / top * 7.99))] for v in tail)
 
 
 def ago(ts):
     return ui.ago(ts)
+
+
+def clip(text, n):
+    s = " ".join(str(text or "").split())
+    return s if len(s) <= n else s[: max(0, n - 1)] + "…"
+
+
+def esc(text):
+    """Textual markup uses square brackets, and a transcript is full of them.
+
+    Only `[` is escaped. Doubling backslashes as well — the Rich habit — put
+    every Windows path in a transcript on screen as `C:\\Users\\...`.
+    """
+    return str(text).replace("[", "\\[")
 
 
 class Table(DataTable):
@@ -95,13 +131,14 @@ class Table(DataTable):
 
     Left to itself a `DataTable` sizes a column from its header label and never
     shrinks it, so a description column pushes the table wider than the card it
-    sits in until the left-hand columns walk off the edge — and the width is not
-    known at mount, only once the layout has run. Both problems belong to the
-    table, not to five screens repeating the fix.
+    sits in until the left-hand columns walk off the edge — and the width is
+    not known at mount, only once the layout has run. Both problems belong to
+    the table, not to six screens repeating the fix.
     """
 
     def __init__(self, *spec, **kw):
-        super().__init__(cursor_type="row", **kw)
+        kw.setdefault("cursor_type", "row")
+        super().__init__(**kw)
         self.spec = spec
 
     def on_mount(self) -> None:
@@ -117,19 +154,15 @@ class Table(DataTable):
             return
         pad = self.cell_padding * 2
         fixed = sum(w for _, w in self.spec[:-1])
-        cols[-1].width = max(8, self.size.width - fixed - pad * len(cols) - 1)
-        self.refresh(layout=True)
-
-
-def clip(text, n):
-    s = " ".join(str(text or "").split())
-    return s if len(s) <= n else s[: max(0, n - 1)] + "…"
+        want = max(8, self.size.width - fixed - pad * len(cols) - 1)
+        if cols[-1].width != want:
+            cols[-1].width = want
+            self.refresh(layout=True)
 
 
 class Card(Container):
     """A titled panel. Every one of them is this widget, so they cannot drift
-    apart in border, padding or title style — which is what made the hand-laid
-    version look uneven."""
+    apart in border, padding or title style."""
 
     def __init__(self, title, *children, upper=True, classes="", **kw):
         # merged, not overwritten: a caller asking for one more class was
@@ -140,134 +173,117 @@ class Card(Container):
         self.border_title = str(title).upper() if upper else str(title)
 
 
-# ── the screens ──
+class Search(Input):
+    """The search box, on screen all the time and not summoned by a key.
 
-# The wordmark, in figlet's `double_blocky`: solid `█▀▄` at two rows a line, so
-# the whole name fits on two lines in four rows and thirty-eight columns. The
-# same name in `ansi_shadow` — the face of the prototype — is 103 columns of
-# banner across the top of every home, which is most of the screen spent on
-# saying what the screen already is.
+    `/` used to open it at the foot. A box you cannot see is a feature nobody
+    finds, and one docked under the rows it filters is one you cannot watch
+    them narrow into. It sits on top of its own list, with its own label.
+    """
+
+    def __init__(self, **kw):
+        # the label is the border title, not a placeholder: with both, the word
+        # "search" sat on the box twice
+        super().__init__(**kw)
+        self.border_title = t("k_search")
+
+
+# ── the wordmark ──
 #
-# Pasted rather than generated: it is four strings, and a dependency to produce
-# four strings is a dependency to keep working forever. To change the face:
+# figlet's `double_blocky`: solid `█▀▄` at two rows a line, so the whole name
+# fits on one line, in two rows and fifty-one columns. The face of the
+# prototype is `ansi_shadow`, and the same name in it is 103 columns and six
+# rows — most of the screen spent saying what the screen already is.
+#
+# Pasted rather than generated: it is two strings, and a dependency to produce
+# two strings is a dependency to keep working forever. To change the face:
 #     uv run --no-project --with pyfiglet python -c
-#       "import pyfiglet; print(pyfiglet.Figlet(font='double_blocky').renderText('BRAINGENT'))"
+#       "import pyfiglet; print(pyfiglet.Figlet(font='double_blocky').renderText('BRAINGENT STO'))"
 WORDMARK = [
-    "██▄ █▀█ ▄▀█ ▀█▀ █▄░█ █▀▀ █▀▀ █▄░█ ▀█▀",
-    "█▄█ █▀▄ █▀█ ▄█▄ █░▀█ █▄█ ██▄ █░▀█ ░█░",
-    "                         ▄▀▀ ▀█▀ █▀█ ",
-    "                         ▄██ ░█░ █▄█ ",
+    "██▄ █▀█ ▄▀█ ▀█▀ █▄░█ █▀▀ █▀▀ █▄░█ ▀█▀  ▄▀▀ ▀█▀ █▀█",
+    "█▄█ █▀▄ █▀█ ▄█▄ █░▀█ █▄█ ██▄ █░▀█ ░█░  ▄██ ░█░ █▄█",
 ]
 WORDMARK_W = max(len(line) for line in WORDMARK)
 
 
 class Wordmark(Static):
-    """The name, twice as wide as it is tall, in the accent."""
-
     def on_mount(self) -> None:
-        block = "\n".join(f"[$accent]{line}[/]" for line in WORDMARK)
-        self.update(Content.from_markup(block))
+        self.repaint()
+
+    def repaint(self) -> None:
+        self.update(Content.from_markup(
+            "\n".join(f"[$accent]{line}[/]" for line in WORDMARK)))
 
 
-class Home(Grid):
-    """Two columns, two rows, proportions stated in the stylesheet."""
+# ── a transcript, as a conversation ──
 
-    def compose(self) -> ComposeResult:
-        yield Card(t("sec_sync"), Static(id="sync-body"))
-        yield Card(t("sec_parity"), Table((t("sec_modules"), 16), (t("local"), 6), (t("in_repo"), 7),
-                                     ("Δ L", 4), ("Δ R", 4), id="t-parity"))
-        yield Card(t("sec_usage"), Static(id="usage-body"))
-        yield Card(t("sec_general"), Static(id="overall-body"))
+CODE = re.compile(r"`([^`]+)`")
+PATHY = re.compile(r"(?<![\w/\\.])((?:[A-Za-z]:)?[\w./\\-]+\.[A-Za-z]{1,5}"
+                   r"(?::\d+)?)(?![\w.])")
 
-    def on_mount(self) -> None:
-        self.refresh_data()
 
-    def refresh_data(self) -> None:
-        app = self.app
-        sy = app.sync
-        up, down = app.preview
-        p = app.parity
+def _inline(text):
+    """Backticks and file paths, coloured. Not a syntax highlighter.
 
-        drift_l = drift_r = 0
-        table = self.query_one("#t-parity", Table)
-        table.clear()
-        for m in p["modules"]:
-            dl, dr = app.deltas(m)
-            drift_l, drift_r = drift_l + dl, drift_r + dr
-            dot = ("[$success]●[/]" if dl == dr == 0 and m["localFiles"]
-                   else "[$warning]◐[/]" if dl
-                   else "[$primary]◑[/]" if dr
-                   else "[$foreground 40%]○[/]")
-            name = m["id"] if m["enabled"] else f"[$foreground 50%]{m['id']}[/]"
-            table.add_row(
-                Content.from_markup(f"{dot} {name}"),
-                str(m["localFiles"]), str(m["repoFiles"]),
-                Content.from_markup(f"[$warning]{dl}[/]" if dl else "[$foreground 40%]·[/]"),
-                Content.from_markup(f"[$primary]{dr}[/]" if dr else "[$foreground 40%]·[/]"),
-            )
-        table.fit()
+    A transcript is prose with code in it, and the two things worth telling
+    apart at a glance are "this is a literal" and "this is a file". Anything
+    more would be guessing at a language per line.
+    """
+    out = esc(text)
+    out = CODE.sub(lambda m: f"[$accent on $panel]{m.group(1)}[/]", out)
+    return PATHY.sub(lambda m: f"[$secondary]{m.group(1)}[/]", out)
 
-        synced = not (drift_l or drift_r or app.to_push or app.to_pull
-                      or sy["ahead"] or sy["behind"])
-        lines = []
-        if synced:
-            # "in sync" is not a percentage. A parity bar at 100 % answered a
-            # question nobody asked and left the one that matters — is there
-            # anything to do? — to be inferred from a full bar.
-            lines.append(f"[$success]● {t('all_synced')}[/]")
-        else:
-            for arrow, n, parts, key in (("▲", app.to_push, ui.preview_parts(up), "to_push"),
-                                         ("▼", app.to_pull, ui.preview_parts(down), "to_pull")):
-                colour = "$accent" if n else "$foreground 50%"
-                lines.append(f"[{colour}]{arrow} {n}[/]  [b]{t(key)}[/b]")
-                lines += [f"    [$foreground 60%]{x}[/]"
-                          for x in (parts or [t("nothing")])]
-                lines.append("")
-        lines += [
-            f"[$foreground 60%]{t('last_sync'):<12}[/]{ui.last_sync()}",
-            f"[$foreground 60%]{'git':<12}[/][$accent]↑{sy['ahead']} ↓{sy['behind']}[/]"
-            f"[$foreground 40%] · [/]"
-            + (f"[$warning]{t('dirty')}[/]" if sy["dirty"] else f"[$success]{t('clean')}[/]"),
-            f"[$foreground 60%]{t('checked', ago=ui.checked_ago())}[/]",
-        ]
-        up_st = ui.update_state()
-        if up_st.get("available"):
-            lines.append(f"[$success]▲ {t('update_available')}: {up_st['available']}[/]")
-        self.query_one("#sync-body", Static).update(
-            Content.from_markup("\n".join(lines)))
 
-        usage = []
-        for lim in (app.usage.get("limits") or []):
-            pct = lim.get("percent") or 0
-            name = clip((lim.get("label") or lim.get("kind") or "?").replace("_", " "), 16)
-            usage.append(Content.from_markup(
-                f"[b]{name}[/b]  [$accent]{pct}%[/]"
-                f"[$foreground 60%]   {ui._reset_at(lim.get('resetsAt'))}[/]"))
-            usage.append(bar(pct, width=24))
-            usage.append(Content(""))
-        body = self.query_one("#usage-body", Static)
-        body.update(Content("\n").join(usage) if usage
-                    else Content.from_markup(f"[$foreground 60%]{t('no_usage')}[/]"))
+def transcript(row):
+    """One session as the conversation it was: a list of `(css class, markup)`.
 
-        counters = "   ".join(f"[$accent b]{n}[/] [$foreground 60%]{t(k)}[/]"
-                              for k, n in ui.counters())
-        machines = " · ".join(
-            name + (f" ({t('this_one')})" if d["local"] else "")
-            for name, d in sorted(srv.list_machines().items()))
-        always = " · ".join(f"{n} {t('n_' + k)}" for k, n in ui.knowledge_counts().items())
-        self.query_one("#overall-body", Static).update(Content.from_markup(
-            f"{counters}\n\n"
-            f"[$foreground 60%]{t('sec_machines'):<16}[/]{machines}\n"
-            f"[$foreground 60%]{t('sec_always'):<16}[/]{always}\n"
-            f"[$foreground 60%]{'agent':<16}[/]{srv.agents.label()}"))
+    Blocks and not one long string because a wrapped line has to keep the
+    indent of the turn it belongs to — a paragraph that starts under `USER` and
+    continues out at the margin stops reading as one person talking. Textual
+    wraps inside a widget, so a turn has to *be* a widget.
 
+    `cli.timeline_lines` paints the same thing in ANSI for the terminal TUI;
+    this reads the structured timeline instead, because the shape — who spoke,
+    what they ran, what broke — is exactly what a string flattens away.
+    """
+    detail = srv.session_timeline(Path(row["path"]))
+    out = [("meta", f"{esc(row['project'])} \u00b7 {esc(row['id'])}")]
+    for item in detail["timeline"]:
+        kind = item["role"]
+        if kind in ("user", "assistant"):
+            who, css = ("USER", "user") if kind == "user" else ("CLAUDE", "claude")
+            out.append((f"who {css}", who))
+            fenced, buf = False, []
+            for line in item["text"].splitlines():
+                if line.lstrip().startswith("```"):
+                    if fenced and buf:
+                        out.append(("code", "\n".join(esc(x) for x in buf)))
+                        buf = []
+                    fenced = not fenced
+                elif fenced:
+                    buf.append(line)
+                else:
+                    out.append((css, _inline(line)))
+            if buf:
+                out.append(("code", "\n".join(esc(x) for x in buf)))
+        elif kind == "tool":
+            out.append(("tool", f"[$warning]\u2699 {esc(item['tool'])}[/]"
+                                f"  {esc(clip(item.get('detail', ''), 120))}"))
+        elif kind == "image":
+            out.append(("tool", f"\u26f6 {t('cli_image')}"))
+        elif kind == "error":
+            out.append(("bad", f"\u2715 {esc(clip(item['text'], 400))}"))
+    return out
+
+
+# ── the confirmation, used by everything that writes ──
 
 class Confirm(ModalScreen[bool]):
     """Nothing that writes runs before this screen says what it will write.
 
-    One modal for the four verbs — push, pull, and bringing or dropping a
-    skill — because they are the same question, and four differently worded
-    boxes for it is four chances to phrase the dangerous one gently.
+    One modal for every verb — push, pull, update, and bringing or dropping a
+    skill — because they are the same question, and five differently worded
+    boxes for it is five chances to phrase the dangerous one gently.
     """
     BINDINGS = [
         Binding("y,enter", "yes", ""),
@@ -327,13 +343,15 @@ def manifest(data):
     return out or [f"[$foreground 60%]{t('nothing_to_sync')}[/]"]
 
 
+# ── a document ──
+
 class Reader(Screen):
     """One document, scrolled. `Esc` goes back.
 
-    A screen and not a panel: a transcript is hundreds of lines and squeezing it
-    beside the list it came from gives two things too narrow to read. It carries
-    the same top bar and the same footer as everything else — a screen you can
-    reach and then cannot tell where you are is worse than no screen.
+    A screen and not a panel: a transcript is hundreds of lines and squeezing
+    it beside the list it came from gives two things too narrow to read. It
+    carries the same top bar and the same footer as everything else — a screen
+    you can reach and then cannot tell where you are is worse than no screen.
     """
     BINDINGS = [
         Binding("escape", "app.pop_screen", "back"),
@@ -344,18 +362,18 @@ class Reader(Screen):
         Binding("home", "top", "", show=False),
         Binding("end", "bottom", "", show=False),
         Binding("q", "app.quit", "quit"),
-        # a screen binding shadows the app's. Reading a transcript with PUSH one
-        # keystroke away is an accident waiting to happen, and hidden they also
-        # stop being offered in the footer of a screen that cannot use them.
-        *[Binding(k, "nothing", "", show=False) for k in "plfgr"],
+        # a screen binding shadows the app's. Reading a transcript with PUSH
+        # one keystroke away is an accident waiting to happen, and hidden they
+        # also stop being offered in the footer of a screen that cannot use them
+        *[Binding(k, "nothing", "", show=False) for k in "plfgru"],
     ]
 
-    def action_nothing(self) -> None:
-        pass
-
-    def __init__(self, title, body):
+    def __init__(self, title, body, links=()):
         super().__init__()
-        self._title, self._body = title, body
+        self._title = title
+        # a string is one plain block; a list is `(css class, markup)` turns
+        self._blocks = body if isinstance(body, list) else [("plain", body)]
+        self._links = list(links)
 
     def compose(self) -> ComposeResult:
         with Container(id="chrome"):
@@ -363,13 +381,26 @@ class Reader(Screen):
         with Container(id="reader"):
             with Card(self._title, upper=False):
                 with VerticalScroll(id="doc-scroll"):
-                    yield Static(self._body, markup=False, id="doc")
+                    for css, text in self._blocks:
+                        yield Static(text if css == "plain"
+                                     else Content.from_markup(text),
+                                     markup=False, classes=f"blk {css}")
+            if self._links:
+                yield Card(t("mem_links"),
+                           Table((t("col_slug"), None), id="t-links"), id="links")
         yield Footer(show_command_palette=False)
 
     def on_mount(self) -> None:
         # the scroll container has to hold focus or the arrows go nowhere: the
         # keys are bound to the screen, and the screen is not what scrolls
         self.query_one("#doc-scroll", VerticalScroll).focus()
+        if self._links:
+            table = self.query_one("#t-links", Table)
+            for arrow, mid in self._links:
+                table.add_row(Content.from_markup(f"[$accent]{arrow}[/] {mid}"))
+
+    def action_nothing(self) -> None:
+        pass
 
     @property
     def doc(self):
@@ -384,27 +415,93 @@ class Reader(Screen):
     def action_bottom(self) -> None:
         self.doc.scroll_end(animate=False)
 
+    def on_data_table_row_selected(self, event) -> None:
+        """A neighbour opens the memory it names, in place of this one."""
+        _, mid = self._links[event.cursor_row]
+        project, _, slug = mid.rpartition("/")
+        self.app.pop_screen()
+        self.app.open_memory(project, slug)
 
-class Sessions(Container):
-    """Projects on the left, that project's sessions on the right.
 
-    A flat list of two hundred sessions is a scroll, not a screen. The stdlib
-    TUI groups them by project for the same reason, and `a` opens the whole
-    pile for when you do not know which project it was in.
+# ── the panes ──
+
+class Split(Container):
+    """A screen made of a search box, a list of groups and a list of rows.
+
+    Sessions and memories are the same shape because they answer the same kind
+    of question: pick the project, then read what it holds. Both lists are
+    `Table`s and not a `ListView` on one side — two widgets meant the two sides
+    highlighted, hovered and took focus differently, on one screen.
     """
+    GROUP_W = 30
 
     def compose(self) -> ComposeResult:
-        yield Card(t("n_projects"), ListView(id="s-projects"))
-        yield Card(t("tab_sessions"),
-                   Table((t("col_when"), 10), (t("col_project"), 18),
-                         (t("col_prompts"), 7), (t("col_tools"), 6),
-                         (t("col_errors"), 7), (t("col_title"), None),
-                         id="t-sessions"))
+        yield Search(id="search")
+        yield Card(t("n_projects"),
+                   Table((t("col_project"), self.GROUP_W - 14), (t("col_total"), None),
+                         id="t-groups"), id="groups")
+        yield Card(self.TITLE, self.make_table(), id="rows")
 
     def on_mount(self) -> None:
-        self.q = ""   # the search text; `self.query` is the DOM query
-        self.all = False
+        self.q = ""          # the search text; `self.query` is the DOM query
+        self.index = 0
+        self.rows = []
         self.refresh_data()
+        # focus starts on the left: you pick the project first, and the
+        # right-hand list is what you move to once you have
+        self.query_one("#t-groups", Table).focus()
+
+    def set_groups(self, pairs, total) -> None:
+        table = self.query_one("#t-groups", Table)
+        keep = table.cursor_row
+        table.clear()
+        table.add_row(Content.from_markup(f"[$accent b]{t('show_all')}[/]"), str(total))
+        for name, n in pairs:
+            table.add_row(clip(name, self.GROUP_W - 15), str(n))
+        table.fit()
+        if 0 < keep < table.row_count:
+            table.move_cursor(row=keep)
+
+    def on_data_table_row_highlighted(self, event) -> None:
+        if event.data_table.id == "t-groups":
+            self.index = event.cursor_row
+            self.fill()
+        else:
+            self.preview(event.cursor_row)
+
+    def on_data_table_row_selected(self, event) -> None:
+        self.open()
+
+    def open(self) -> None:
+        """`↵` on whichever of the two lists has focus.
+
+        The app binds `enter` with priority — it has to, or the tables eat it
+        and the other screens lose their opener — so the routing has to happen
+        here rather than in a per-table handler.
+        """
+        if self.query_one("#t-groups", Table).has_focus:
+            # a project is a folder, and a folder opens into its contents
+            return self.query_one("#t-rows", Table).focus()
+        self.open_row()
+
+    def on_input_changed(self, event) -> None:
+        self.q = event.value
+        self.fill()
+
+    def on_input_submitted(self, event) -> None:
+        self.query_one("#t-rows", Table).focus()
+
+    def preview(self, index) -> None:
+        pass
+
+
+class Sessions(Split):
+    TITLE = t("tab_sessions")
+
+    def make_table(self):
+        return Table((t("col_when"), 10), (t("col_project"), 18),
+                     (t("col_prompts"), 7), (t("col_tools"), 6),
+                     (t("col_errors"), 7), (t("col_title"), None), id="t-rows")
 
     def refresh_data(self) -> None:
         rows, _ = cli.cached_sessions()
@@ -413,159 +510,100 @@ class Sessions(Container):
         for r in rows:
             groups.setdefault(r["project"], []).append(r)
         self.groups = sorted(groups.items(), key=lambda kv: -kv[1][0]["mtime"])
-        lv = self.query_one("#s-projects", ListView)
-        keep = lv.index or 0
-        lv.clear()
-        lv.append(ListItem(Static(Content.from_markup(
-            f"[$accent b]{t('show_all'):<22}[/][$foreground 60%]{len(rows):>4}[/]"))))
-        for name, items in self.groups:
-            lv.append(ListItem(Static(Content.from_markup(
-                f"[$accent]{clip(name, 22):<22}[/][$foreground 60%]{len(items):>4}[/]"))))
-        lv.index = min(keep, len(self.groups))
-        self.fill(lv.index)
+        self.set_groups([(name, len(items)) for name, items in self.groups], len(rows))
+        self.fill()
 
-    def visible(self):
-        rows = self.all_rows if self.all else self.rows_of_group
+    def fill(self) -> None:
+        pool = (self.all_rows if self.index == 0 or self.index > len(self.groups)
+                else self.groups[self.index - 1][1])
         if self.q:
             q = self.q.lower()
-            rows = [r for r in rows
-                    if q in f"{r['project']} {r['title']}".lower()]
-        return rows
-
-    @property
-    def rows_of_group(self):
-        if self.index == 0 or self.index > len(self.groups):
-            return self.all_rows
-        return self.groups[self.index - 1][1]
-
-    def fill(self, index) -> None:
-        self.index = index or 0
-        self.all = self.index == 0
-        table = self.query_one("#t-sessions", Table)
+            pool = [r for r in pool if q in f"{r['project']} {r['title']}".lower()]
+        self.rows = pool
+        table = self.query_one("#t-rows", Table)
         table.clear()
-        self.rows = self.visible()
-        for r in self.rows:
+        for r in pool:
             table.add_row(ago(r["mtime"]), clip(r["project"], 18), str(r["n_prompts"]),
                           str(r["n_tools"]),
                           Content.from_markup(f"[$error]{r['errors']}[/]"
                                               if r["errors"] else "0"),
                           clip(r["title"], 200), key=r["id"])
         table.fit()
+        if not pool:
+            self.app.empty(table, t("cli_no_sessions") if not self.all_rows
+                           else t("cli_no_hits", q=self.q))
 
-    def set_query(self, text) -> None:
-        self.q = text
-        self.fill(self.index)
-
-    def on_list_view_highlighted(self, event) -> None:
-        if event.list_view.index is not None:
-            self.fill(event.list_view.index)
-
-    def on_list_view_selected(self, event) -> None:
-        self.query_one("#t-sessions", Table).focus()
-
-    def on_data_table_row_selected(self, event) -> None:
-        self.open()
-
-    def open(self) -> None:
-        table = self.query_one("#t-sessions", Table)
+    def open_row(self) -> None:
+        table = self.query_one("#t-rows", Table)
         if not self.rows:
             return
         r = self.rows[table.cursor_row]
-        # `cli.timeline_lines` colours for the terminal TUI and puts newlines
-        # inside some of its lines; both have to go before the text is handed to
-        # a widget that does its own styling and its own wrapping.
-        body = "\n".join(ui.strip_ansi(part)
-                         for line in cli.timeline_lines(r)
-                         for part in line.split("\n"))
-        self.app.push_screen(Reader(clip(r["title"], 60), body))
+        self.app.push_screen(Reader(clip(r["title"], 60), transcript(r)))
 
 
-class Memory(Container):
-    def compose(self) -> ComposeResult:
-        yield Card(t("n_projects"), ListView(id="projects"))
-        yield Card(t("tab_memory"), Table((t("col_slug"), 28), (t("col_when"), 9),
-                                      (t("col_machine"), 14), (t("col_desc"), None), id="t-memories"))
+class Memory(Split):
+    TITLE = t("tab_memory")
 
-    def on_mount(self) -> None:
-        self.q = ""   # the search text; `self.query` is the DOM query
-        self.refresh_data()
+    def make_table(self):
+        return Table((t("col_slug"), 28), (t("col_when"), 9),
+                     (t("col_machine"), 14), (t("col_desc"), None), id="t-rows")
 
     def refresh_data(self) -> None:
-        self.groups = srv.list_memory()
-        lv = self.query_one("#projects", ListView)
-        lv.clear()
-        for g in self.groups:
-            lv.append(ListItem(Static(Content.from_markup(
-                f"[$accent]{clip(g['project'], 22):<24}[/][$foreground 60%]{g['count']:>3}[/]"))))
-        self.fill(0)
+        self.projects = srv.list_memory()
+        self.all_rows = [dict(m, project=p["project"])
+                         for p in self.projects for m in p["memories"]]
+        self.all_rows.sort(key=lambda m: -m["mtime"])
+        self.set_groups([(p["project"], p["count"]) for p in self.projects],
+                        len(self.all_rows))
+        self.fill()
 
-    def fill(self, index) -> None:
-        table = self.query_one("#t-memories", Table)
+    def fill(self) -> None:
+        pool = (self.all_rows if self.index == 0 or self.index > len(self.projects)
+                else [dict(m, project=self.projects[self.index - 1]["project"])
+                      for m in self.projects[self.index - 1]["memories"]])
+        if self.q:
+            q = self.q.lower()
+            pool = [m for m in pool
+                    if q in f"{m['project']} {m['slug']} {m['description']}".lower()]
+        self.rows = pool
+        table = self.query_one("#t-rows", Table)
         table.clear()
-        if not self.groups:
-            return
-        g = self.groups[max(0, min(index, len(self.groups) - 1))]
-        self.current = g
-        for m in self.visible(g):
-            table.add_row(clip(m["slug"], 30), ago(m["mtime"]),
-                          clip(m["machine"], 16), clip(m["description"], 200))
+        for m in pool:
+            table.add_row(clip(m["slug"], 28), ago(m["mtime"]),
+                          clip(m["machine"], 14), clip(m["description"], 200))
         table.fit()
+        if not pool:
+            self.app.empty(table, t("cli_no_memories") if not self.all_rows
+                           else t("cli_no_hits", q=self.q))
 
-    def on_list_view_highlighted(self, event) -> None:
-        if event.list_view.index is not None:
-            self.fill(event.list_view.index)
-
-    def visible(self, group):
-        if not self.q:
-            return group["memories"]
-        q = self.q.lower()
-        return [m for m in group["memories"]
-                if q in f"{m['slug']} {m['type']} {m['description']}".lower()]
-
-    def set_query(self, text) -> None:
-        self.q = text
-        lv = self.query_one("#projects", ListView)
-        self.fill(lv.index or 0)
-
-    def on_list_view_selected(self, event) -> None:
-        # clicking a project moves to its memories rather than opening one:
-        # the project is a folder, and a folder opens into its contents
-        self.query_one("#t-memories", Table).focus()
-
-    def on_data_table_row_selected(self, event) -> None:
-        self.open()
-
-    def open(self) -> None:
-        table = self.query_one("#t-memories", Table)
-        if not getattr(self, "current", None):
+    def open_row(self) -> None:
+        table = self.query_one("#t-rows", Table)
+        if not self.rows:
             return
-        rows = self.visible(self.current)
-        if not rows:
-            return
-        m = rows[table.cursor_row]
-        row = dict(m, project=self.current["project"])
-        # `ui.detail_memory` already reads the file and appends the one level of
-        # graph around it; re-reading it here would be a second answer to the
-        # same question, and the two would drift.
-        body = "\n".join(ui.strip_ansi(line) for line in ui.detail_memory(row))
-        self.app.push_screen(Reader(f"{row['project']}/{m['slug']}", body))
+        m = self.rows[table.cursor_row]
+        self.app.open_memory(m["project"], m["slug"], m["machine"])
 
 
 class Skills(Container):
-    """The skills and plugins of this machine and of the repo, side by side.
+    """The skills and plugins of this machine and of the repo, together.
 
     This is the drill-down the terminal TUI does inside a config module, and it
-    carries the same four states — the point of the screen is the ones that are
+    carries the same four states — the point of the screen is the rows that are
     only on one side.
     """
 
     def compose(self) -> ComposeResult:
-        yield Card(t("tab_skills"), Table((t("col_name"), 34), (t("col_desc"), None), id="t-skills"))
-        yield Card(t("sec_detail"), Static(id="skill-detail"))
+        yield Search(id="search")
+        yield Card(t("tab_skills"),
+                   Table((t("col_name"), 34), (t("col_desc"), None), id="t-rows"),
+                   id="rows")
+        yield Card(t("sec_detail"), Static(id="skill-detail"), id="detail")
 
     def on_mount(self) -> None:
-        self.q = ""   # the search text; `self.query` is the DOM query
+        self.q = ""
+        self.rows = []
         self.refresh_data()
+        self.query_one("#t-rows", Table).focus()
 
     def refresh_data(self) -> None:
         rows = ui.module_items("skills") + ui.module_items("plugins")
@@ -573,45 +611,50 @@ class Skills(Container):
             q = self.q.lower()
             rows = [r for r in rows if q in f"{r['label']} {r['desc']}".lower()]
         self.rows = rows
-        table = self.query_one("#t-skills", Table)
+        table = self.query_one("#t-rows", Table)
         keep = table.cursor_row
         table.clear()
-        for r in self.rows:
+        for r in rows:
             mark, colour = {"local": (r"\[L]", "$warning"), "repo": (r"\[R]", "$success"),
                             "gone": (r"\[x]", "$error")}.get(r.get("where"),
                                                              (r"\[=]", "$foreground 40%"))
-            table.add_row(Content.from_markup(f"[{colour}]{mark}[/] {clip(r['label'], 34)}"),
+            table.add_row(Content.from_markup(f"[{colour}]{mark}[/] {clip(r['label'], 30)}"),
                           clip(r["desc"], 200))
         table.fit()
-        if 0 <= keep < len(self.rows):
+        if 0 <= keep < len(rows):
             table.move_cursor(row=keep)
-        self.show(min(keep, max(0, len(self.rows) - 1)))
+        if not rows:
+            self.app.empty(table, t("cli_no_hits", q=self.q) if self.q
+                           else t("cli_no_skills"))
+        self.preview(min(keep, max(0, len(rows) - 1)))
 
-    def set_query(self, text) -> None:
-        self.q = text
+    def on_input_changed(self, event) -> None:
+        self.q = event.value
         self.refresh_data()
 
-    def show(self, index) -> None:
+    def on_input_submitted(self, event) -> None:
+        self.query_one("#t-rows", Table).focus()
+
+    def preview(self, index) -> None:
+        detail = self.query_one("#skill-detail", Static)
         if not self.rows:
-            self.query_one("#skill-detail", Static).update(
-                Content.from_markup(f"[$foreground 60%]{t('empty')}[/]"))
-            return
+            return detail.update(Content.from_markup(f"[$foreground 60%]{t('empty')}[/]"))
         r = self.rows[max(0, min(index, len(self.rows) - 1))]
         state = {"local": "st_local", "repo": "st_repo",
                  "gone": "st_gone"}.get(r.get("where"), "st_both")
-        self.query_one("#skill-detail", Static).update(Content.from_markup(
-            f"[$accent b]{r['label']}[/]\n"
+        detail.update(Content.from_markup(
+            f"[$accent b]{esc(r['label'])}[/]\n"
             f"[$foreground 60%]{r['what']} · {t(state)}[/]\n\n"
-            f"{clip(r['desc'], 600)}"))
+            f"{esc(clip(r['desc'], 600))}"))
 
     def on_data_table_row_highlighted(self, event) -> None:
-        self.show(event.cursor_row)
+        self.preview(event.cursor_row)
 
     def on_data_table_row_selected(self, event) -> None:
         self.open()
 
     def open(self) -> None:
-        table = self.query_one("#t-skills", Table)
+        table = self.query_one("#t-rows", Table)
         if not self.rows:
             return
         r = self.rows[table.cursor_row]
@@ -619,8 +662,7 @@ class Skills(Container):
         if skill is None:
             # a plugin has no SKILL.md to read, and neither does a skill the
             # repo has but this machine never installed
-            self.app.notify(t("empty"))
-            return
+            return self.app.notify(t("empty"))
         self.app.push_screen(Reader(skill["name"], skill["content"]))
 
     # ── the three verbs of the module screen of the stdlib TUI ──
@@ -629,40 +671,32 @@ class Skills(Container):
     # it from the repo. There is no fourth for "push this one": `export_config`
     # carries everything local on the next push anyway.
 
-    def selected(self):
-        table = self.query_one("#t-skills", Table)
-        if not self.rows:
-            return None
-        r = self.rows[table.cursor_row]
-        if r["what"] not in ("skill", "plugin"):
-            self.app.notify(t("not_deletable", id=r["what"]), severity="warning")
-            return None
-        return r
-
     def act(self, verb) -> None:
-        row = self.selected()
-        if row is None:
+        table = self.query_one("#t-rows", Table)
+        if not self.rows:
             return
+        row = self.rows[table.cursor_row]
+        if row["what"] not in ("skill", "plugin"):
+            return self.app.notify(t("not_deletable", id=row["what"]),
+                                   severity="warning")
         name = row["label"] if row["what"] == "skill" else row["id"]
         target = f"{row['what']}:{name}"
 
         if verb == "delete":
             lines = [f"[$error b]{t('delete_title', what=row['what'])}[/]  {row['label']}",
                      f"[$foreground 60%]{t('delete_warning')}[/]"]
-            return self.ask(t("k_delete"), lines, True,
-                            lambda: self._delete(row))
+            return self.ask(t("k_delete"), lines, True, lambda: self._delete(row))
 
         # bring and forget both dry-run first: the manifest is the file list the
         # engine itself is about to touch, not a summary written here
         paths, err = (srv.bring(target) if verb == "bring" else srv.forget(target))
         if err:
             return self.app.notify(err, severity="error")
-        lines = [f"[$accent]{p}[/]" for p in list(paths)[:14]]
+        lines = [f"[$accent]{esc(p)}[/]" for p in list(paths)[:14]]
         if len(paths) > 14:
             lines.append(f"[$foreground 60%]…+{len(paths) - 14}[/]")
         self.ask(t("k_bring") if verb == "bring" else t("k_forget"), lines,
-                 verb == "forget",
-                 lambda: self._apply(verb, target, row["label"]))
+                 verb == "forget", lambda: self._apply(verb, target, row["label"]))
 
     def ask(self, title, lines, danger, run) -> None:
         def answered(yes):
@@ -685,110 +719,250 @@ class Skills(Container):
         self.app.done(err or t("deleted", id=row["label"]), bool(err))
 
 
-class Config(Container):
+class Home(Container):
+    """The dashboard, and one box to search everything from."""
+
     def compose(self) -> ComposeResult:
-        yield Card(t("tab_config"), Table(("", 24), ("", 26), ("", None), id="t-config", show_header=False))
+        yield Wordmark(id="wordmark")
+        yield Search(id="search")
+        with Grid(id="home-grid"):
+            yield Card(t("sec_sync"), Static(id="sync-body"))
+            yield Card(t("sec_parity"),
+                       Table((t("sec_modules"), 16), (t("local"), 6),
+                             (t("in_repo"), 7), ("Δ L", 4), ("Δ R", 4),
+                             id="t-parity"))
+            yield Card(t("sec_usage"), Static(id="usage-body"))
+            yield Card(t("sec_general"), Static(id="overall-body"))
 
     def on_mount(self) -> None:
-        table = self.query_one("#t-config", Table)
+        self.refresh_data()
+
+    def on_input_submitted(self, event) -> None:
+        """The home has no list of its own, so its box hands the query to the
+        screen that does — which is what you wanted when you typed it here."""
+        self.app.search_sessions(event.value)
+
+    def refresh_data(self) -> None:
+        app = self.app
+        sy, p = app.sync, app.parity
+        up, down = app.preview
+
+        drift_l = drift_r = 0
+        table = self.query_one("#t-parity", Table)
+        table.clear()
+        for m in p["modules"]:
+            dl, dr = app.deltas(m)
+            drift_l, drift_r = drift_l + dl, drift_r + dr
+            dot = ("[$success]●[/]" if dl == dr == 0 and m["localFiles"]
+                   else "[$warning]◐[/]" if dl
+                   else "[$primary]◑[/]" if dr
+                   else "[$foreground 40%]○[/]")
+            name = m["id"] if m["enabled"] else f"[$foreground 50%]{m['id']}[/]"
+            table.add_row(
+                Content.from_markup(f"{dot} {name}"),
+                str(m["localFiles"]), str(m["repoFiles"]),
+                Content.from_markup(f"[$warning]{dl}[/]" if dl else "[$foreground 40%]·[/]"),
+                Content.from_markup(f"[$primary]{dr}[/]" if dr else "[$foreground 40%]·[/]"))
+
+        lines = []
+        if not sy.get("remote"):
+            # the one state where every number on this screen is meaningless
+            lines.append(f"[$warning]{t('no_remote')}[/]")
+            lines.append(f"[$foreground 60%]{t('guide_hint')} · {t('tab_help')}[/]")
+        elif not (drift_l or drift_r or app.to_push or app.to_pull
+                  or sy["ahead"] or sy["behind"]):
+            # "in sync" is not a percentage. A parity bar at 100 % answered a
+            # question nobody asked and left the one that matters — is there
+            # anything to do? — to be inferred from a full bar.
+            lines.append(f"[$success]● {t('all_synced')}[/]")
+        else:
+            for arrow, n, parts, key in (("▲", app.to_push, ui.preview_parts(up), "to_push"),
+                                         ("▼", app.to_pull, ui.preview_parts(down), "to_pull")):
+                colour = "$accent" if n else "$foreground 50%"
+                lines.append(f"[{colour}]{arrow} {n}[/]  [b]{t(key)}[/b]")
+                lines += [f"    [$foreground 60%]{x}[/]" for x in (parts or [t("nothing")])]
+                lines.append("")
+        lines += [
+            f"[$foreground 60%]{t('last_sync'):<12}[/]{ui.last_sync()}",
+            f"[$foreground 60%]{'git':<12}[/][$accent]↑{sy['ahead']} ↓{sy['behind']}[/]"
+            f"[$foreground 40%] · [/]"
+            + (f"[$warning]{t('dirty')}[/]" if sy["dirty"] else f"[$success]{t('clean')}[/]"),
+            f"[$foreground 60%]{t('checked', ago=ui.checked_ago())}[/]",
+        ]
+        if app.update.get("available"):
+            lines.append(f"[$success]▲ {t('update_available')}: "
+                         f"{app.update['available']}[/]  [$accent b]u[/]")
+        self.query_one("#sync-body", Static).update(Content.from_markup("\n".join(lines)))
+
+        usage = []
+        for lim in (app.usage.get("limits") or []):
+            pct = lim.get("percent") or 0
+            name = clip((lim.get("label") or lim.get("kind") or "?").replace("_", " "), 16)
+            usage.append(f"[b]{name}[/b]  [$accent]{pct}%[/]"
+                         f"[$foreground 60%]   {ui._reset_at(lim.get('resetsAt'))}[/]")
+            usage.append(bar(pct, width=24))
+            usage.append("")
+        costs = [d.get("totalCost") or 0 for d in (app.usage.get("daily") or [])]
+        if costs:
+            usage.append(f"[$foreground 60%]{t('usage_daily')}[/]")
+            usage.append(f"[$accent]{spark(costs, 24)}[/]"
+                         f"[$foreground 60%]  {costs[-1]:.0f}[/]")
+        self.query_one("#usage-body", Static).update(Content.from_markup(
+            "\n".join(usage) or f"[$foreground 60%]{t('no_usage')}[/]"))
+
+        counters = "   ".join(f"[$accent b]{n}[/] [$foreground 60%]{t(k)}[/]"
+                              for k, n in ui.counters())
+        machines = " · ".join(name + (f" ({t('this_one')})" if d["local"] else "")
+                              for name, d in sorted(srv.list_machines().items()))
+        always = " · ".join(f"{n} {t('n_' + k)}"
+                            for k, n in ui.knowledge_counts().items())
+        self.query_one("#overall-body", Static).update(Content.from_markup(
+            f"{counters}\n\n"
+            f"[$foreground 60%]{t('sec_machines'):<16}[/]{machines}\n"
+            f"[$foreground 60%]{t('sec_always'):<16}[/]{always}\n"
+            f"[$foreground 60%]{'agent':<16}[/]{srv.agents.label()}"))
+
+
+class Config(Container):
+    """Three cards, because these are three unrelated things.
+
+    One long list ran the preferences, the counts and the modules together with
+    nothing but a heading between them, and a heading inside a table is a row
+    pretending to be a title.
+    """
+
+    def compose(self) -> ComposeResult:
+        yield Card(t("sec_prefs"),
+                   Table(("", 22), ("", None), id="t-prefs", show_header=False),
+                   id="prefs")
+        yield Card(t("sec_modules"),
+                   Table(("", 16), ("", 6), ("", None), id="t-modules",
+                         show_header=False), id="modules")
+        yield Card(t("sec_remote"), Static(id="remote-body"), id="remote")
+
+    def on_mount(self) -> None:
         self.refresh_data()
 
     def refresh_data(self) -> None:
-        table = self.query_one("#t-config", Table)
-        keep = table.cursor_row
-        table.clear()
-        self.rows = []
-
-        def head(key):
-            self.rows.append(None)
-            table.add_row(Content.from_markup(f"[$accent b]{t(key).upper()}[/]"), "", "")
-
-        head("sec_prefs")
-        # no swatch strip beside the name: six squares of which one meant
-        # "current" was a legend nobody could read, and the row is already
-        # painted in the colour it names
-        self.rows.append(("accent", None))
-        table.add_row(t("accent_color"), Content.from_markup(f"[$accent]{ui.accent_name()}[/]"),
-                      Content.from_markup(f"[$foreground 60%]{t('k_change')}[/]"))
-        ground = i18n.get_prefs().get("tui_ground", "dark")
-        self.rows.append(("ground", None))
-        table.add_row(t("tui_ground"), Content.from_markup(
-            "  ".join(f"[$accent b]{t('ground_' + g)}[/]" if g == ground
-                      else f"[$foreground 50%]{t('ground_' + g)}[/]" for g in GROUNDS)), "")
-        self.rows.append(("lang", None))
-        table.add_row(t("language"), Content.from_markup(
-            "  ".join(f"[$accent b]{c}[/]" if c == i18n.LANG else f"[$foreground 50%]{c}[/]"
-                      for c in i18n.LANGS)), "")
+        prefs = self.query_one("#t-prefs", Table)
+        keep = prefs.cursor_row
+        prefs.clear()
+        # the value shows what is on, not the whole menu: three words with one
+        # of them bright is a legend to decode, and the row changes on ↵ anyway
+        prefs.add_row(t("accent_color"),
+                      Content.from_markup(f"[$accent b]{ui.accent_name()}[/]"))
+        prefs.add_row(t("tui_ground"),
+                      Content.from_markup(f"[$accent b]{t('ground_' + self.app.ground)}[/]"))
+        prefs.add_row(t("language"), Content.from_markup(f"[$accent b]{i18n.LANG}[/]"))
         on = srv.badge_status()["on"]
-        self.rows.append(("badge", None))
-        table.add_row(t("badge_row"),
-                      Content.from_markup(f"[$accent]{BOX_ON if on else BOX_OFF}[/]"),
-                      Content.from_markup(
-                          f"[$foreground 60%]{t('badge_on') if on else t('badge_off')}[/]"))
+        prefs.add_row(t("badge_row"), Content.from_markup(
+            f"[$accent]{BOX_ON if on else BOX_OFF}[/] "
+            f"[$foreground 60%]{t('badge_on') if on else t('badge_off')}[/]"))
+        prefs.fit()
+        if 0 <= keep < prefs.row_count:
+            prefs.move_cursor(row=keep)
 
-        head("sec_always")
+        mods = self.query_one("#t-modules", Table)
+        keep = mods.cursor_row
+        mods.clear()
         for key, n in ui.knowledge_counts().items():
-            self.rows.append(None)
-            table.add_row(Content.from_markup(f"[$success]●[/] {t('n_' + key)}"), str(n),
-                          Content.from_markup(f"[$foreground 60%]{t('always_syncing')}[/]"))
-
-        head("sec_modules")
-        for m in srv.config_status():
-            self.rows.append(("module", m["id"]))
-            table.add_row(
+            mods.add_row(Content.from_markup(f"[$success]●[/] {t('n_' + key)}"), str(n),
+                         Content.from_markup(f"[$foreground 60%]{t('always_syncing')}[/]"))
+        self.modules = srv.config_status()
+        for m in self.modules:
+            mods.add_row(
                 m["id"],
                 Content.from_markup(f"[$accent]{BOX_ON if m['enabled'] else BOX_OFF}[/]"),
                 Content.from_markup(
                     f"[$foreground 60%]{t('syncing') if m['enabled'] else t('not_syncing')}"
                     f"   {m['localFiles']} {t('local')} · {m['repoFiles']} {t('in_repo')}[/]"))
-        table.fit()
-        if 0 <= keep < len(self.rows):
-            table.move_cursor(row=keep)
+        mods.fit()
+        if 0 <= keep < mods.row_count:
+            mods.move_cursor(row=keep)
+
+        lines = []
+        for name, url, note in (("origin", ui._origin(), t("r_origin")),
+                                ("upstream", ui._upstream(), t("r_upstream"))):
+            lines.append(f"[$accent b]{name}[/]  [$foreground 60%]{note}[/]")
+            lines.append(f"  {esc(url)}" if url
+                         else f"  [$warning]{t('no_remote')}[/]")
+            lines.append("")
+        lines.append(f"[$foreground 60%]{t('guide_hint')}[/]")
+        lines.append(f"[$accent b]{len(TABS)}[/] [$foreground 60%]{t('tab_help')}[/]")
+        self.query_one("#remote-body", Static).update(
+            Content.from_markup("\n".join(lines)))
+
+    def open(self) -> None:
+        """`↵` on the selected row of whichever of the two tables has focus."""
+        prefs = self.query_one("#t-prefs", Table)
+        mods = self.query_one("#t-modules", Table)
+        if prefs.has_focus:
+            row = prefs.cursor_row
+            if row == 0:
+                codes = [c for _, c in ui.ACCENTS]
+                ui.set_accent(codes[(codes.index(ui.ACCENT) + 1) % len(codes)])
+                self.app.apply_theme()
+                return
+            if row == 1:
+                names = list(GROUNDS)
+                self.app.ground = names[(names.index(self.app.ground) + 1) % len(names)]
+                i18n.set_pref("tui_ground", self.app.ground)
+                self.app.apply_theme()
+                return
+            if row == 2:
+                ui.set_lang(i18n.LANGS[(i18n.LANGS.index(i18n.LANG) + 1) % len(i18n.LANGS)])
+            else:
+                srv.set_badge(not srv.badge_status()["on"])
+        elif mods.has_focus:
+            fixed = len(ui.knowledge_counts())
+            index = mods.cursor_row - fixed
+            if index < 0:
+                return                     # the always-synced rows are not a toggle
+            mod = self.modules[index]["id"]
+            enabled = set(srv.get_sync_prefs())
+            enabled.discard(mod) if mod in enabled else enabled.add(mod)
+            srv.set_sync_prefs(sorted(enabled))
+        self.refresh_data()
 
     def on_data_table_row_selected(self, event) -> None:
         self.open()
 
-    def open(self) -> None:
-        """`↵` on the selected row. Headings and the always-synced rows are not
-        actions, so landing on one does nothing rather than something odd."""
-        table = self.query_one("#t-config", Table)
-        row = self.rows[table.cursor_row] if table.cursor_row < len(self.rows) else None
-        if row is None:
-            return
-        kind, arg = row
-        if kind == "accent":
-            codes = [c for _, c in ui.ACCENTS]
-            ui.set_accent(codes[(codes.index(ui.ACCENT) + 1) % len(codes)])
-            self.app.apply_theme()
-        elif kind == "ground":
-            names = list(GROUNDS)
-            now = i18n.get_prefs().get("tui_ground", "dark")
-            i18n.set_pref("tui_ground",
-                          names[(names.index(now) + 1) % len(names)]
-                          if now in names else "light")
-            self.app.apply_theme()
-        elif kind == "lang":
-            ui.set_lang(i18n.LANGS[(i18n.LANGS.index(i18n.LANG) + 1) % len(i18n.LANGS)])
-            self.app.notify(t("tab_config"))
-        elif kind == "badge":
-            srv.set_badge(not srv.badge_status()["on"])
-        elif kind == "module":
-            on = set(srv.get_sync_prefs())
-            on.discard(arg) if arg in on else on.add(arg)
-            srv.set_sync_prefs(sorted(on))
-        self.refresh_data()
-
 
 class Help(Container):
+    """The `sto` commands, read off the CLI registry, plus the setup guide.
+
+    Keyboard shortcuts are not here: the footer already shows the ones for the
+    screen you are on, and a second list of them goes stale on its own every
+    time a key moves.
+    """
+
     def compose(self) -> ComposeResult:
-        yield Card(t("sec_commands"), Table((t("sec_commands"), 34), ("", None), id="t-help", show_header=False))
+        yield Card(t("sec_commands"),
+                   Table((t("sec_commands"), 34), ("", None), id="t-help",
+                         show_header=False), id="commands")
+        yield Card(t("guide_open"), VerticalScroll(Static(id="guide-body")), id="guide")
 
     def on_mount(self) -> None:
         table = self.query_one("#t-help", Table)
         for usage, what in ui.commands():
-            table.add_row(Content.from_markup(f"[$accent]{usage}[/]"),
-                          Content.from_markup(f"[$foreground 60%]{what}[/]"))
+            table.add_row(Content.from_markup(f"[$accent]{esc(usage)}[/]"),
+                          Content.from_markup(f"[$foreground 60%]{esc(what)}[/]"))
         table.fit()
+
+        lines = []
+        for sub, where, steps in (
+                (t("sub_first_time"), "where_steps",
+                 ("step1", "step2", "step3", "step3b", "step3c")),
+                (t("sub_each_machine"), "where_more",
+                 ("step4", "step5", "step6", "step6b", "step6c")),
+                (t("sub_updates"), None, ("step7", "step8", "step9"))):
+            lines.append(f"[$accent b]{sub}[/]")
+            # the "where do I run this" line first: that was the whole
+            # confusion, the steps never said which folder they belonged to
+            for key in ([where] if where else []) + list(steps):
+                lines.append(f"[$foreground 70%]{esc(t(key))}[/]")
+            lines.append("")
+        self.query_one("#guide-body", Static).update(Content.from_markup("\n".join(lines)))
 
 
 # ── the app ──
@@ -799,25 +973,21 @@ class StoApp(App):
     # the palette is the library's own screen, in the library's own idiom, and
     # it puts a button in our footer that leads out of the product
     ENABLE_COMMAND_PALETTE = False
+
     BINDINGS = [
-        Binding("1", "tab(0)", "", show=False),
-        Binding("2", "tab(1)", "", show=False),
-        Binding("3", "tab(2)", "", show=False),
-        Binding("4", "tab(3)", "", show=False),
-        Binding("5", "tab(4)", "", show=False),
-        Binding("6", "tab(5)", "", show=False),
+        *[Binding(str(i + 1), f"tab({i})", "", show=False) for i in range(len(TABS))],
         # priority: Tab is the library's focus-next by default, and it ate the
         # one key that is supposed to walk the tab bar everywhere
         Binding("tab", "next_tab", "", show=False, priority=True),
         Binding("shift+tab", "prev_tab", "", show=False, priority=True),
-        Binding("enter", "open", "open", show=False, priority=True),
+        Binding("enter", "open", "", show=False, priority=True),
         Binding("p", "sync('push')", "PUSH"),
         Binding("l", "sync('pull')", "PULL"),
         Binding("f", "fetch", "FETCH"),
+        Binding("u", "update", "UPDATE"),
         Binding("g", "graph", "GRAPH"),
         Binding("r", "reload", "reload"),
         Binding("q", "quit", "quit"),
-        Binding("slash", "search", "", show=False),
         Binding("a", "verb('bring')", "", show=False),
         Binding("d", "verb('delete')", "", show=False),
         Binding("R", "verb('forget')", "", show=False),
@@ -825,21 +995,40 @@ class StoApp(App):
 
     def __init__(self):
         super().__init__()
-        self.tab = HOME
-        self.reload_data()
+        # STO_TUI_TAB is how a screen other than the home gets captured: piped
+        # into a file there is no keyboard to press `2` with.
+        self.tab = int(os.environ.get("STO_TUI_TAB") or 0)
+        self.ground = i18n.get_prefs().get("tui_ground", "dark")
+        if self.ground not in GROUNDS:
+            self.ground = "dark"
+        self._blank()
 
     # ── data ──
 
+    def _blank(self) -> None:
+        """Enough of a shape for the screen to paint before git has answered."""
+        empty = {"skills": [], "config": [], "memories": {}, "sessions": 0, "vault": 0}
+        self.sync = {"remote": None, "branch": None, "ahead": 0, "behind": 0,
+                     "dirty": False}
+        self.preview = (empty, dict(empty))
+        self.parity = {"modules": [], "local_only": [], "repo_only": []}
+        self.usage = {"limits": [], "daily": []}
+        self.update = {"available": 0}
+        self.to_push = self.to_pull = 0
+
     def reload_data(self) -> None:
-        """Everything the chrome and the home read, fetched once per refresh.
+        """Everything the chrome and the home read.
 
         The same functions `ui.py` calls: nothing here recomputes a rule, so
-        the two flavours cannot disagree about a number.
+        the two flavours cannot disagree about a number. It is also slow —
+        `sync_preview` dry-runs four exports and shells out to git — which is
+        why every caller runs it off the UI thread.
         """
         self.sync = srv.sync_status(fetch=False)
         self.preview = ui.sync_preview(self.sync)
         self.parity = ui.parity()
-        self.usage = srv.usage_snapshot(detail=False)
+        self.usage = srv.usage_snapshot(detail=True)
+        self.update = ui.update_state()
         self.to_push = ui.count_items(self.preview[0])
         self.to_pull = ui.count_items(self.preview[1])
 
@@ -856,6 +1045,10 @@ class StoApp(App):
         return (max(0, m["localFiles"] - m["repoFiles"]),
                 max(0, m["repoFiles"] - m["localFiles"]))
 
+    def empty(self, table, message) -> None:
+        """A table with nothing in it says why, instead of being a blank box."""
+        table.add_row(Content.from_markup(f"[$foreground 60%]{esc(message)}[/]"))
+
     # ── chrome ──
 
     def topbar_content(self) -> Content:
@@ -863,15 +1056,9 @@ class StoApp(App):
         sep = "[$foreground 30%]  │  [/]"
         return Content.from_markup(
             f"[$accent b]braingent STO[/]{sep}"
-            f"[$foreground 60%]repo [/]{remote}{sep}"
+            f"[$foreground 60%]repo [/]{esc(remote) or t('no_remote')}{sep}"
             f"[$foreground 60%]agent [/]{srv.agents.label()}{sep}"
             f"[$foreground 60%]{t('col_machine')} [/]{srv.LOCAL_MACHINE}")
-
-    def paint_tabs(self) -> None:
-        """The active tab is a filled rectangle in the accent colour, the way
-        `sto ui` draws it — same product, same chip."""
-        for i, chip in enumerate(self.query(".tab")):
-            chip.set_class(i == self.tab, "on")
 
     def compose(self) -> ComposeResult:
         # one container docked to the top and not two widgets each docked to it:
@@ -879,67 +1066,131 @@ class StoApp(App):
         # second draws over the first
         with Container(id="chrome"):
             yield Static(self.topbar_content(), id="topbar")
-            with Horizontal(id="tabs"):
+            with Container(id="tabs"):
                 for i, key in enumerate(TABS):
                     yield Static(f" {t(key)} ", classes="tab", id=f"tab-{i}")
-        yield Wordmark(id="wordmark")
-        yield Home(id="home")
-        yield Sessions(id="sessions", classes="split-even")
-        yield Memory(id="memory", classes="split-even")
-        yield Skills(id="skills", classes="split")
-        yield Config(id="config", classes="one")
-        yield Help(id="help", classes="one")
-        yield Input(placeholder=t("k_search"), id="search")
+        yield Home(id="home", classes="home")
+        yield Sessions(id="sessions", classes="split")
+        yield Memory(id="memory", classes="split")
+        yield Skills(id="skills", classes="split wide-left")
+        yield Config(id="config", classes="three")
+        yield Help(id="help", classes="two")
         yield Static("", id="status")
         yield Footer(show_command_palette=False)
 
-    def on_resize(self) -> None:
-        # Textual CSS has no media query, so the breakpoint is a class the app
-        # puts on itself and the stylesheet answers
-        self.set_class(self.size.width < 100, "narrow")
-        self.show_tab(self.tab)
-
     def on_mount(self) -> None:
         self.apply_theme()
-        self.query_one("#topbar", Static).update(self.topbar_content())
-        self.show_tab(HOME)
+        self.show_tab(self.tab)
+        self.load_all()
+
+    def on_resize(self) -> None:
+        # Textual CSS has no media query, so the breakpoint is a class the app
+        # puts on itself and the stylesheet answers. Nothing else happens here:
+        # a resize that re-ran the screens made dragging a window feel like mud.
+        self.set_class(self.size.width < 100, "narrow")
 
     def apply_theme(self) -> None:
         """One accent, one ground, both ours.
 
         The accent comes from `sto ui` — the same setting drives both flavours,
         so they are the same product with the same colour. The ground is this
-        flavour's own preference: a terminal TUI cannot ask the terminal what
-        its background is, so which of the three it is has to be said.
+        flavour's own preference: a terminal cannot be asked what its
+        background is, so which of the three it is has to be said.
         """
-        accent = ACCENT_CSS.get(ui.ACCENT, "#22d3ee")
-        ground = i18n.get_prefs().get("tui_ground", "dark")
-        if ground not in GROUNDS:
-            ground = "dark"
-        self.register_theme(make_theme(ground, accent))
-        self.theme = f"sto-{ground}"
+        theme = theme_for(self.ground, ui.ACCENT)
+        self.register_theme(theme)
+        self.theme = theme.name
+        # the panes hold rendered content, not live markup: a theme change has
+        # to ask them to paint again or the old accent stays on screen
+        for pane in self.panes:
+            if hasattr(pane, "refresh_data"):
+                pane.refresh_data()
+        self.query_one("#wordmark", Wordmark).repaint()
+        self.query_one("#topbar", Static).update(self.topbar_content())
 
     @property
     def panes(self):
-        return [self.query_one("#home"), self.query_one("#sessions"),
-                self.query_one("#memory"), self.query_one("#skills"),
-                self.query_one("#config"), self.query_one("#help")]
+        return [self.query_one(f"#{name}") for name in
+                ("home", "sessions", "memory", "skills", "config", "help")]
 
     def show_tab(self, index) -> None:
         self.tab = index % len(TABS)
-        # the banner belongs to the home and only when the terminal can spare
-        # the rows: on a short window the table under it is worth more
-        mark = self.query_one("#wordmark", Wordmark)
-        mark.display = (self.tab == HOME and self.size.height >= 26
-                        and self.size.width >= WORDMARK_W + 4
-                        and not self.has_class("narrow"))
         for i, pane in enumerate(self.panes):
             pane.display = i == self.tab
-        self.paint_tabs()
+        for i, chip in enumerate(self.query(".tab")):
+            chip.set_class(i == self.tab, "on")
+        # focus starts on the left-hand list of the screen, which is the one
+        # you choose with before you read with
         pane = self.panes[self.tab]
-        focusable = pane.query(Table).first() if pane.query(Table) else None
-        if focusable is not None:
-            focusable.focus()
+        tables = list(pane.query(Table))
+        for table in tables:
+            # a hidden pane has no size, so its columns were never fitted; the
+            # width is only knowable once the pane is the one on screen
+            table.call_after_refresh(table.fit)
+        if tables:
+            tables[0].focus()
+
+    # ── work off the UI thread ──
+
+    @work(thread=True, exclusive=True)
+    def load_all(self) -> None:
+        """The first paint does not wait for git.
+
+        `reload_data` shells out to git four or five times and dry-runs the
+        exports; on a big repo that is seconds. Doing it in `__init__` meant
+        the terminal sat blank for those seconds and the app felt broken before
+        it had drawn anything.
+        """
+        self.call_from_thread(self.busy, t("k_reload"))
+        self.reload_data()
+        self.call_from_thread(self._painted)
+
+    def _painted(self) -> None:
+        for pane in self.panes:
+            if hasattr(pane, "refresh_data"):
+                pane.refresh_data()
+        self.query_one("#topbar", Static).update(self.topbar_content())
+        self.done()
+
+    # ── the status strip ──
+
+    SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+
+    def busy(self, message) -> None:
+        """Say what is running, in the strip above the keys.
+
+        `fetch`, `reload`, `push` and `pull` all go to the network or to git
+        and all of them used to look like a key that did nothing until they
+        were done. A spinner beside the sentence is the difference between
+        "working" and "broken".
+        """
+        self._busy = message
+        self._frame = getattr(self, "_frame", 0)
+        self._paint_status()
+        if getattr(self, "_spin", None) is None:
+            self._spin = self.set_interval(0.08, self._tick)
+
+    def _paint_status(self) -> None:
+        self.query_one("#status", Static).update(Content.from_markup(
+            f"[$accent]{self.SPINNER[self._frame % len(self.SPINNER)]}[/]"
+            f" [$foreground 70%]{esc(self._busy)}[/]"))
+
+    def _tick(self) -> None:
+        self._frame += 1
+        self._paint_status()
+
+    def done(self, message="", error=False) -> None:
+        if getattr(self, "_spin", None) is not None:
+            self._spin.stop()
+            self._spin = None
+        colour, mark = ("$error", "✕") if error else ("$success", "✓")
+        self.query_one("#status", Static).update(
+            Content.from_markup(f"[{colour}]{mark}[/] [$foreground 70%]{esc(message)}[/]")
+            if message else Content(""))
+        if message:
+            # the strip is glanceable and the toast is unmissable; a push that
+            # failed should not be a line you might have looked away from
+            self.notify(message, severity="error" if error else "information")
 
     # ── actions ──
 
@@ -947,7 +1198,7 @@ class StoApp(App):
         self.show_tab(index)
 
     def on_click(self, event) -> None:
-        """A tab chip is a button. Nothing on this bar looked like it could be
+        """A tab chip is a button. Nothing on the bar looked like it could be
         clicked and everything on it can be."""
         node = event.widget
         if node is not None and node.id and node.id.startswith("tab-"):
@@ -957,116 +1208,63 @@ class StoApp(App):
         self.show_tab(self.tab - 1)
 
     def action_next_tab(self) -> None:
-        # Tab always walks the tab bar. Letting it mean something else inside a
-        # screen is how the one key that should mean the same thing everywhere
-        # stops meaning it two screens in.
         self.show_tab(self.tab + 1)
 
-    # ── search ──
-
-    def action_search(self) -> None:
-        """`/` on any screen that has a list. The box is docked rather than
-        floating: a search that covers the rows it is filtering is a search you
-        cannot watch narrow."""
-        pane = self.panes[self.tab]
-        if not hasattr(pane, "set_query"):
-            return
-        box = self.query_one("#search", Input)
-        box.display = True
-        box.focus()
-
-    def on_input_changed(self, event) -> None:
-        pane = self.panes[self.tab]
-        if hasattr(pane, "set_query"):
-            pane.set_query(event.value)
-
-    def on_input_submitted(self, event) -> None:
-        self.close_search(keep=True)
-
-    def close_search(self, keep=False) -> None:
-        box = self.query_one("#search", Input)
-        if not keep:
-            box.value = ""
-            pane = self.panes[self.tab]
-            if hasattr(pane, "set_query"):
-                pane.set_query("")
-        box.display = False
-        pane = self.panes[self.tab]
-        target = pane.query(Table).first() if pane.query(Table) else None
-        if target is not None:
-            target.focus()
-
-    def on_key(self, event) -> None:
-        if event.key == "escape" and self.query_one("#search", Input).display:
-            self.close_search()
-            event.stop()
-
-    def action_verb(self, verb: str) -> None:
-        """`a` / `d` / `R` belong to whichever screen can do them. Bound at the
-        app so the footer can name them, dispatched to the pane so a screen
-        that has no such verb simply does not have one."""
-        pane = self.panes[self.tab]
-        if hasattr(pane, "act"):
-            pane.act(verb)
-
     def action_open(self) -> None:
+        if isinstance(self.focused, Input):
+            return
         pane = self.panes[self.tab]
         if hasattr(pane, "open"):
             pane.open()
 
-    # ── the status strip ──
+    def action_verb(self, verb: str) -> None:
+        """`a` / `d` / `R` belong to whichever screen can do them. Bound at the
+        app so the footer can name them, dispatched to the pane so a screen
+        with no such verb simply does not have one."""
+        if isinstance(self.focused, Input):
+            return
+        pane = self.panes[self.tab]
+        if hasattr(pane, "act"):
+            pane.act(verb)
 
-    SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+    def search_sessions(self, text) -> None:
+        """The home's box hands its query to the screen that has the list."""
+        self.show_tab(SESSIONS)
+        box = self.panes[SESSIONS].query_one("#search", Search)
+        box.value = text
+        box.focus()
 
-    def busy(self, message) -> None:
-        """Say what is running, in the strip above the keys.
+    def open_memory(self, project, slug, machine=None) -> None:
+        """A memory, its body, and one level of the graph around it as rows you
+        can walk into."""
+        row = {"project": project, "slug": slug,
+               "machine": machine or srv.LOCAL_MACHINE}
+        if machine is None:
+            for p in srv.list_memory():
+                if p["project"] == project:
+                    for m in p["memories"]:
+                        if m["slug"] == slug:
+                            row["machine"] = m["machine"]
+        body = "\n".join(ui.strip_ansi(line) for line in ui.detail_memory(row))
+        try:
+            out, inc = srv.memory_neighbours(project, slug)
+        except Exception:
+            out, inc = [], []            # a memory reads fine without its edges
+        links = [("→", mid) for mid in out] + [("←", mid) for mid in inc]
+        self.push_screen(Reader(f"{project}/{slug}", body, links))
 
-        `fetch`, `reload`, `push` and `pull` all go to the network or to git and
-        all of them used to look like a key that did nothing until they were
-        done. A spinner beside the sentence is the difference between "working"
-        and "broken".
-        """
-        self._busy = message
-        self._frame = 0
-        self.query_one("#status", Static).update(Content.from_markup(
-            f"[$accent]{self.SPINNER[0]}[/] [$foreground 70%]{message}[/]"))
-        if getattr(self, "_spin", None) is None:
-            self._spin = self.set_interval(0.08, self._tick)
-        self.refresh()
-
-    def _tick(self) -> None:
-        self._frame += 1
-        self.query_one("#status", Static).update(Content.from_markup(
-            f"[$accent]{self.SPINNER[self._frame % len(self.SPINNER)]}[/]"
-            f" [$foreground 70%]{self._busy}[/]"))
-
-    def done(self, message="", error=False) -> None:
-        if getattr(self, "_spin", None) is not None:
-            self._spin.stop()
-            self._spin = None
-        colour = "$error" if error else "$success"
-        mark = "✕" if error else "✓"
-        self.query_one("#status", Static).update(
-            Content.from_markup(f"[{colour}]{mark}[/] [$foreground 70%]{message}[/]")
-            if message else Content(""))
-        if message:
-            # the strip is glanceable and the toast is unmissable; a push that
-            # failed should not be a line you might have looked away from
-            self.notify(message, severity="error" if error else "information")
-
+    @work(thread=True, exclusive=True)
     def action_reload(self) -> None:
-        self.busy(t("k_reload"))
+        self.call_from_thread(self.busy, t("k_reload"))
         self.reload_data()
-        for pane in self.panes:
-            if hasattr(pane, "refresh_data"):
-                pane.refresh_data()
-        self.query_one("#topbar", Static).update(self.topbar_content())
-        self.done()
+        self.call_from_thread(self._painted)
 
+    @work(thread=True, exclusive=True)
     def action_fetch(self) -> None:
-        self.busy("FETCH")
+        self.call_from_thread(self.busy, "FETCH")
         self.sync = srv.sync_status(fetch=True, force=True)
-        self.action_reload()
+        self.reload_data()
+        self.call_from_thread(self._painted)
 
     def action_graph(self) -> None:
         """The classic window. `cli.open_memory_graph` already knows how to
@@ -1076,26 +1274,58 @@ class StoApp(App):
         res = cli.open_memory_graph()
         self.done(res.get("error") or res.get("message") or "", bool(res.get("error")))
 
+    def action_update(self) -> None:
+        """`u` — the OS itself, not your knowledge. The log of what is coming is
+        the manifest: an update you cannot see the shape of is one you accept
+        blind."""
+        if isinstance(self.focused, Input):
+            return
+        st = self.update
+        if not st.get("available"):
+            return self.notify(t("all_synced"))
+        lines = [f"[$foreground 70%]{esc(line)}[/]" for line in (st.get("log") or [])[:14]]
+        self.push_screen(
+            Confirm(f"▲ {t('update_available')}: {st['available']}", lines),
+            lambda yes: self._run_update() if yes else None)
+
+    @work(thread=True, exclusive=True)
+    def _run_update(self) -> None:
+        self.call_from_thread(self.busy, t("update_available"))
+        res = srv.update_apply(progress=lambda step:
+                               self.call_from_thread(self.busy, t(step)))
+        self.call_from_thread(self.done, res.get("error") or t("update_restart"),
+                              bool(res.get("error")))
+        self.reload_data()
+        self.call_from_thread(self._painted)
+
     def action_sync(self, what: str) -> None:
         """Nothing moves before the manifest is on screen.
 
         The count on the key cap says how much; this says of what, which is the
         question you actually have with a finger over the key.
         """
+        if isinstance(self.focused, Input):
+            return
         data = self.preview[0 if what == "push" else 1]
         title = f"{'▲' if what == 'push' else '▼'} {what.upper()}"
+        self.push_screen(Confirm(title, manifest(data)),
+                         lambda yes: self._run_sync(what) if yes else None)
 
-        def answered(yes):
-            if not yes:
-                return
-            self.busy(what.upper())
-            fn = srv.sync_push if what == "push" else srv.sync_pull
-            res = fn()
-            self.done(res.get("error") or res.get("message") or "",
-                      bool(res.get("error")))
-            self.action_reload()
+    @work(thread=True, exclusive=True)
+    def _run_sync(self, what: str) -> None:
+        """On a thread, with the engine's own step names in the strip.
 
-        self.push_screen(Confirm(title, manifest(data)), answered)
+        `sync_push` takes a progress callback and the stdlib TUI paints it live;
+        blocking the UI for the length of a push and then saying "done" is the
+        one thing a spinner cannot make better.
+        """
+        fn = srv.sync_push if what == "push" else srv.sync_pull
+        self.call_from_thread(self.busy, what.upper())
+        res = fn(progress=lambda step: self.call_from_thread(self.busy, t(step)))
+        self.call_from_thread(self.done, res.get("error") or res.get("message") or "",
+                              bool(res.get("error")))
+        self.reload_data()
+        self.call_from_thread(self._painted)
 
 
 def run():
