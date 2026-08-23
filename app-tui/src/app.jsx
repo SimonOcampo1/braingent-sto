@@ -336,32 +336,40 @@ function App() {
     return s;
   };
   const accent = ACCENTS[d.accent] || "cyan";
-  // the chrome costs a fixed number of rows; whatever is left is the list's
-  const viewport = Math.max(3, size.h - 14);
+  // The chrome is pinned: the whole app is exactly as tall as the terminal, the
+  // middle is the only thing that grows, and it is clipped rather than allowed
+  // to push anything off. Without this the terminal itself scrolls, and the
+  // header and the tab bar — the two things you always want on screen — are the
+  // first to leave.
+  const wordmark = tab === HOME && size.h > 22 ? 4 : 0;
+  const body = Math.max(4, size.h - 7 - wordmark);   // header 2, tabs 3, foot 2
+  const viewport = Math.max(3, body - 5);            // the panel's own border+head
 
   return (
-    <Box flexDirection="column" width={size.w}>
+    <Box flexDirection="column" width={size.w} height={size.h}>
       <Header d={d} width={size.w} t={t} accent={accent} />
-      {tab === HOME && size.h > 22 && (
+      {!!wordmark && (
         <Box paddingX={1} marginTop={1}><Wordmark width={size.w} accent={accent} /></Box>
       )}
       <Tabs tab={tab} t={t} accent={accent} busy={busy} />
 
-      {tab === HOME && <Home d={d} t={t} accent={accent} width={size.w} />}
-      {tab === SESSIONS && (
-        <Sessions rows={list} sel={sel[SESSIONS]} size={viewport} t={t} accent={accent}
-                  width={size.w} />
-      )}
-      {tab === MEMORY && (
-        <Memories groups={groups} sel={sel[MEMORY]} memSel={memSel} size={viewport}
-                  t={t} accent={accent} width={size.w} />
-      )}
-      {tab === CONFIG && (
-        <Config d={d} t={t} accent={accent} width={size.w} sel={sel[CONFIG]} rows={cfgRows} />
-      )}
-      {tab === HELP && <Help d={d} t={t} accent={accent} width={size.w} />}
+      <Box flexGrow={1} flexShrink={1} height={body} overflow="hidden">
+        {tab === HOME && <Home d={d} t={t} accent={accent} width={size.w} />}
+        {tab === SESSIONS && (
+          <Sessions rows={list} sel={sel[SESSIONS]} size={viewport} t={t} accent={accent}
+                    width={size.w} />
+        )}
+        {tab === MEMORY && (
+          <Memories groups={groups} sel={sel[MEMORY]} memSel={memSel} size={viewport}
+                    t={t} accent={accent} width={size.w} />
+        )}
+        {tab === CONFIG && (
+          <Config d={d} t={t} accent={accent} width={size.w} sel={sel[CONFIG]} rows={cfgRows} />
+        )}
+        {tab === HELP && <Help d={d} t={t} accent={accent} width={size.w} />}
+      </Box>
 
-      <Box marginTop={1}><Rule n={size.w} /></Box>
+      <Rule n={size.w} />
       {confirm
         ? <Confirm what={confirm} d={d} t={t} accent={accent} />
         : <Actions d={d} t={t} accent={accent} flash={flash} tab={tab} />}
