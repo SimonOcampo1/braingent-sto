@@ -1167,6 +1167,8 @@ class Help(Container):
         table.fit()
 
         lines = []
+        # step5 is the only line that changes with the OS: the installer does.
+        fills = {"step5": {"installer": i18n.installer_cmd()}}
         for sub, where, steps in (
                 (t("sub_first_time"), "where_steps",
                  ("step1", "step2", "step3", "step3b", "step3c")),
@@ -1177,7 +1179,7 @@ class Help(Container):
             # the "where do I run this" line first: that was the whole
             # confusion, the steps never said which folder they belonged to
             for key in ([where] if where else []) + list(steps):
-                lines.append(f"[$foreground 70%]{esc(t(key))}[/]")
+                lines.append(f"[$foreground 70%]{esc(t(key, **fills.get(key, {})))}[/]")
             lines.append("")
         self.query_one("#guide-body", Static).update(Content.from_markup("\n".join(lines)))
 

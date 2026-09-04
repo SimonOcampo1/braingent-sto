@@ -67,7 +67,8 @@ braingent-sto/
 │   ├── i18n.py              # every user-facing string, en/es
 │   ├── memory_graph.html    # graph window template (canvas 2D, no CDN)
 │   ├── dream_extract.py     # transcript parsing and redaction
-│   ├── install_sto_cli.ps1  # installs the `sto` function into both PowerShell profiles
+│   ├── install_sto_cli.sh   # installs `sto` on Linux/macOS: ~/.local/bin + PATH
+│   ├── install_sto_cli.ps1  # the same on Windows: both PowerShell profiles
 │   └── test_*.py            # the suite: no framework, no fixtures
 ├── app/                     # React + Vite dashboard (optional)
 ├── knowledge/               # what travels: sessions/, memory/, config/
@@ -81,7 +82,7 @@ braingent-sto/
 
 - **Backend** — Python 3.11+, standard library only. No `pip install`, no virtualenv, no server to keep alive for the CLI: `cli.py` imports the engine directly.
 - **Sync** — plain `git`. Your repo, your remote, your history. Conflicts are git conflicts, and you already know how to resolve those.
-- **TUI** — `msvcrt` + ANSI escapes. Alternate screen buffer, per-line diffing, keyboard drain per frame.
+- **TUI** — Textual. Same screens on Windows and Linux; `uv` borrows it in a throwaway environment when it is not installed.
 - **Graph** — one HTML file, canvas 2D, hand-rolled force layout. Opens offline in a Chromium `--app` window.
 - **App** — React 19, Vite 8, Tailwind 4, `react-force-graph` for the 2D/3D views.
 
@@ -92,7 +93,8 @@ braingent-sto/
 ```bash
 git clone https://github.com/SimonOcampo1/braingent-sto.git
 cd braingent-sto
-powershell -ExecutionPolicy Bypass -File scripts/install_sto_cli.ps1
+sh scripts/install_sto_cli.sh                                          # Linux / macOS
+powershell -ExecutionPolicy Bypass -File scripts/install_sto_cli.ps1   # Windows
 ```
 
 Open a new terminal and you have `sto`. Now make the clone yours.
@@ -135,7 +137,8 @@ Here you *do* clone — and what you clone is **your private repo**, not the pub
 ```bash
 git clone git@github.com:<you>/<your-repo>.git
 cd <your-repo>
-powershell -ExecutionPolicy Bypass -File scripts/install_sto_cli.ps1
+sh scripts/install_sto_cli.sh                                          # Linux / macOS
+powershell -ExecutionPolicy Bypass -File scripts/install_sto_cli.ps1   # Windows
 sto pull     # brings and installs what the other machines have
 sto push     # uploads the memories this machine already had
 ```
@@ -204,7 +207,7 @@ Honesty beats a feature matrix:
 - **No embeddings, no semantic recall.** Search is lexical. If you want vector recall inside the agent loop, run [claude-mem](https://github.com/thedotmack/claude-mem) or [engram](https://github.com/Gentleman-Programming/engram) alongside it — they solve a different problem.
 - **No MCP server.** The agent does not query STO at runtime; STO moves the files Claude Code already reads.
 - **No memory system of its own.** Claude Code's auto memory writes the files; STO makes them travel. Nothing is distilled by a background job.
-- **Windows-first.** The TUI needs `msvcrt` and the installer is PowerShell. The engine and CLI are portable; the terminal UI is not, yet.
+- **Windows-first, not Windows-only.** Engine, CLI and TUI run on Linux and macOS too, and each has its own installer. What is still Windows-only is `start.cmd`, the double-click launcher for the web app.
 - **Single user.** It syncs *your* machines. It is not a team knowledge base.
 
 ---
