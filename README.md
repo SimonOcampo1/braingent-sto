@@ -73,7 +73,8 @@ braingent-sto/
 ├── app/                     # React + Vite dashboard (optional)
 ├── knowledge/               # what travels: sessions/, memory/, config/
 ├── vault/                   # curated knowledge: raw/ → wiki/ → outputs/
-└── start.cmd                # double-click launcher: backend + app + `sto`
+├── start.sh                 # launcher: backend + app + `sto`, Ctrl+C stops both
+└── start.cmd                # the same on Windows, from a double click
 ```
 
 ---
@@ -173,7 +174,9 @@ from then on `sto update` is an ordinary merge.
 
 > Keep the repo **private**. It carries your session transcripts and memories.
 
-Want the web app too? `start.cmd` installs the front-end dependencies, starts the backend and Vite, and opens the dashboard.
+Want the web app too? `./start.sh` (`start.cmd` on Windows) installs the front-end
+dependencies, starts the backend and Vite, and opens the dashboard. On Linux and
+macOS both servers log to `.sto-cache/` and `Ctrl+C` takes them down together.
 
 ---
 
@@ -207,7 +210,7 @@ Honesty beats a feature matrix:
 - **No embeddings, no semantic recall.** Search is lexical. If you want vector recall inside the agent loop, run [claude-mem](https://github.com/thedotmack/claude-mem) or [engram](https://github.com/Gentleman-Programming/engram) alongside it — they solve a different problem.
 - **No MCP server.** The agent does not query STO at runtime; STO moves the files Claude Code already reads.
 - **No memory system of its own.** Claude Code's auto memory writes the files; STO makes them travel. Nothing is distilled by a background job.
-- **Windows-first, not Windows-only.** Engine, CLI and TUI run on Linux and macOS too, and each has its own installer. What is still Windows-only is `start.cmd`, the double-click launcher for the web app.
+- **Windows-first by history, not by design.** Engine, CLI, TUI, installer and launcher all run on Windows, Linux and macOS. What Windows still has alone is the double click: `start.cmd` opens from the file manager, `start.sh` expects a terminal.
 - **Single user.** It syncs *your* machines. It is not a team knowledge base.
 
 ---
