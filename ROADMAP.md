@@ -149,12 +149,12 @@ told about.
 
 ---
 
-## 5. Cross-platform TUI
+## 5. Cross-platform TUI — done
 
-`msvcrt` is the only thing tying `sto ui` to Windows; the engine and the CLI are
-already portable. A `termios`/`tty` branch behind the same `read_key()` /
-`pending_keys()` contract is ~30 lines. For a public repo this is the difference
-between "a Windows tool" and "a tool".
+Closed by deletion, not by a port. `ui.py` was the stdlib TUI and `msvcrt` was
+the only thing tying it to Windows; rather than grow a `termios` branch beside
+it, the Textual front-end took over as `sto ui` and the stdlib one was removed.
+One TUI, portable, no flag.
 
 ---
 
@@ -196,8 +196,8 @@ quickstart → GIF. Nothing else. The comparison table, "what it does not do" an
 the command reference all move below, and the long ones fold into `<details>` so
 the page stays scannable.
 
-**5. CI.** A GitHub Action running the four suites on push. It makes the badge
-honest and catches a broken `ui.py` before someone else clones it.
+**5. CI.** A GitHub Action running the suites on push. It makes the badge
+honest and catches a broken TUI before someone else clones it.
 
 **6. A screenshot of the memory graph.** Wide, dark, detail panel open, filters
 visible. It is the most distinctive thing on screen and the hardest to imagine

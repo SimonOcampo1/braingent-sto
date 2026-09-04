@@ -3,7 +3,7 @@
 `sto ui` is the one that always runs: Python stdlib, no dependencies, on any
 machine. This is the flavour you pick, and it is allowed to want a library.
 
-It imports `cli` and `sessions_server` **directly**, exactly like `ui.py` does.
+It imports `cli` and `sessions_server` **directly**, with no HTTP in between.
 There is no HTTP in between and no second copy of any rule: what "to push"
 counts, which side of a parity a skill falls on and how a reset time is worded
 are decided once, in Python, and this file only decides how they look.
@@ -21,7 +21,7 @@ sys.path.insert(0, str(Path(__file__).parent))  # scripts/ is not a package
 import cli  # noqa: E402
 import i18n  # noqa: E402
 import sessions_server as srv  # noqa: E402
-import ui  # noqa: E402
+import ui_data as ui  # noqa: E402
 
 from textual import work  # noqa: E402
 from textual.app import App, ComposeResult  # noqa: E402
@@ -1201,7 +1201,7 @@ class StoApp(App):
         self._stale = set()
 
     # Everything the chrome and the home read, in three phases and not one
-    # call. The same functions `ui.py` calls — nothing here recomputes a rule,
+    # call. The same functions `cli.py` calls — nothing here recomputes a rule,
     # so the two flavours cannot disagree about a number — but they do not cost
     # the same, and paying for the slowest before drawing any of them is how
     # the screen stayed empty for twenty seconds. `load_all` runs them in turn

@@ -44,7 +44,8 @@ STO is the union of the three, on one substrate. Every artifact is **plain text 
 - **One repo, everything in it.** `sto push` exports sessions, memories, `~/.claude` modules and your vault, commits and pushes. `sto pull` applies them on the other machine — including installing missing plugins and marketplaces.
 - **Modular sync.** Pick exactly which parts of `~/.claude` travel: `claude-md`, `settings`, `keybindings`, `skills`, `agents`, `hooks`, `plugins`. Memories, sessions and vault always travel.
 - **Redaction on export.** Session transcripts are trimmed to what a reader needs (prompts, tool names, errors) and scrubbed of API-key-shaped strings before they ever hit a commit.
-- **Terminal UI (`sto ui`).** Five tabs — Home, Sessions, Memory, Config, Help — over pure stdlib: `msvcrt` for keys, raw ANSI for pixels. No Ink, no `rich`, no dependencies. Alt screen, diff-based repaint, 2 KB of Python per frame.
+- **Resumable conversations.** `sto keep <id>` archives one transcript untrimmed and gzipped; on the other machine `sto resume <id>` files it under that machine's own project slug so `claude --resume` finds it. Opt-in per session: the trimmed copies are what makes the repo small, and archiving every session would undo that.
+- **Terminal UI (`sto ui`).** Five tabs — Home, Sessions, Memory, Config, Help — built on Textual over the same engine the CLI uses: no HTTP in between, no second copy of any rule. Runs the same on Windows and Linux, and `uv` borrows Textual in a throwaway environment when it is not installed.
 - **Live push/pull progress.** Every step of a sync reports itself (`exporting sessions → staging → committing → pushing to origin`) with a spinner, instead of freezing the screen until git returns.
 - **Memory graph.** A real graph of *your memories*: one node per memory, one per project, edges from `[[wikilinks]]`. Opens as a chrome-less window with a project/type/machine sidebar, click-to-inspect detail panel and search. Built from the same files the repo syncs, so it shows every machine and every session, not just this one.
 - **Config parity at a glance.** The Home dashboard shows what is local-only, what is in the repo but not installed, and which plugins are missing on this machine.
@@ -61,7 +62,8 @@ braingent-sto/
 ├── scripts/
 │   ├── sessions_server.py   # engine: sessions, memory, config sync, git — stdlib only
 │   ├── cli.py               # `sto` — presentation over the engine
-│   ├── ui.py                # the TUI: state + key → state, state → lines
+│   ├── tui_app.py           # the TUI (Textual), over the same engine
+│   ├── ui_data.py           # computed state both front-ends read
 │   ├── i18n.py              # every user-facing string, en/es
 │   ├── memory_graph.html    # graph window template (canvas 2D, no CDN)
 │   ├── dream_extract.py     # transcript parsing and redaction
@@ -181,6 +183,8 @@ Want the web app too? `start.cmd` installs the front-end dependencies, starts th
 | `sto ui` | the terminal UI |
 | `sto sessions [project]` | sessions, most recent first |
 | `sto show <id>` | one transcript, through the pager |
+| `sto keep <id>` | archive a transcript in full so another machine can resume it |
+| `sto resume <id>` | bring an archived transcript here and print the `claude --resume` line |
 | `sto search <text>` | full-text search across every session, every machine |
 | `sto memory [project\|show\|search\|sync]` | the memories in the repo |
 | `sto skills [id]` | installed skills, or one in full |
@@ -216,7 +220,8 @@ would do it.
 
 ```bash
 cd scripts
-python test_sessions_server.py && python test_dream_extract.py && python test_cli.py && python test_ui.py
+python test_sessions_server.py && python test_dream_extract.py && python test_cli.py && python test_ui_data.py
+uv run --no-project --with textual python test_tui_app.py
 ```
 
-No framework, no fixtures, no mocks beyond swapping a function for a lambda. The TUI suite drives `handle()` and `draw()` directly, so it needs neither a terminal nor a pty.
+No framework, no fixtures, no mocks beyond swapping a function for a lambda. The TUI suite skips itself when `textual` is missing, which is how the first line stays runnable on a machine that never opted into it.

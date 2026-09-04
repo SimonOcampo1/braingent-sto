@@ -15,7 +15,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))  # scripts/ is not a package
 
 import i18n  # noqa: E402
-import ui  # noqa: E402
+import ui_data as ui  # noqa: E402
 
 from textual.binding import Binding  # noqa: E402
 from textual.containers import Container  # noqa: E402

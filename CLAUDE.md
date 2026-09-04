@@ -4,7 +4,7 @@ An orchestration layer over Claude Code: engine first (sessions + sync + vault),
 
 ## Language
 
-Code, comments, docstrings and docs are written in English. The TUI and the CLI print in the language configured in `sto ui` (English by default, Spanish available); every user-facing string lives in `scripts/i18n.py` — never hardcode one in `ui.py` or `cli.py`.
+Code, comments, docstrings and docs are written in English. The TUI and the CLI print in the language configured in `sto ui` (English by default, Spanish available); every user-facing string lives in `scripts/i18n.py` — never hardcode one in `tui_app.py` or `cli.py`.
 
 ## Where code is written
 
@@ -19,7 +19,7 @@ When a significant thread closes in this repo (a bug solved, a decision taken, r
 ## Tests
 
 ```
-cd scripts && python test_sessions_server.py && python test_dream_extract.py && python test_cli.py && python test_ui.py && python test_tui_app.py
+cd scripts && python test_sessions_server.py && python test_dream_extract.py && python test_cli.py && python test_ui_data.py && python test_tui_app.py
 ```
 
 `test_tui_app.py` skips itself when `textual` is missing, which is how the line
