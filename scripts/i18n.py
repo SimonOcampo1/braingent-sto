@@ -149,7 +149,7 @@ STRINGS = {
         "sub_each_machine": "En cada máquina más",
         "where_more": "Acá sí clonás: el que clonás es TU repo privado, no el público.",
         "step4": "1. git clone <URL de tu repo privado>   ·   cd al clon",
-        "step5": "2. powershell -File scripts/install_sto_cli.ps1",
+        "step5": "2. {installer}",
         "step6": "3. PULL · trae e instala lo de las otras máquinas",
         "step6b": "4. PUSH · sube las memorias que esta máquina ya tenía",
         "step6c": "tus memorias locales sin publicar nunca se pisan en un PULL",
@@ -339,7 +339,7 @@ STRINGS = {
         "sub_each_machine": "On every other machine",
         "where_more": "Here you do clone — and what you clone is YOUR private repo, not the public one.",
         "step4": "1. git clone <URL of your private repo>   ·   cd into it",
-        "step5": "2. powershell -File scripts/install_sto_cli.ps1",
+        "step5": "2. {installer}",
         "step6": "3. PULL · brings and installs what the other machines have",
         "step6b": "4. PUSH · uploads the memories this machine already had",
         "step6c": "a PULL never overwrites local memories you have not published yet",
@@ -532,6 +532,14 @@ def t(key, **kw):
     frame down."""
     s = STRINGS.get(LANG, {}).get(key) or STRINGS["en"].get(key, key)
     return s.format(**kw) if kw else s
+
+
+def installer_cmd():
+    """The line that puts `sto` on PATH here. Windows keeps the PowerShell
+    profiles, everything else gets the shell script — printing the wrong one is
+    how the setup guide loses the machine it is being read on."""
+    return ("powershell -File scripts/install_sto_cli.ps1" if sys.platform == "win32"
+            else "sh scripts/install_sto_cli.sh")
 
 
 def get_prefs():
