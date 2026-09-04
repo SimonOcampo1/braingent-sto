@@ -168,7 +168,7 @@ def test_bad_arity_is_a_usage_error():
 
 def test_ui_rejects_extra_args_instead_of_opening():
     # `sto ui junk` must not open the TUI silently: same arity error as any
-    # other command. It must not really import ui.
+    # other command, and without importing the TUI at all.
     res = cli.main(["ui", "basura"])
     assert res["error"].startswith("uso: sto ui")
 
@@ -551,38 +551,35 @@ def test_graph_open_launches_a_chromeless_window():
     _con_html(caso)
 
 
-def test_ui_textual_falls_back_to_the_stdlib_tui_without_a_way_to_run_it():
-    """The Textual flavour is a preference, not a requirement.
+def test_ui_says_what_is_missing_instead_of_opening_nothing():
+    """Textual is the only front-end now, so a machine without it (and without
+    `uv` to borrow it) has to be told what to install.
 
-    A machine with neither `textual` nor `uv` still has to get a TUI when it
-    asks for one, so what is missing is a printed line and the usual screen —
-    not an error that leaves the user with nothing.
+    Before, this case fell back to a stdlib TUI. That TUI is gone, and the
+    failure mode worth guarding against is the silent one: a `sto ui` that
+    returns an empty message and leaves the user staring at a prompt.
     """
     import sys
-    import types
-    abierto, real_which = [], cli.shutil.which
-    fake_ui = types.ModuleType("ui")
-    fake_ui.run = lambda: abierto.append("stdlib") or {"message": ""}
-    sys.modules["ui"] = fake_ui
+    real_which = cli.shutil.which
     try:
         cli.shutil.which = lambda name: None
         sys.modules["textual"] = None      # import textual -> ImportError
-        cli.cmd_ui("--textual")
-        assert abierto == ["stdlib"], abierto
+        res = cli.cmd_ui()
+        assert "textual" in res["error"], res
     finally:
         cli.shutil.which = real_which
-        sys.modules.pop("ui", None)
         sys.modules.pop("textual", None)
 
 
-def test_ui_takes_no_flag_it_does_not_know():
-    """`--web` today is a typo, not a third flavour: it has to say so rather
-    than silently opening the default one."""
-    try:
-        cli.cmd_ui("--web")
-        assert False, "an unknown flag went through"
-    except TypeError:
-        pass
+def test_ui_takes_no_flag_at_all():
+    """`--textual` is not a flavour any more, it is the whole thing: passing it
+    has to be the same arity error as any other unknown argument."""
+    for flag in ("--textual", "--web"):
+        try:
+            cli.cmd_ui(flag)
+            assert False, f"{flag} went through"
+        except TypeError:
+            pass
 
 
 def test_graph_open_falls_back_to_the_browser_without_chromium():
@@ -785,8 +782,8 @@ if __name__ == "__main__":
     test_graph_command_without_file()
     test_graph_open_launches_a_chromeless_window()
     test_graph_open_falls_back_to_the_browser_without_chromium()
-    test_ui_textual_falls_back_to_the_stdlib_tui_without_a_way_to_run_it()
-    test_ui_takes_no_flag_it_does_not_know()
+    test_ui_says_what_is_missing_instead_of_opening_nothing()
+    test_ui_takes_no_flag_at_all()
     test_graph_open_without_the_html()
     test_cached_sessions_hides_subagent_sessions_by_default()
     test_timeline_lines_is_what_show_prints()

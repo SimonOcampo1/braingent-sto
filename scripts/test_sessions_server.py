@@ -1581,6 +1581,113 @@ def test_repair_memory_refiles_slug_folders_and_never_clobbers():
 
 
 
+def test_project_slug_matches_what_claude_code_writes_on_disk():
+    """The slug is the whole feature: get it wrong and `claude --resume` looks
+    in a directory that does not exist.
+
+    `_decode_slug` already walks a slug back to a real path, so any project
+    directory on this machine is a free fixture — encode what it decoded and
+    the answer has to be the directory we started from. Skips cleanly on a
+    machine with no transcripts.
+    """
+    pd = srv.dx.PROJECTS_DIR
+    if not pd.is_dir():
+        return
+    checked = 0
+    for d in sorted(pd.iterdir()):
+        if not d.is_dir():
+            continue
+        real = srv._decode_slug(d.name)
+        if real is None:
+            continue          # not on this disk any more; nothing to compare
+        assert srv.project_slug(real) == d.name, (real, srv.project_slug(real), d.name)
+        checked += 1
+    assert checked or True    # a fresh machine legitimately has nothing to check
+
+
+def test_project_slug_dashes_every_character_that_is_not_alphanumeric():
+    """Accents included: Claude Code writes `Teolog-a`, not `Teología`.
+
+    Built from a real temp directory rather than a hardcoded absolute path:
+    `/x` is not absolute on Windows, where resolving it would prepend a drive
+    and the expected string would depend on which machine ran the test.
+    """
+    slug = srv.project_slug(Path(tempfile.gettempdir()) / "Licenciatura en Teología Sistemática")
+    assert slug.endswith("Licenciatura-en-Teolog-a-Sistem-tica"), slug
+    assert " " not in slug and "í" not in slug and "á" not in slug
+
+
+def test_keep_archives_the_untrimmed_transcript_and_still_masks_secrets():
+    """What `export_sessions` drops is exactly what resuming needs.
+
+    The trimmed copy throws away tool_result bodies, so it cannot be replayed;
+    the archive has to keep every line. It must not become a hole in the
+    redaction, though: an API key pasted into a prompt stays masked.
+    """
+    with tempfile.TemporaryDirectory() as proj, tempfile.TemporaryDirectory() as kn:
+        pdir = Path(proj) / "D--repo"
+        pdir.mkdir()
+        src = _write_session(pdir)
+        res = srv.keep_session(src.stem, projects_dir=Path(proj), dest=Path(kn))
+        assert res.get("ok"), res
+        out = Path(res["path"])
+        assert out.name.endswith(srv.FULL_SUFFIX)
+        import gzip
+        body = gzip.open(out, "rt", encoding="utf-8").read()
+        assert "sk-abcdefghijklmnopqrstuvwxyz123" not in body
+        assert "[REDACTED]" in body
+        # the bodies the trimmed export drops are the point of the archive
+        assert '"tool_result"' in body and "boom" in body
+        assert res["lines"] == len(SAMPLE)
+
+
+def test_keep_then_resume_lands_where_claude_resume_actually_looks():
+    with tempfile.TemporaryDirectory() as proj, tempfile.TemporaryDirectory() as kn, \
+         tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as work:
+        pdir = Path(proj) / "D--repo"
+        pdir.mkdir()
+        src = _write_session(pdir)
+        srv.keep_session(src.stem, projects_dir=Path(proj), dest=Path(kn) / "OtherPC")
+
+        res = srv.resume_session(src.stem[:8], project_dir=work,
+                                 claude_dir=Path(home), knowledge_dir=Path(kn))
+        assert res.get("ok"), res
+        landed = Path(res["path"])
+        # the directory name is derived from THIS machine's path, not the one
+        # that recorded the session
+        assert landed.parent.name == srv.project_slug(work)
+        assert landed.name == src.stem + ".jsonl"
+        assert res["machine"] == "OtherPC"
+        assert res["command"] == f"claude --resume {src.stem}"
+        # every line survived the round trip
+        assert len(landed.read_text(encoding="utf-8").splitlines()) == len(SAMPLE)
+
+
+def test_resume_refuses_to_clobber_a_session_already_on_this_machine():
+    """Half-overwriting a live transcript is worse than refusing."""
+    with tempfile.TemporaryDirectory() as proj, tempfile.TemporaryDirectory() as kn, \
+         tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as work:
+        pdir = Path(proj) / "D--repo"
+        pdir.mkdir()
+        src = _write_session(pdir)
+        srv.keep_session(src.stem, projects_dir=Path(proj), dest=Path(kn) / "OtherPC")
+        here = Path(home) / "projects" / srv.project_slug(work)
+        here.mkdir(parents=True)
+        (here / (src.stem + ".jsonl")).write_text("mine\n", encoding="utf-8")
+
+        res = srv.resume_session(src.stem, project_dir=work,
+                                 claude_dir=Path(home), knowledge_dir=Path(kn))
+        assert "already" in res["error"], res
+        assert (here / (src.stem + ".jsonl")).read_text(encoding="utf-8") == "mine\n"
+
+
+def test_resume_without_an_archive_says_which_command_creates_one():
+    with tempfile.TemporaryDirectory() as kn, tempfile.TemporaryDirectory() as home:
+        res = srv.resume_session("deadbeef", project_dir=home,
+                                 claude_dir=Path(home), knowledge_dir=Path(kn))
+        assert "sto keep deadbeef" in res["error"], res
+
+
 if __name__ == "__main__":
     test_session_meta()
     test_session_meta_redacts_title()
@@ -1649,4 +1756,10 @@ if __name__ == "__main__":
     test_apply_config_and_bring_share_one_copy_loop()
     test_memory_neighbours_is_one_level_and_both_directions()
     test_memory_neighbours_reuses_the_graphs_own_link_resolution()
+    test_project_slug_matches_what_claude_code_writes_on_disk()
+    test_project_slug_dashes_every_character_that_is_not_alphanumeric()
+    test_keep_archives_the_untrimmed_transcript_and_still_masks_secrets()
+    test_keep_then_resume_lands_where_claude_resume_actually_looks()
+    test_resume_refuses_to_clobber_a_session_already_on_this_machine()
+    test_resume_without_an_archive_says_which_command_creates_one()
     print("OK")

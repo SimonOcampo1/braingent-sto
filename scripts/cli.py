@@ -458,7 +458,7 @@ def _embeddable(data: str) -> str:
 
 
 # The window is the one surface outside the TUI painted in the accent, and it
-# is HTML: the six terminal colours need a hex each. Same order as ui.ACCENTS.
+# is HTML: the six terminal colours need a hex each. Same order as the TUI's accents.
 ACCENT_HEX = {"36": "#2bd6c4", "32": "#4cd964", "35": "#c08cf5",
               "34": "#5aa9f8", "33": "#e3c05a", "31": "#f2705f"}
 TEMPLATE_ACCENT = "--accent:#2bd6c4"
@@ -672,22 +672,41 @@ def cmd_memory(*args):
     return {"message": "\n".join(rows) or t("cli_no_memories")}
 
 
-def cmd_ui(*args):
-    """`sto ui`, and `sto ui --textual` for the optional Textual flavour.
+def cmd_keep(sid=""):
+    """sto keep <id> — archive a full transcript so another machine can resume it."""
+    if not sid:
+        return {"error": t("cli_use_keep")}
+    res = srv.keep_session(sid)
+    if "error" in res:
+        return res
+    return {"message": t("cli_kept", id=res["id"][:8], project=res["project"],
+                         kb=max(1, res["bytes"] // 1024))}
 
-    Two front-ends over one engine. The default is `ui.py`: Python stdlib,
-    always there, nothing to install. `--textual` is `tui_app.py`, which imports
-    the same `cli` and `sessions_server` — no HTTP in between, no second copy of
-    any rule — and spends a library on the parts a TUI framework is actually
-    good at: grid layout, scrollable tables, real widgets.
 
-    It is opt-in and it stays opt-in. `uv` runs it in a throwaway environment so
-    nothing lands in the user's Python; without `uv` and without `textual`, this
-    says how to get it and opens the usual screen rather than failing.
+def cmd_resume(sid=""):
+    """sto resume <id> — bring an archived transcript into this machine.
+
+    Runs against the current directory: the conversation is filed under the
+    checkout you are standing in, which is what `claude --resume` looks at.
     """
-    if not args:
-        return __import__("ui").run()   # ponytail: lazy — ui imports cli
-    if args != ("--textual",):
+    if not sid:
+        return {"error": t("cli_use_resume")}
+    res = srv.resume_session(sid, project_dir=Path.cwd())
+    if "error" in res:
+        return res
+    return {"message": t("cli_resumed", id=res["id"][:8], machine=res["machine"],
+                         n=res["lines"]) + "\n  " + c(res["command"], CYAN)}
+
+
+def cmd_ui(*args):
+    """`sto ui` — the terminal UI.
+
+    It imports `cli` and `sessions_server` directly: no HTTP in between and no
+    second copy of any rule. `textual` is what it needs; when it is missing,
+    `uv` runs it in a throwaway environment so nothing lands in the user's
+    Python.
+    """
+    if args:
         return _no_args("ui")
     try:
         import textual  # noqa: F401
@@ -702,8 +721,7 @@ def cmd_ui(*args):
         subprocess.run(["uv", "run", "--no-project", "--with", "textual",
                         "python", str(here / "tui_app.py")], cwd=here.parent)
         return {"message": ""}
-    print(t("textual_missing"))
-    return __import__("ui").run()
+    return {"error": t("textual_missing")}
 
 
 def _no_args(cmd):
@@ -727,6 +745,8 @@ CLI = {
     "usage": cmd_usage,
     "machines": cmd_machines,
     "graph": cmd_graph,
+    "keep": cmd_keep,
+    "resume": cmd_resume,
     "ui": cmd_ui,
 }
 

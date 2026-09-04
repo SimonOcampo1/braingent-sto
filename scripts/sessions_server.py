@@ -6,6 +6,7 @@ dream_extract.py for parsing. Serves two JSON endpoints on 127.0.0.1.
 """
 from __future__ import annotations
 
+import gzip
 import json
 import os
 import re
@@ -909,6 +910,122 @@ def export_sessions(projects_dir=None, dest=None) -> int:
         os.utime(out, (st.st_atime, st.st_mtime))  # keep mtime for change detection
         written += 1
     return written
+
+
+# ---------- resumable transcripts ----------
+
+FULL_SUFFIX = ".full.jsonl.gz"
+
+
+def project_slug(path) -> str:
+    """Claude Code's directory name for a project: every character of the
+    absolute path that is not a letter or a digit becomes a dash.
+
+    `D:\\Descargas\\Web App Projects\\my-agentic-os` becomes
+    `D--Descargas-Web-App-Projects-my-agentic-os`, and on Linux
+    `/home/simon/my-agentic-os` becomes `-home-simon-my-agentic-os`. This is the
+    whole reason a transcript is not portable on its own: `claude --resume` only
+    reads the directory matching the path the session was started from, so the
+    same conversation needs a different file name on every machine.
+    """
+    return re.sub(r"[^A-Za-z0-9]", "-", str(Path(path).resolve()))
+
+
+def _local_session(sid: str, projects_dir=None):
+    """(path, error) — a raw local session from an id or a unique id prefix."""
+    pd = projects_dir or dx.PROJECTS_DIR
+    hits = [p for _, p in dx.find_sessions(None, projects_dir=pd,
+                                           max_sessions=MAX_SESSIONS)
+            if p.stem.startswith(sid)]
+    if not hits:
+        return None, f"no local session starts with {sid}"
+    if len(hits) > 1:
+        return None, "ambiguous id: " + ", ".join(p.stem[:12] for p in hits[:5])
+    return hits[0], None
+
+
+def keep_session(sid: str, projects_dir=None, dest=None) -> dict:
+    """Archive one session's FULL transcript so another machine can resume it.
+
+    `export_sessions` trims every line to what a reader needs, which is right
+    for browsing and useless for resuming: a `tool_use` whose `tool_result` was
+    dropped is not a conversation the model can continue. This writes the
+    untrimmed lines instead, redacted and gzipped, beside the trimmed copy.
+
+    One session at a time, on purpose. The 125 raw sessions on the machine this
+    was written on are 295 MB, and gzip only buys 1.4x on them because the
+    base64 attachments are already dense; archiving all of them would put
+    ~200 MB into a repo whose entire value is that it syncs in seconds.
+    """
+    src, err = _local_session(sid, projects_dir)
+    if err:
+        return {"error": err}
+    meta = session_meta(src)
+    dest = dest if dest is not None else KNOWLEDGE_SESSIONS / LOCAL_MACHINE
+    out = dest / meta["project"] / (src.stem + FULL_SUFFIX)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    n = 0
+    with gzip.open(out, "wt", encoding="utf-8", newline="\n") as gz:
+        with src.open(encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                line = line.strip()
+                if line:
+                    gz.write(dx._redact(line) + "\n")
+                    n += 1
+    return {"ok": True, "id": src.stem, "project": meta["project"],
+            "lines": n, "bytes": out.stat().st_size, "path": str(out)}
+
+
+def archived_sessions(knowledge_dir=None):
+    """[{id, project, machine, bytes}] — every transcript kept for resuming."""
+    kd = knowledge_dir if knowledge_dir is not None else KNOWLEDGE_SESSIONS
+    rows = []
+    for p in sorted(kd.rglob("*" + FULL_SUFFIX)):
+        rel = p.relative_to(kd).parts
+        rows.append({"id": p.name[:-len(FULL_SUFFIX)],
+                     "machine": rel[0] if rel else "",
+                     "project": rel[1] if len(rel) > 2 else "",
+                     "bytes": p.stat().st_size, "path": p})
+    return rows
+
+
+def resume_session(sid: str, project_dir=None, claude_dir=None,
+                   knowledge_dir=None) -> dict:
+    """Materialise an archived transcript into this machine's projects tree.
+
+    `project_dir` is the checkout the conversation should continue in (the
+    current directory by default). The slug comes from it rather than from the
+    machine that recorded the session: the same repo lives at a different path
+    on every machine, and a transcript only resumes under the project it is
+    filed against.
+
+    Refuses to clobber an existing local session — a half-overwritten
+    transcript is worse than no transcript.
+    """
+    hits = [r for r in archived_sessions(knowledge_dir) if r["id"].startswith(sid)]
+    if not hits:
+        return {"error": f"no archived transcript starts with {sid} "
+                         f"(run `sto keep {sid}` on the machine that has it)"}
+    if len(hits) > 1:
+        return {"error": "ambiguous id: " + ", ".join(r["id"][:12] for r in hits[:5])}
+    row = hits[0]
+    cd = Path(claude_dir) if claude_dir else CLAUDE_DIR
+    target = cd / "projects" / project_slug(project_dir or Path.cwd())
+    out = target / (row["id"] + ".jsonl")
+    if out.exists():
+        return {"error": f"{out} already exists: this session is already here"}
+    target.mkdir(parents=True, exist_ok=True)
+    n = 0
+    with gzip.open(row["path"], "rt", encoding="utf-8") as gz:
+        with out.open("w", encoding="utf-8", newline="\n") as fh:
+            for line in gz:
+                if line.strip():
+                    fh.write(line)
+                    n += 1
+    return {"ok": True, "id": row["id"], "machine": row["machine"],
+            "lines": n, "path": str(out),
+            "command": f"claude --resume {row['id']}"}
+
 
 
 # ---------- per-project memory (cross-machine) ----------
