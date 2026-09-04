@@ -328,9 +328,16 @@ def test_switching_language_invalidates_the_cached_header_summary():
 
 
 def test_module_items_reads_skills_plugins_and_plain_files():
+    """Both sides go to a temp dir, machine AND repo.
+
+    `repo_config` used to be left at its default, which is the real
+    `knowledge/config`: the test then asserted against whatever skills the
+    clone happened to carry. Green on the published repo, which carries none,
+    red on any repo actually in use — the ones this is supposed to protect.
+    """
     import tempfile as tmp
-    with tmp.TemporaryDirectory() as d:
-        cd = Path(d)
+    with tmp.TemporaryDirectory() as d, tmp.TemporaryDirectory() as r:
+        cd, cfg = Path(d), Path(r)
         _skill(cd, "tackler", desc="hace cosas")
         (cd / "plugins").mkdir(parents=True)
         (cd / "plugins" / "installed_plugins.json").write_text(
@@ -338,17 +345,26 @@ def test_module_items_reads_skills_plugins_and_plain_files():
         (cd / "agents").mkdir()
         (cd / "agents" / "uno.md").write_text("x", encoding="utf-8")
 
-        skills = ui.module_items("skills", cd)
-        assert [s["label"] for s in skills] == ["tackler"]
-        assert skills[0]["id"] == "personal:tackler" and skills[0]["what"] == "skill"
+        # the fourth parity state comes from `git log` on the real repo, and
+        # this test is about `module_items`, not about the history
+        real = ui.srv.dropped_skills
+        try:
+            ui.srv.dropped_skills = lambda **k: set()
 
-        plugins = ui.module_items("plugins", cd)
-        assert [p["id"] for p in plugins] == ["superpowers@official"]
-        assert plugins[0]["what"] == "plugin"
+            skills = ui.module_items("skills", cd, cfg)
+            assert [s["label"] for s in skills] == ["tackler"]
+            assert skills[0]["id"] == "personal:tackler" and skills[0]["what"] == "skill"
+            assert skills[0]["where"] == "local"     # el repo de al lado está vacío
 
-        archivos = ui.module_items("agents", cd)
-        assert [f["label"] for f in archivos] == ["uno.md"]
-        assert archivos[0]["what"] == "file"        # y por eso no se borra
+            plugins = ui.module_items("plugins", cd, cfg)
+            assert [p["id"] for p in plugins] == ["superpowers@official"]
+            assert plugins[0]["what"] == "plugin"
+
+            archivos = ui.module_items("agents", cd, cfg)
+            assert [f["label"] for f in archivos] == ["uno.md"]
+            assert archivos[0]["what"] == "file"        # y por eso no se borra
+        finally:
+            ui.srv.dropped_skills = real
 
 
 def test_the_three_verbs_are_all_reachable_from_a_module_and_named_in_the_legend():
@@ -485,6 +501,14 @@ def test_no_pictographs_in_the_source():
     `knowledge/` is exempt and always will be: those are captured transcripts
     and memories. What somebody typed into a session is data, and rewriting
     data to match our own house style is worse than the emoji.
+
+    So is anything else the clone carries that we did not publish. A private
+    clone tracks its owner's files next to ours — research notes, plans, a
+    `prompt.md` at the root — and our house style is not theirs to obey.
+    `upstream/main` is the published tree, which is the only local answer to
+    "is this our source"; `sto update` keeps the ref fresh. `scripts/` and
+    `app/` are policed regardless, so a source file that is new and not pushed
+    yet cannot slip through the same door.
     """
     import re
     import subprocess
@@ -493,11 +517,16 @@ def test_no_pictographs_in_the_source():
                             text=True, encoding="utf-8")
     if listed.returncode != 0:
         return                                  # not a checkout; nothing to police
+    published = subprocess.run(["git", "ls-tree", "-r", "--name-only", "upstream/main"],
+                               cwd=root, capture_output=True, text=True, encoding="utf-8")
+    ours = set(published.stdout.splitlines()) if published.returncode == 0 else None
     escape = re.compile(r"\\u([0-9a-fA-F]{4})")
     bad = []
     for rel in listed.stdout.splitlines():
         if not rel.strip() or rel.startswith("knowledge/"):
             continue
+        if ours is not None and rel not in ours and not rel.startswith(("scripts/", "app/")):
+            continue                            # theirs, not ours
         path = root / rel
         try:
             text = path.read_text(encoding="utf-8")
