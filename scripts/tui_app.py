@@ -290,6 +290,13 @@ class Levels:
     # the panels, outermost first, by widget id
     LEVELS = ()
 
+    def ask(self, title, lines, danger, run) -> None:
+        def answered(yes):
+            if yes:
+                run()
+                self.app.action_reload()
+        self.app.push_screen(Confirm(title, lines, danger), answered)
+
     # which key of a row each column of the row table is rendered from. `None`
     # means the column is not sortable and never enters the cycle.
     SORT_FIELDS = ()
@@ -471,8 +478,9 @@ class Split(Levels, Container):
 
 class Sessions(Split):
     TITLE = t("tab_sessions")
+    VERBS = ("keep", "bring")
     SORT_FIELDS = ("mtime", "project", "n_prompts", "n_tools", "errors",
-                   "machine", "title")
+                   "machine", "kept", "title")
 
     def make_table(self):
         # every column sorts, including the two whose cell is not the datum:
@@ -481,10 +489,16 @@ class Sessions(Split):
         return Table((t("col_when"), 10, "data"), (t("col_project"), 18, "data"),
                      (t("col_prompts"), 7, "data"), (t("col_tools"), 6, "data"),
                      (t("col_errors"), 7, "data"), (t("col_machine"), 12, "data"),
+                     (t("col_kept"), 5, "data"),
                      (t("col_title"), None, "data"), id="t-rows")
 
     def refresh_data(self) -> None:
         rows, _ = cli.cached_sessions()
+        # one directory walk for the whole table: asking per row would stat the
+        # knowledge tree 500 times to paint one screen
+        archived = {a["id"] for a in srv.archived_sessions()}
+        for r in rows:
+            r["kept"] = r["id"] in archived
         self.all_rows = rows
         groups = {}
         for r in rows:
@@ -516,6 +530,9 @@ class Sessions(Split):
                           # not clipped to the column width: the marquee needs
                           # something longer than the column to scroll
                           clip(r.get("machine") or srv.LOCAL_MACHINE, 60),
+                          # a dot and not a word: it is a yes/no you scan down
+                          # the column for, and the header already names it
+                          Content.from_markup("[$success]●[/]" if r.get("kept") else ""),
                           clip(r["title"], 200), key=r["id"])
         table.fit()
         if not pool:
@@ -528,6 +545,55 @@ class Sessions(Split):
             return
         r = self.rows[table.cursor_row]
         self.app.push_screen(Reader(clip(r["title"], 60), transcript(r)))
+
+    def act(self, verb: str) -> None:
+        """`k` keeps this conversation whole, `a` brings it to this machine.
+
+        The same two verbs the Tools tab spends on skills, pointed at
+        transcripts: one machine archives, the other one brings. Which of the
+        two applies is never a guess — the machine column says where the
+        session was recorded and the kept column says whether it travelled.
+        """
+        table = self.query_one("#t-rows", Table)
+        if not self.rows:
+            return
+        r = self.rows[table.cursor_row]
+        sid, short = r["id"], r["id"][:8]
+        if verb == "keep":
+            if (r.get("machine") or srv.LOCAL_MACHINE) != srv.LOCAL_MACHINE:
+                return self.app.notify(t("keep_only_local", id=short),
+                                       severity="warning")
+            if r.get("kept"):
+                return self.app.notify(t("keep_already", id=short))
+            self.ask(t("keep_title"),
+                     [f"[$accent]{esc(clip(r['title'], 90))}[/]",
+                      f"[$foreground 60%]{esc(t('keep_what'))}[/]",
+                      f"[$foreground 60%]{esc(t('keep_how'))}[/]"],
+                     False, lambda: self._keep(sid, short))
+        elif verb == "bring":
+            if not r.get("kept"):
+                return self.app.notify(t("resume_needs_keep", id=short),
+                                       severity="warning")
+            out = (srv.CLAUDE_DIR / "projects" /
+                   srv.project_slug(Path.cwd()) / f"{sid}.jsonl")
+            self.ask(t("resume_title"),
+                     [f"[$accent]{esc(clip(r['title'], 90))}[/]",
+                      f"[$foreground 60%]{esc(t('resume_what', path=out))}[/]",
+                      f"[$foreground 60%]{esc(t('resume_how', id=sid))}[/]"],
+                     False, lambda: self._resume(sid, short))
+
+    def _keep(self, sid, short) -> None:
+        res = srv.keep_session(sid)
+        self.app.done(res.get("error") or
+                      t("kept_ok", id=short, kb=max(1, res["bytes"] // 1024)),
+                      "error" in res)
+
+    def _resume(self, sid, short) -> None:
+        """Filed against the directory the TUI was launched from: that is the
+        checkout the user is standing in, and the slug `claude --resume` reads."""
+        res = srv.resume_session(sid, project_dir=Path.cwd())
+        self.app.done(res.get("error") or t("resumed_ok", short=short, id=sid),
+                      "error" in res)
 
 
 class Memory(Split):
@@ -578,6 +644,8 @@ class Memory(Split):
 
 
 class Tools(Levels, Container):
+    VERBS = ("bring", "delete", "forget")
+
     """Everything the agent runs with, on this machine and in the repo.
 
     It was the skills tab, which meant `settings.json` and `CLAUDE.md` — things
@@ -765,13 +833,6 @@ class Tools(Levels, Container):
             lines.append(f"[$foreground 60%]…+{len(paths) - 14}[/]")
         self.ask(t("k_bring") if verb == "bring" else t("k_forget"), lines,
                  verb == "forget", lambda: self._apply(verb, target, row["label"]))
-
-    def ask(self, title, lines, danger, run) -> None:
-        def answered(yes):
-            if yes:
-                run()
-                self.app.action_reload()
-        self.app.push_screen(Confirm(title, lines, danger), answered)
 
     def _apply(self, verb, target, label) -> None:
         fn = srv.bring if verb == "bring" else srv.forget
@@ -1167,9 +1228,13 @@ class StoApp(App):
         Binding("s", "sort", "sort"),
         Binding("r", "reload", "reload"),
         Binding("q", "quit", "quit"),
-        Binding("a", "verb('bring')", "", show=False),
-        Binding("d", "verb('delete')", "", show=False),
-        Binding("R", "verb('forget')", "", show=False),
+        # shown, not hidden: `check_action` below offers each one only on the
+        # tab that can do it, so the footer names the verbs instead of leaving
+        # them to be discovered by accident
+        Binding("k", "verb('keep')", t("k_keep")),
+        Binding("a", "verb('bring')", t("k_bring")),
+        Binding("d", "verb('delete')", t("k_delete")),
+        Binding("R", "verb('forget')", t("k_forget")),
     ]
 
     def __init__(self):
@@ -1353,6 +1418,9 @@ class StoApp(App):
 
     def show_tab(self, index) -> None:
         self.tab = index % len(TABS)
+        # the footer caches which keys it offers, and `check_action` answers
+        # per tab: without this the verbs of the tab you left stay on screen
+        self.refresh_bindings()
         for i, pane in enumerate(self.panes):
             pane.display = i == self.tab
         for i, chip in enumerate(self.query(".tab")):
@@ -1571,8 +1639,23 @@ class StoApp(App):
         if isinstance(self.focused, Table):
             self.focused.cycle_sort()
 
+    def check_action(self, action: str, parameters: tuple):
+        """Which keys the footer offers, tab by tab.
+
+        The verbs are bound at the app so one handler dispatches them, but each
+        only means something on a pane that declares it. `None` hides the key
+        rather than advertising a `d` on the home that deletes nothing.
+        """
+        if action != "verb":
+            return True
+        panes = getattr(self, "panes", None)
+        if not panes:
+            return None                    # before mount there is no pane to ask
+        verbs = getattr(panes[self.tab], "VERBS", ())
+        return True if parameters and parameters[0] in verbs else None
+
     def action_verb(self, verb: str) -> None:
-        """`a` / `d` / `R` belong to whichever screen can do them. Bound at the
+        """`a` / `d` / `R` / `k` belong to whichever screen can do them. Bound at the
         app so the footer can name them, dispatched to the pane so a screen
         with no such verb simply does not have one."""
         if isinstance(self.focused, Input):

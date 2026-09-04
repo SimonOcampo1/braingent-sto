@@ -817,6 +817,128 @@ def test_a_coloured_cell_scrolls_too():
     asyncio.run(go())
 
 
+
+def test_keeping_a_conversation_asks_first_and_never_writes_on_escape():
+    """`k` is the one key on this tab that puts bytes in the repo.
+
+    It goes through the same Confirm every writing verb goes through, and
+    escaping it has to leave `keep_session` uncalled — not called and rolled
+    back, not called on a copy: uncalled.
+    """
+    async def go():
+        llamadas = []
+        real = tui_app.srv.keep_session
+        tui_app.srv.keep_session = lambda *a, **k: llamadas.append(a) or {"bytes": 1024}
+        try:
+            app = tui_app.StoApp()
+            async with app.run_test(size=(130, 30)) as pilot:
+                await app.workers.wait_for_complete()
+                await pilot.press("2")
+                await pilot.pause()
+                pane = app.query_one("#sessions")
+                if not pane.rows:
+                    return                      # a machine with no transcripts
+                pane.query_one("#t-rows", tui_app.Table).focus()
+                await pilot.pause()
+                await pilot.press("k")
+                await pilot.pause()
+                assert type(app.screen).__name__ == "Confirm", app.screen
+                await pilot.press("escape")
+                await pilot.pause()
+                assert llamadas == [], llamadas
+        finally:
+            tui_app.srv.keep_session = real
+
+    asyncio.run(go())
+
+
+def test_bringing_a_conversation_that_was_never_kept_says_so_instead_of_failing():
+    """The two verbs are halves of one round trip, and the row says which half
+    you are on. Asking to bring a transcript nobody archived is the common
+    mistake, so it answers with the missing step rather than an engine error.
+    """
+    async def go():
+        llamadas = []
+        real = tui_app.srv.resume_session
+        tui_app.srv.resume_session = lambda *a, **k: llamadas.append(a) or {"ok": True}
+        try:
+            app = tui_app.StoApp()
+            async with app.run_test(size=(130, 30)) as pilot:
+                await app.workers.wait_for_complete()
+                await pilot.press("2")
+                await pilot.pause()
+                pane = app.query_one("#sessions")
+                if not pane.rows:
+                    return
+                for r in pane.rows:
+                    r["kept"] = False
+                pane.query_one("#t-rows", tui_app.Table).focus()
+                await pilot.pause()
+                await pilot.press("a")          # bring it here
+                await pilot.pause()
+                # no confirmation, and above all no write
+                assert type(app.screen).__name__ == "Screen", app.screen
+                assert llamadas == [], llamadas
+        finally:
+            tui_app.srv.resume_session = real
+
+    asyncio.run(go())
+
+
+def test_the_kept_column_is_a_column_and_sorts_like_the_others():
+    """Every column on this tab sorts, and the state marker is not an exception:
+    "which of these travelled" is exactly the question you sort by."""
+    async def go():
+        app = tui_app.StoApp()
+        async with app.run_test(size=(150, 30)) as pilot:
+            await app.workers.wait_for_complete()
+            await pilot.press("2")
+            await pilot.pause()
+            pane = app.query_one("#sessions")
+            assert "kept" in pane.SORT_FIELDS
+            table = pane.query_one("#t-rows", tui_app.Table)
+            # one column per sort field, in the same order
+            assert len(table.columns) == len(pane.SORT_FIELDS)
+            if pane.rows:
+                assert all("kept" in r for r in pane.rows)
+
+    asyncio.run(go())
+
+
+def test_the_footer_offers_a_verb_only_where_it_does_something():
+    """The verbs live at the app so one handler dispatches them, and before
+    this they were hidden bindings nobody could find.
+
+    Showing them all instead is worse: `delete here` over a dashboard with
+    nothing to delete is a promise the key does not keep. `check_action` turns
+    each one off away from its pane and the CSS drops the dead key rather than
+    dimming it, so the footer is a list of what actually works right here.
+    """
+    async def go():
+        app = tui_app.StoApp()
+        async with app.run_test(size=(150, 30)) as pilot:
+            await app.workers.wait_for_complete()
+
+            async def footer():
+                await pilot.pause()
+                return [s.text for s in app.screen._compositor.render_strips()][-1]
+
+            await pilot.press("1")
+            home = await footer()
+            assert " k " not in home and " d " not in home, home
+
+            await pilot.press("2")
+            sessions = await footer()
+            assert "keep" in sessions and "bring" in sessions, sessions
+            assert "delete" not in sessions, sessions
+
+            await pilot.press("4")
+            tools = await footer()
+            assert "bring" in tools and "delete" in tools, tools
+            assert "keep" not in tools, tools
+
+    asyncio.run(go())
+
 if __name__ == "__main__":
     test_the_wordmark_is_a_rectangle()
     test_the_accent_and_the_ground_are_one_theme_each()
@@ -845,4 +967,8 @@ if __name__ == "__main__":
     test_the_home_search_finds_things_that_are_not_sessions()
     test_a_memory_shows_its_body_and_its_neighbours()
     test_a_coloured_cell_scrolls_too()
+    test_keeping_a_conversation_asks_first_and_never_writes_on_escape()
+    test_bringing_a_conversation_that_was_never_kept_says_so_instead_of_failing()
+    test_the_kept_column_is_a_column_and_sorts_like_the_others()
+    test_the_footer_offers_a_verb_only_where_it_does_something()
     print("OK")

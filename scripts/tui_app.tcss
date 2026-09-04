@@ -307,3 +307,10 @@ Toast.-error { border-left: outer $error; }
  * already says. */
 
 .tiny #wordmark, .short #wordmark { display: none; }
+
+/* A verb belongs to the tab that can do it. Textual dims a key its
+   `check_action` turned off; dimming still spends footer width on `delete
+   here` over a screen with nothing to delete, so it goes instead. */
+Footer FooterKey.-disabled {
+    display: none;
+}
