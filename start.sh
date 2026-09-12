@@ -33,8 +33,13 @@ command -v npm >/dev/null 2>&1 || die "Node.js/npm is missing: https://nodejs.or
 
 # ── the front-end deps (idempotent: fast when already there) ──
 
+# `npm ci`, not `npm install`: install re-resolves every semver range, so on a
+# machine whose npm cache is newer it rewrites package-lock.json — a dirty tree
+# that made `sto update` and `sto sync` refuse to run on every fresh clone. `ci`
+# installs the lockfile as written and never touches it. It only fails when the
+# lock and package.json really disagree, and then install is the right repair.
 echo "Checking the app dependencies..."
-(cd app && npm install) || die "npm install failed"
+(cd app && { npm ci || npm install; }) || die "npm install failed"
 
 # ── graphify (repo knowledge graph) ──
 #
