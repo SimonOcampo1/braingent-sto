@@ -6,9 +6,13 @@ rem --- check the runtimes ---
 where python >nul 2>&1 || (echo [ERROR] Python is missing: https://www.python.org/downloads/ & pause & exit /b 1)
 where npm >nul 2>&1 || (echo [ERROR] Node.js/npm is missing: https://nodejs.org/ & pause & exit /b 1)
 
-rem --- install/reconcile the front-end deps (idempotent: fast when already there) ---
+rem --- install the front-end deps (idempotent: fast when already there) ---
+rem `npm ci`, not `npm install`: install re-resolves every semver range and
+rem rewrites package-lock.json, and that dirty tree makes `sto update` and
+rem `sto sync` refuse to run. Falls back to install when lock and package.json
+rem really disagree, which is the one case install is the right repair for.
 echo Checking the app dependencies...
-cmd /c "cd app && npm install" || (echo [ERROR] npm install failed & pause & exit /b 1)
+cmd /c "cd app && (npm ci || npm install)" || (echo [ERROR] npm install failed & pause & exit /b 1)
 
 rem --- graphify (repo knowledge graph; optional) ---
 set "PATH=%USERPROFILE%\.local\bin;%PATH%"
