@@ -2057,7 +2057,10 @@ def sync_push(progress=None) -> dict:
                          "--", "knowledge", "vault")
         if code != 0:
             return {"error": f"commit failed: {out[:400]}"}
-    st = sync_status(fetch=False)
+    # `force=True`: the behind check has to ask the remote, not the last fetch.
+    # Inside the FETCH_TTL window a push from another machine is invisible, and
+    # the guard would wave through a push that git then rejects.
+    st = sync_status(force=True)
     if st["behind"] > 0:
         return {"error": f"remote has {st['behind']} new commit(s): pull first",
                 "needsPull": True, "status": st}
