@@ -1688,6 +1688,30 @@ def test_resume_without_an_archive_says_which_command_creates_one():
         assert "sto keep deadbeef" in res["error"], res
 
 
+def test_sync_push_forces_a_fetch_before_the_behind_check():
+    """The guard used to read the last fetch (`fetch=False`): if another machine
+    pushed inside the FETCH_TTL window, `behind` came back 0, the guard stayed
+    quiet and git rejected the push with `fetch first`. The check has to ask the
+    remote."""
+    llamadas, real = [], (srv.sync_status, srv.sync_stage, srv._git)
+    try:
+        def fake_status(fetch=True, force=False):
+            llamadas.append({"fetch": fetch, "force": force})
+            # the cached refs say 0; the remote, asked, says 2
+            return {"remote": "git@x", "branch": "main", "ahead": 1,
+                    "behind": 2 if force else 0, "dirty": False,
+                    "machine": "PC", "fetchError": None}
+        srv.sync_status = fake_status
+        srv.sync_stage = lambda progress=None: {"paths": [], "sessions": 0,
+                                                "config": 0, "memory": 0}
+        srv._git = lambda *a, **k: (0, "")  # a push reaching git here is the bug
+        out = srv.sync_push()
+        assert out.get("needsPull") and "pull first" in out["error"], out
+        assert llamadas[-1]["force"] is True, llamadas
+    finally:
+        srv.sync_status, srv.sync_stage, srv._git = real
+
+
 if __name__ == "__main__":
     test_session_meta()
     test_session_meta_redacts_title()
@@ -1762,4 +1786,5 @@ if __name__ == "__main__":
     test_keep_then_resume_lands_where_claude_resume_actually_looks()
     test_resume_refuses_to_clobber_a_session_already_on_this_machine()
     test_resume_without_an_archive_says_which_command_creates_one()
+    test_sync_push_forces_a_fetch_before_the_behind_check()
     print("OK")
