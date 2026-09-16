@@ -475,10 +475,10 @@ def test_the_wordmark_shrinks_before_it_disappears():
     six rows on a banner, which is a height question and not a width one.
     """
     async def go():
-        cases = (((120, 34), 6),     # one line of ansi_shadow
-                 ((90, 34), 13),     # the same letters, wrapped
-                 ((90, 24), 1),      # no rows to wrap into: the name, plainly
-                 ((60, 30), 1))      # too narrow even for the wrapped face
+        cases = (((120, 34), 5),     # one line of smmono9
+                 ((50, 34), 11),     # the same letters, wrapped
+                 ((50, 24), 1),      # no rows to wrap into: the name, plainly
+                 ((36, 30), 1))      # too narrow even for the wrapped face
         for size, rows in cases:
             app = tui_app.StoApp()
             async with app.run_test(size=size) as pilot:
@@ -777,6 +777,37 @@ def test_a_column_sorts_the_datum_and_not_the_cell():
             assert rows.sort_by is not None, "errors never came up in the cycle"
             counts = [r["errors"] for r in pane.rows]
             assert counts == sorted(counts), counts
+
+    asyncio.run(go())
+
+
+def test_s_on_the_project_rail_sorts_the_projects_and_not_the_rows():
+    """The rail handed its sort to the pane, and the pane sorted the rows
+    beside it: `s` on the projects moved everything except the projects."""
+    async def go():
+        app = tui_app.StoApp()
+        async with app.run_test(size=(150, 30)) as pilot:
+            await app.workers.wait_for_complete()
+            await pilot.press("2")
+            await pilot.pause()
+            pane = app.query_one("#sessions")
+            if len(pane.groups) < 3:
+                return
+            groups = pane.query_one("#t-groups", tui_app.Table)
+            groups.focus()
+            await pilot.pause()
+            await pilot.press("s")                  # the count, ascending
+            await pilot.pause()
+            counts = [len(items) for _, items in pane.groups]
+            assert counts == sorted(counts), counts
+            await pilot.press("s", "s")             # the name, ascending
+            await pilot.pause()
+            names = [name.lower() for name, _ in pane.groups]
+            assert names == sorted(names), names
+            # and the rail still points at the group it shows
+            groups.move_cursor(row=1)
+            await pilot.pause()
+            assert {r["project"] for r in pane.rows} == {pane.groups[0][0]}
 
     asyncio.run(go())
 
@@ -1300,6 +1331,7 @@ if __name__ == "__main__":
     test_tab_walks_tabs_and_the_arrows_walk_everything_inside_one()
     test_s_cycles_the_sort_and_comes_back_to_the_natural_order()
     test_a_column_sorts_the_datum_and_not_the_cell()
+    test_s_on_the_project_rail_sorts_the_projects_and_not_the_rows()
     test_the_marquee_runs_only_where_text_is_cut_and_only_with_focus()
     test_a_memory_renders_as_markdown_and_a_transcript_does_not()
     test_tools_reaches_every_config_module_and_reads_one()

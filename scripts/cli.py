@@ -73,6 +73,7 @@ def cached_sessions(projects_dir=None, knowledge_dir=None, cache_path=None,
     cands += srv._knowledge_sessions(knowledge_dir)
 
     entries, rows, prompts, seen = {}, [], {}, set()
+    committed = srv.committed_at()
     for machine, p in cands:
         key = str(p)
         if key in entries:
@@ -101,7 +102,8 @@ def cached_sessions(projects_dir=None, knowledge_dir=None, cache_path=None,
         if not include_agents and meta["id"].startswith("agent-"):
             continue
         seen.add(meta["id"])
-        rows.append(dict(meta, machine=entry["machine"], path=key))
+        rows.append(dict(meta, machine=entry["machine"], path=key,
+                         mtime=srv.real_mtime(key, meta["mtime"], committed)))
         prompts[meta["id"]] = entry["prompts"]
 
     if entries != old:

@@ -49,21 +49,20 @@ FooterKey, Static, Container, TabBar {
     background: $background;
 }
 
-/* the tabs are the navigation of the whole product, so they are the size of
- * navigation: three rows, centred, and readable from across the room. The row
- * used to be six small words flush left under a title bar, which made the
- * title bar look like the important part. */
+/* the tabs are the navigation of the whole product: centred, one row each,
+ * with air above and below. Three-row blocks read as buttons shouting over
+ * the screen they lead to. */
 #tabs {
     layout: horizontal;
     height: 3;
     width: 100%;
     align-horizontal: center;
-    padding: 0 1;
+    padding: 1 1;
 }
 .tab {
     width: auto;
-    height: 3;
-    padding: 1 3;
+    height: 1;
+    padding: 0 2;
     margin: 0 1;
     color: $foreground 45%;
     text-style: bold;
@@ -111,7 +110,7 @@ FooterKey:hover > .footer-key--key { background: $panel; color: $accent; }
 .home, .split, .three, .two { padding: 1; }
 /* the home starts lower than the others: it is a masthead, and a masthead
  * pinned to the first available row is a header, not a title page */
-.home { padding: 2 1 1 1; }
+.home { padding: 4 1 1 1; }
 
 /* it is the name of the thing, and it was sitting flush left over a search box
  * like a label for it. `auto` because there are two faces: six rows of
@@ -178,7 +177,7 @@ Search:focus { border: round $accent; border-title-color: $accent; }
  * chosen — and one panel at a time below it, which is the same hierarchy
  * walked instead of laid out.
  */
-.split { layout: grid; grid-size: 2 2; grid-columns: 1fr 2fr; grid-rows: 3 1fr; grid-gutter: 1 1; }
+.split { layout: grid; grid-size: 2 2; grid-columns: 2fr 3fr; grid-rows: 3 1fr; grid-gutter: 1 1; }
 .split > Search { column-span: 2; margin-bottom: 0; }
 .split > .card { height: 1fr; min-height: 6; }
 .split DataTable { height: 1fr; max-height: 100%; }
@@ -338,6 +337,7 @@ Toast.-error { border-left: outer $error; }
 /* the masthead breathes where there is room and stops breathing where there is
  * not: four blank rows spent on air is one gauge pushed under the fold */
 .narrow #wordmark { margin: 0 0 1 0; }
+.narrow .home { padding: 1 1 1 1; }
 .narrow #search-wrap > Search { margin-bottom: 1; }
 .narrow #stats-body { margin-bottom: 1; }
 .narrow .three { grid-size: 1 3; grid-columns: 1fr; grid-rows: auto auto auto; }

@@ -243,11 +243,13 @@ def list_sessions(projects_dir=None, knowledge_dir=None) -> list[dict]:
              for _, p in dx.find_sessions(None, projects_dir=pd, max_sessions=MAX_SESSIONS)]
     cands += _knowledge_sessions(knowledge_dir)
     rows, seen = [], set()
+    committed = committed_at()
     for machine, p in cands:
         if p.stem in seen:
             continue
         seen.add(p.stem)
         m = session_meta(p)
+        m["mtime"] = real_mtime(p, m["mtime"], committed)
         if m["n_prompts"] == 0:
             continue  # noise: sessions where nothing was asked
         m["machine"] = None if machine == LOCAL_MACHINE else machine
@@ -835,6 +837,50 @@ def _git(*args, timeout=120):
         return r.returncode, (r.stdout.strip() + ("\n" + r.stderr.strip() if r.stderr.strip() else "")).strip()
     except (OSError, Exception) as e:  # git missing / timeout
         return 1, str(e)
+
+
+_COMMITTED = {"head": None, "data": {}}
+
+
+def committed_at() -> dict:
+    """{absolute path: unix time of the last commit that touched it}, for the
+    knowledge files that say when something happened.
+
+    A file that arrives through a pull is stamped with the time of the
+    checkout, not the time it was written: git does not keep mtimes. Every
+    session and memory another machine synced showed the day of the last
+    `git pull`, so a list spanning months read "4 days ago" top to bottom.
+    One `git log` answers for all of them, and only again when HEAD moves.
+    """
+    code, head = _git("rev-parse", "HEAD", timeout=10)
+    if code != 0:
+        return {}
+    if _COMMITTED["head"] == head:
+        return _COMMITTED["data"]
+    code, out = _git("-c", "core.quotepath=off", "log", "--format=@%ct",
+                     "--name-only", "--", "knowledge/sessions", "knowledge/memory",
+                     timeout=30)
+    data, ts = {}, None
+    for line in out.splitlines() if code == 0 else ():
+        line = line.strip()
+        if line.startswith("@") and line[1:].isdigit():
+            ts = int(line[1:])
+        elif line and ts is not None:
+            # newest first: the first commit seen for a path is its last
+            data.setdefault(str(REPO_ROOT / line), ts)
+    _COMMITTED.update(head=head, data=data)
+    return data
+
+
+def real_mtime(path, mtime, committed) -> float:
+    """The earlier of the file's own mtime and its last commit.
+
+    A checkout makes the mtime later than the commit, so the commit wins. An
+    export written on this machine keeps its source's mtime, which is earlier
+    than the commit that carried it, so the mtime wins. Never committed: the
+    mtime is all there is.
+    """
+    return min(mtime, committed.get(str(path), mtime))
 
 
 def _trim_session_line(line: str):
@@ -1464,6 +1510,7 @@ def list_memory(src=None) -> list[dict]:
     out = []
     if not root.exists():
         return out
+    committed = committed_at()
     for pdir in sorted(root.iterdir()):
         if not pdir.is_dir():
             continue
@@ -1474,7 +1521,7 @@ def list_memory(src=None) -> list[dict]:
             for f in sorted(mdir.glob("*.md")):
                 meta = _memory_meta(f.read_text(encoding="utf-8", errors="replace"))
                 items.append({"slug": f.stem, "type": meta["type"], "machine": mdir.name,
-                              "mtime": f.stat().st_mtime,
+                              "mtime": real_mtime(f, f.stat().st_mtime, committed),
                               "description": meta["description"] or meta["name"]})
         if items:
             out.append({"project": pdir.name,
