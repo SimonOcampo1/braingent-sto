@@ -475,10 +475,10 @@ def test_the_wordmark_shrinks_before_it_disappears():
     six rows on a banner, which is a height question and not a width one.
     """
     async def go():
-        cases = (((120, 34), 5),     # one line of smmono9
-                 ((50, 34), 11),     # the same letters, wrapped
-                 ((50, 24), 1),      # no rows to wrap into: the name, plainly
-                 ((36, 30), 1))      # too narrow even for the wrapped face
+        cases = (((120, 34), 6),     # one line of ansi_shadow
+                 ((90, 34), 13),     # the same letters, wrapped
+                 ((90, 24), 1),      # no rows to wrap into: the name, plainly
+                 ((60, 30), 1))      # too narrow even for the wrapped face
         for size, rows in cases:
             app = tui_app.StoApp()
             async with app.run_test(size=size) as pilot:
@@ -1207,11 +1207,18 @@ def test_w_asks_where_the_project_lives_and_writes_only_on_enter():
     say what that path is here.
 
     Escaping the prompt writes nothing, the way every other verb behaves.
+
+    The listing fills the registry on its own from each transcript's cwd, and
+    through the same `set_project_path`. With that stubbed nothing ever lands
+    on disk, so every refresh "finds" the paths again and writes them again --
+    the test was counting the loader, not the prompt. It is switched off here.
     """
     async def go():
         saved = []
         real = tui_app.srv.set_project_path
+        real_remember = tui_app.srv.remember_project_paths
         tui_app.srv.set_project_path = lambda *a: saved.append(a)
+        tui_app.srv.remember_project_paths = lambda rows: None
         try:
             app = tui_app.StoApp()
             async with app.run_test(size=(140, 30)) as pilot:
@@ -1241,6 +1248,7 @@ def test_w_asks_where_the_project_lives_and_writes_only_on_enter():
                 assert saved == [(pane.groups[0][0], "/tmp/donde-vive")], saved
         finally:
             tui_app.srv.set_project_path = real
+            tui_app.srv.remember_project_paths = real_remember
 
     asyncio.run(go())
 
