@@ -1696,6 +1696,13 @@ def test_a_project_path_is_per_machine_and_merges_without_a_conflict():
             assert fresh["agentic-os"]["LaOtra"] == r"D:\Projects\moved", fresh
             assert "otro" not in fresh, fresh
 
+            # rows come newest first: an older session recorded before the
+            # checkout moved must not write the old path back
+            srv.remember_project_paths([
+                {"project": "agentic-os", "cwd": r"D:\Projects\moved", "machine": None},
+                {"project": "agentic-os", "cwd": r"C:\Downloads\agentic-os", "machine": None}])
+            assert srv.local_project_path("agentic-os") == Path(r"D:\Projects\moved")
+
             # and forgetting is saying nothing, not saying ""
             srv.set_project_path("agentic-os", None)
             assert srv.local_project_path("agentic-os") is None

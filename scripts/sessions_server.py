@@ -1030,13 +1030,19 @@ def remember_project_paths(rows) -> None:
     on this machine, so nobody has to type it. Only what is new gets written:
     this runs on every session listing."""
     known = project_paths()
-    fresh = {}
+    fresh, seen = {}, set()
     for r in rows:
         cwd = r.get("cwd")
         if not cwd or r.get("machine"):
             continue          # a row from another machine carries their path
+        # only the newest local session of a project speaks for it: an older
+        # one recorded before the checkout moved differs from the registry
+        # too, and was writing the old path back over the right one
+        if r["project"] in seen:
+            continue
+        seen.add(r["project"])
         if known.get(r["project"], {}).get(LOCAL_MACHINE) != cwd:
-            fresh.setdefault(r["project"], cwd)
+            fresh[r["project"]] = cwd
     for project, cwd in fresh.items():
         try:
             set_project_path(project, cwd)
