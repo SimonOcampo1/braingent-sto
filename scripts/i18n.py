@@ -213,6 +213,24 @@ STRINGS = {
 
         "c_teal": "turquesa", "c_green": "verde", "c_violet": "violeta",
         "c_blue": "azul", "c_yellow": "amarillo", "c_red": "rojo",
+
+        # el rediseño: la home de una sola columna y los dos botones de fila
+        "sec_stats": "Resumen", "sec_projects": "Proyectos",
+        "on": "ON", "off": "OFF",
+        "k_row_sync": "sincronizar", "k_row_path": "ruta",
+        "path_title": "Ruta del proyecto en esta máquina",
+        "path_what": "Dónde vive {project} acá. Se guarda por máquina y viaja en el repo.",
+        "path_placeholder": "/ruta/al/proyecto",
+        "path_saved": "ruta de {project}: {path}",
+        "path_cleared": "ruta de {project}: sin definir",
+        "path_none": "sin ruta en esta máquina",
+        "path_others": "en otras máquinas",
+        "row_sync_up": "guardar entera (esta máquina la grabó)",
+        "row_sync_down": "traer acá",
+        "sync_project_title": "Sincronizar el proyecto entero",
+        "sync_project_what": "{n} conversación(es) de {project} se guardan enteras",
+        "sync_project_done": "{ok} guardadas · {fail} fallaron",
+        "sync_project_none": "no hay nada que guardar en {project}",
     },
     "en": {
         "tab_help": "Help",
@@ -403,6 +421,24 @@ STRINGS = {
 
         "c_teal": "turquoise", "c_green": "green", "c_violet": "violet",
         "c_blue": "blue", "c_yellow": "yellow", "c_red": "red",
+
+        # the redesign: the one-column home and the two row buttons
+        "sec_stats": "Overview", "sec_projects": "Projects",
+        "on": "ON", "off": "OFF",
+        "k_row_sync": "sync", "k_row_path": "path",
+        "path_title": "Project path on this machine",
+        "path_what": "Where {project} lives here. Saved per machine, travels in the repo.",
+        "path_placeholder": "/path/to/project",
+        "path_saved": "{project} path: {path}",
+        "path_cleared": "{project} path: unset",
+        "path_none": "no path on this machine",
+        "path_others": "on other machines",
+        "row_sync_up": "keep in full (this machine recorded it)",
+        "row_sync_down": "bring it here",
+        "sync_project_title": "Sync the whole project",
+        "sync_project_what": "{n} conversation(s) of {project} kept in full",
+        "sync_project_done": "{ok} kept · {fail} failed",
+        "sync_project_none": "nothing to keep in {project}",
     },
 }
 

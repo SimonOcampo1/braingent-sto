@@ -339,7 +339,8 @@ def test_every_card_of_the_home_is_reachable_in_one_column():
 
     Not clipped — absent, with no scroll in the pane, so no key and no mouse
     could reach them. A `1fr` card inside an `auto` grid row resolves to the
-    card's full natural height, and the first one took the screen.
+    card's full natural height, and the first one took the screen. The home is
+    two cards now instead of four, and the rule it broke is the same one.
     """
     async def go():
         app = tui_app.StoApp()
@@ -352,7 +353,7 @@ def test_every_card_of_the_home_is_reachable_in_one_column():
             home.scroll_end(animate=False)
             await pilot.pause()
             titles = [c.border_title for c in home.query(tui_app.Card)]
-            assert "OVERALL" in titles, titles
+            assert "USAGE" in titles, titles
             assert not app.query_one("#more").display, "the arrow stayed at the bottom"
 
     asyncio.run(go())
@@ -396,20 +397,30 @@ def test_a_narrow_split_shows_one_level_and_walks_between_them():
     asyncio.run(go())
 
 
-def test_a_wide_split_shows_every_level_at_once():
-    """The wide behaviour does not change: `level` only says who holds the
-    focus. Widening is not supposed to unwind anything."""
+def test_a_split_is_a_hierarchy_at_every_width():
+    """Sessions and memories show one panel at a time however wide the window
+    is: the projects, and then what one project holds.
+
+    They used to sit side by side above 100 columns, which put a project rail
+    too narrow to read a name in next to five hundred rows belonging to
+    projects nobody had chosen yet. `Esc` climbs back out.
+    """
     async def go():
         app = tui_app.StoApp()
         async with app.run_test(size=(140, 30)) as pilot:
             await app.workers.wait_for_complete()
             await pilot.press("2")
             await pilot.pause()
+            assert app.query_one("#groups").display
+            assert not app.query_one("#rows").display, "the sessions were on screen"
             await pilot.press("enter")
             await pilot.pause()
-            assert app.query_one("#groups").display
+            assert not app.query_one("#groups").display
             assert app.query_one("#rows").display
             assert app.query_one("#t-rows", tui_app.Table).has_focus
+            await pilot.press("escape")
+            await pilot.pause()
+            assert app.query_one("#groups").display
 
     asyncio.run(go())
 
@@ -435,8 +446,19 @@ def test_tab_walks_panels_and_the_tab_bar_is_somewhere_you_can_stand():
                 assert app.tab == 1, "tab changed the pestana, not the panel"
                 if app.focused is not None:
                     seen.add(app.focused.id)
-            assert {"t-groups", "t-rows"} <= seen, seen
+            # the ring is the panels *on screen*, and a hierarchy shows one
+            # level at a time: the projects and the box that filters them
+            assert {"t-groups", "search"} <= seen, seen
+            assert "t-rows" not in seen, seen
             assert "tabs" in seen, seen
+
+            # one level in, the ring is the level you are on
+            app.query_one("#t-groups", tui_app.Table).focus()
+            await pilot.press("enter")
+            await pilot.pause()
+            assert app.focused is not None and app.focused.id == "t-rows"
+            await pilot.press("escape")
+            await pilot.pause()
 
             app.query_one("#tabs").focus()
             await pilot.pause()
@@ -576,12 +598,13 @@ def test_a_column_sorts_the_datum_and_not_the_cell():
             # `when` is column 0 and the first step of the cycle
             await pilot.press("s")
             await pilot.pause()
-            assert rows.sort_by == (0, False), rows.sort_by
+            # column 2: the first two are the buttons, and a button does not sort
+            assert rows.sort_by == (2, False), rows.sort_by
             stamps = [r["mtime"] for r in pane.rows]
             assert stamps == sorted(stamps), "when did not sort by time"
 
             # walk to `errors` and check it sorts by the count, not the markup
-            while rows.sort_by is not None and rows.sort_by[0] != 4:
+            while rows.sort_by is not None and rows.sort_by[0] != 5:
                 await pilot.press("s")
                 await pilot.pause()
             assert rows.sort_by is not None, "errors never came up in the cycle"
@@ -790,11 +813,19 @@ def test_a_coloured_cell_scrolls_too():
         tui_app.cli.cached_sessions = fake
         try:
             app = tui_app.StoApp()
-            async with app.run_test(size=(120, 20)) as pilot:
+            # narrow on purpose: a marquee is what a cell does when its column
+            # cut it, so the column has to be able to cut it
+            async with app.run_test(size=(70, 20)) as pilot:
                 await app.workers.wait_for_complete()
                 await pilot.press("2")
                 await pilot.pause()
                 for table_id in ("#t-groups", "#t-rows"):
+                    if table_id == "#t-rows":
+                        # one level in: the sessions are not on screen until a
+                        # project has been chosen
+                        app.query_one("#t-groups", tui_app.Table).focus()
+                        await pilot.press("enter")
+                        await pilot.pause()
                     table = app.query_one(table_id, tui_app.Table)
                     if table.row_count < 2:
                         continue
@@ -838,9 +869,16 @@ def test_keeping_a_conversation_asks_first_and_never_writes_on_escape():
                 pane = app.query_one("#sessions")
                 if not pane.rows:
                     return                      # a machine with no transcripts
-                pane.query_one("#t-rows", tui_app.Table).focus()
+                # one level in: the conversations are behind their project
+                pane.query_one("#t-groups", tui_app.Table).focus()
+                await pilot.press("enter")
                 await pilot.pause()
-                await pilot.press("k")
+                table = pane.query_one("#t-rows", tui_app.Table)
+                table.move_cursor(row=0)
+                # recorded here and never archived: `e` means keep
+                pane.rows[0]["machine"], pane.rows[0]["kept"] = None, False
+                await pilot.pause()
+                await pilot.press("e")
                 await pilot.pause()
                 assert type(app.screen).__name__ == "Confirm", app.screen
                 await pilot.press("escape")
@@ -852,10 +890,12 @@ def test_keeping_a_conversation_asks_first_and_never_writes_on_escape():
     asyncio.run(go())
 
 
-def test_bringing_a_conversation_that_was_never_kept_says_so_instead_of_failing():
-    """The two verbs are halves of one round trip, and the row says which half
-    you are on. Asking to bring a transcript nobody archived is the common
-    mistake, so it answers with the missing step rather than an engine error.
+def test_a_conversation_with_nowhere_to_go_is_not_a_write():
+    """`e` is one button with two meanings, and the row decides which.
+
+    Recorded on another machine and never archived there, it has nothing to
+    bring: the button says so and writes nothing, rather than handing the
+    engine an id it will fail on.
     """
     async def go():
         llamadas = []
@@ -870,11 +910,14 @@ def test_bringing_a_conversation_that_was_never_kept_says_so_instead_of_failing(
                 pane = app.query_one("#sessions")
                 if not pane.rows:
                     return
-                for r in pane.rows:
-                    r["kept"] = False
-                pane.query_one("#t-rows", tui_app.Table).focus()
+                pane.query_one("#t-groups", tui_app.Table).focus()
+                await pilot.press("enter")
                 await pilot.pause()
-                await pilot.press("a")          # bring it here
+                for r in pane.rows:
+                    r["machine"], r["kept"] = "otra-maquina", False
+                pane.query_one("#t-rows", tui_app.Table).move_cursor(row=0)
+                await pilot.pause()
+                await pilot.press("e")          # nothing to bring
                 await pilot.pause()
                 # no confirmation, and above all no write
                 assert type(app.screen).__name__ == "Screen", app.screen
@@ -885,9 +928,15 @@ def test_bringing_a_conversation_that_was_never_kept_says_so_instead_of_failing(
     asyncio.run(go())
 
 
-def test_the_kept_column_is_a_column_and_sorts_like_the_others():
-    """Every column on this tab sorts, and the state marker is not an exception:
-    "which of these travelled" is exactly the question you sort by."""
+def test_the_two_buttons_are_columns_and_they_never_sort():
+    """The state marker became a button: the first column says what `e` would
+    do to that row, so `kept` is on screen where you can act on it rather than
+    as a dot in a column of its own.
+
+    Neither button sorts. They are the same glyph for every row in the same
+    state, so ordering by one of them orders by nothing — `SORT_FIELDS` says
+    so with a `None`, and the count still has to match the columns.
+    """
     async def go():
         app = tui_app.StoApp()
         async with app.run_test(size=(150, 30)) as pilot:
@@ -895,12 +944,88 @@ def test_the_kept_column_is_a_column_and_sorts_like_the_others():
             await pilot.press("2")
             await pilot.pause()
             pane = app.query_one("#sessions")
-            assert "kept" in pane.SORT_FIELDS
+            assert pane.SORT_FIELDS[:2] == (None, None), pane.SORT_FIELDS
             table = pane.query_one("#t-rows", tui_app.Table)
             # one column per sort field, in the same order
             assert len(table.columns) == len(pane.SORT_FIELDS)
             if pane.rows:
                 assert all("kept" in r for r in pane.rows)
+                # the glyph is the verb: kept locally is done, unkept is a push
+                local = next((r for r in pane.rows if not r.get("machine")), None)
+                if local is not None:
+                    assert pane._todo(local) == (None if local["kept"] else "keep")
+
+    asyncio.run(go())
+
+
+def test_w_asks_where_the_project_lives_and_writes_only_on_enter():
+    """The second button on the row. A project sits at a different absolute
+    path on every machine, `claude --resume` only reads the directory matching
+    the path a session was filed against, and nothing else on the screen could
+    say what that path is here.
+
+    Escaping the prompt writes nothing, the way every other verb behaves.
+    """
+    async def go():
+        saved = []
+        real = tui_app.srv.set_project_path
+        tui_app.srv.set_project_path = lambda *a: saved.append(a)
+        try:
+            app = tui_app.StoApp()
+            async with app.run_test(size=(140, 30)) as pilot:
+                await app.workers.wait_for_complete()
+                await pilot.press("2")
+                await pilot.pause()
+                pane = app.query_one("#sessions")
+                if not pane.groups:
+                    return                       # a machine with no transcripts
+                groups = pane.query_one("#t-groups", tui_app.Table)
+                groups.focus()
+                groups.move_cursor(row=1)        # row 0 is "all", not a project
+                await pilot.pause()
+
+                await pilot.press("w")
+                await pilot.pause()
+                assert type(app.screen).__name__ == "PathPrompt", app.screen
+                await pilot.press("escape")
+                await pilot.pause()
+                assert saved == [], saved
+
+                await pilot.press("w")
+                await pilot.pause()
+                app.screen.query_one("#path-input").value = "/tmp/donde-vive"
+                await pilot.press("enter")
+                await pilot.pause()
+                assert saved == [(pane.groups[0][0], "/tmp/donde-vive")], saved
+        finally:
+            tui_app.srv.set_project_path = real
+
+    asyncio.run(go())
+
+
+def test_the_home_leads_with_the_counts_and_the_two_arrows():
+    """The dashboard was four cards of four different densities, and the one
+    number anybody opens the screen for — is there anything to sync? — was a
+    cell in a parity table.
+
+    Now it is the wordmark, the box that searches everything, the counts, and
+    the two arrows, in that order.
+    """
+    async def go():
+        app = tui_app.StoApp()
+        async with app.run_test(size=(140, 34)) as pilot:
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            body = "\n".join(screen_text(app))
+            for key in ("n_sessions", "n_projects", "n_memories", "n_skills",
+                        "n_machines"):
+                assert tui_app.i18n.t(key).upper()[:11] in body, (key, body)
+            assert "\u25b2" in body and "\u25bc" in body, body
+            # and the parity detail it dropped is on the screen that can change it
+            await pilot.press("5")
+            await pilot.pause()
+            mods = app.query_one("#t-modules", tui_app.Table)
+            assert mods.row_count, "the modules went nowhere"
 
     asyncio.run(go())
 
@@ -929,13 +1054,15 @@ def test_the_footer_offers_a_verb_only_where_it_does_something():
 
             await pilot.press("2")
             sessions = await footer()
-            assert "keep" in sessions and "bring" in sessions, sessions
-            assert "delete" not in sessions, sessions
+            # the two buttons on the row, and only those: `keep` and `bring`
+            # were two key caps for the one decision the row already makes
+            assert " e " in sessions and " w " in sessions, sessions
+            assert "delete" not in sessions and "keep" not in sessions, sessions
 
             await pilot.press("4")
             tools = await footer()
             assert "bring" in tools and "delete" in tools, tools
-            assert "keep" not in tools, tools
+            assert " e " not in tools and " w " not in tools, tools
 
     asyncio.run(go())
 
@@ -956,7 +1083,7 @@ if __name__ == "__main__":
     test_the_wordmark_goes_when_it_does_not_fit_and_not_before()
     test_every_card_of_the_home_is_reachable_in_one_column()
     test_a_narrow_split_shows_one_level_and_walks_between_them()
-    test_a_wide_split_shows_every_level_at_once()
+    test_a_split_is_a_hierarchy_at_every_width()
     test_tab_walks_panels_and_the_tab_bar_is_somewhere_you_can_stand()
     test_up_leaves_a_list_only_from_its_first_row()
     test_s_cycles_the_sort_and_comes_back_to_the_natural_order()
@@ -968,7 +1095,9 @@ if __name__ == "__main__":
     test_a_memory_shows_its_body_and_its_neighbours()
     test_a_coloured_cell_scrolls_too()
     test_keeping_a_conversation_asks_first_and_never_writes_on_escape()
-    test_bringing_a_conversation_that_was_never_kept_says_so_instead_of_failing()
-    test_the_kept_column_is_a_column_and_sorts_like_the_others()
+    test_a_conversation_with_nowhere_to_go_is_not_a_write()
+    test_the_two_buttons_are_columns_and_they_never_sort()
+    test_w_asks_where_the_project_lives_and_writes_only_on_enter()
+    test_the_home_leads_with_the_counts_and_the_two_arrows()
     test_the_footer_offers_a_verb_only_where_it_does_something()
     print("OK")
