@@ -46,10 +46,16 @@ ACCENT_CSS = {"36": "#22d3ee", "32": "#4ade80", "35": "#c084fc",
 # every one of them brings its own accent, which then fights the accent the OS
 # already has a setting for — two places deciding one colour. These take the
 # accent from `sto ui` and only decide how dark the room is.
+# `surface` is the ground itself, not a shade of it. Three tones on one screen
+# — a background, a slightly lighter card and a lighter bar again — meant "pure
+# black" was black only in the gaps between the panels, and every theme had to
+# be checked three times. One tone, and what separates a panel from the screen
+# is its outline. `panel` is what is left: the raised key-cap behind a button,
+# and nothing else.
 GROUNDS = {
-    "dark":  ("#12141a", "#171a21", "#1d212a", "#e6e8ee"),
-    "light": ("#f4f5f7", "#ffffff", "#e9ebef", "#1b1e26"),
-    "black": ("#000000", "#0a0a0a", "#141414", "#e6e8ee"),
+    "dark":  ("#12141a", "#12141a", "#242833", "#e6e8ee"),
+    "light": ("#f6f7f9", "#f6f7f9", "#e2e5ea", "#1b1e26"),
+    "black": ("#000000", "#000000", "#171717", "#e6e8ee"),
 }
 
 def theme_for(ground, accent_code):
@@ -113,16 +119,18 @@ def gauge(label, pct, note, width=36, label_w=15):
 def chip(text, state="on"):
     """A cell that reads as a button, because it is one.
 
-    A `DataTable` cannot hold a real `Button`, and a lone glyph in a column is
-    not something anybody tries to click. A filled rectangle in the accent with
-    a word in it is, and the word says what the click will do rather than
-    leaving it to be guessed from a triangle.
+    A `DataTable` cannot hold a real `Button` and cannot draw a border inside a
+    cell, so the outline is two brackets in grey with the label between them —
+    which is what a button has looked like in a terminal since before there
+    were terminals. Filling the whole chip with the accent was tried first: on
+    every row of a long list it reads as a selection, not as something to
+    press, and it fought the cursor for the same colour.
     """
-    if state == "on":
-        return f"[$background on $accent b] {text} [/]"
-    if state == "quiet":
-        return f"[$accent on $panel] {text} [/]"
-    return f"[$foreground 35%] {text} [/]"
+    body = {"on": "$foreground 90% on $panel",
+            "quiet": "$foreground 55% on $panel",
+            "accent": "$accent b on $panel"}.get(state, "$foreground 35%")
+    edge = "$foreground 20%" if state == "off" else "$foreground 40%"
+    return f"[{edge}]\\[[/][{body}] {text} [/][{edge}]][/]"
 
 
 def spark(values, width=24):
@@ -172,6 +180,15 @@ class Table(DataTable):
     not known at mount, only once the layout has run. Both problems belong to
     the table, not to six screens repeating the fix.
     """
+
+    # `←` and `→` walk the panels of the screen; `↑` and `↓` walk the rows of
+    # this one. `DataTable` binds the horizontal pair to a cell cursor it does
+    # not have in `row` mode, so without this they are two keys that look
+    # broken. Declared on the subclass, which Textual checks before the parent.
+    BINDINGS = [
+        Binding("left", "app.panel_prev", "", show=False),
+        Binding("right", "app.panel_next", "", show=False),
+    ]
 
     def __init__(self, *spec, **kw):
         kw.setdefault("cursor_type", "row")
@@ -409,17 +426,6 @@ class Table(DataTable):
         event.stop()
         self.cycle_sort(event.column_index)
 
-    def action_cursor_up(self) -> None:
-        """At the top of the list, `↑` leaves it for the tab bar.
-
-        Only at the top: holding `↑` to reach the first row has to reach the
-        first row, and a hatch that opens one press early is a hatch you fall
-        through every time you use the list normally.
-        """
-        if self.cursor_row <= 0:
-            return self.app.focus_tabs()
-        super().action_cursor_up()
-
     def fit(self) -> None:
         cols = list(self.columns.values())
         if not cols or not self.size.width or self.spec[-1][1] is not None:
@@ -453,12 +459,10 @@ class Search(Input):
     them narrow into. It sits on top of its own list, with its own label.
     """
 
-    # a one-line box has no vertical cursor for `↑` to consume, so unlike a
-    # table there is no top to reach first
-    BINDINGS = [Binding("up", "to_tabs", "", show=False)]
-
-    def action_to_tabs(self) -> None:
-        self.app.focus_tabs()
+    # `←` and `→` belong to the text while the box has the focus, so the way
+    # down into the list it filters is `↓`. A one-line box has no vertical
+    # cursor for that key to consume, which is why it is the one that is free.
+    BINDINGS = [Binding("down", "app.panel_next", "", show=False)]
 
     def __init__(self, **kw):
         # the label is the border title, not a placeholder: with both, the word
@@ -482,10 +486,6 @@ class Search(Input):
 #     uv run --no-project --with pyfiglet python -c
 #       "import pyfiglet; print(pyfiglet.Figlet(font='double_blocky').renderText('BRAINGENT STO'))"
 WORDMARK = [
-    "██▄ █▀█ ▄▀█ ▀█▀ █▄░█ █▀▀ █▀▀ █▄░█ ▀█▀  ▄▀▀ ▀█▀ █▀█",
-    "█▄█ █▀▄ █▀█ ▄█▄ █░▀█ █▄█ ██▄ █░▀█ ░█░  ▄██ ░█░ █▄█",
-]
-WORDMARK_BIG = [
     "██████╗ ██████╗  █████╗ ██╗███╗   ██╗ ██████╗ ███████╗███╗   ██╗████████╗    ███████╗████████╗ ██████╗",
     "██╔══██╗██╔══██╗██╔══██╗██║████╗  ██║██╔════╝ ██╔════╝████╗  ██║╚══██╔══╝    ██╔════╝╚══██╔══╝██╔═══██╗",
     "██████╔╝██████╔╝███████║██║██╔██╗ ██║██║  ███╗█████╗  ██╔██╗ ██║   ██║       ███████╗   ██║   ██║   ██║",
@@ -493,18 +493,46 @@ WORDMARK_BIG = [
     "██████╔╝██║  ██║██║  ██║██║██║ ╚████║╚██████╔╝███████╗██║ ╚████║   ██║       ███████║   ██║   ╚██████╔╝",
     "╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚═╝  ╚═══╝ ╚═════╝ ╚══════╝╚═╝  ╚═══╝   ╚═╝       ╚══════╝   ╚═╝    ╚═════╝",
 ]
-WORDMARK_BIG_W = max(len(line) for line in WORDMARK_BIG)
+
+WORDMARK_STACK = [
+    "██████╗ ██████╗  █████╗ ██╗███╗   ██╗ ██████╗ ███████╗███╗   ██╗████████╗",
+    "██╔══██╗██╔══██╗██╔══██╗██║████╗  ██║██╔════╝ ██╔════╝████╗  ██║╚══██╔══╝",
+    "██████╔╝██████╔╝███████║██║██╔██╗ ██║██║  ███╗█████╗  ██╔██╗ ██║   ██║",
+    "██╔══██╗██╔══██╗██╔══██║██║██║╚██╗██║██║   ██║██╔══╝  ██║╚██╗██║   ██║",
+    "██████╔╝██║  ██║██║  ██║██║██║ ╚████║╚██████╔╝███████╗██║ ╚████║   ██║",
+    "╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚═╝  ╚═══╝ ╚═════╝ ╚══════╝╚═╝  ╚═══╝   ╚═╝",
+    "",
+    "    ███████╗████████╗ ██████╗",
+    "    ██╔════╝╚══██╔══╝██╔═══██╗",
+    "    ███████╗   ██║   ██║   ██║",
+    "    ╚════██║   ██║   ██║   ██║",
+    "    ███████║   ██║   ╚██████╔╝",
+    "    ╚══════╝   ╚═╝    ╚═════╝",
+]
+
 WORDMARK_W = max(len(line) for line in WORDMARK)
+WORDMARK_STACK_W = max(len(line) for line in WORDMARK_STACK)
+# what is left when even the stacked face does not fit. Same name, no face.
+WORDMARK_FLAT = "braingent STO"
 
 
 class Wordmark(Static):
-    """The name of the thing, as big as the window can hold.
+    """The name of the thing, in one typeface, as big as the window can hold.
 
-    Two faces and not one: the tall one is the face of the product and the flat
-    one is what still fits when the window cannot take it. Which of the two is
-    on screen is a class the app puts on itself from `on_resize`, the same way
-    every other breakpoint here works.
+    Three sizes and one face. A second typeface for the narrow case was tried
+    and it is worse than a smaller logo: the product looks like two products.
+    So the name wraps to two blocks before it changes anything about how it is
+    drawn, and only gives up the face entirely when even the wrapped one does
+    not fit — at which point there is no room for a logo at all, just a name.
+
+    Which size is on screen is a class the app puts on itself from `on_resize`,
+    the same way every other breakpoint here works.
     """
+
+    def art(self):
+        if self.app.has_class("mark-flat"):
+            return [WORDMARK_FLAT]
+        return WORDMARK_STACK if self.app.has_class("mark-stack") else WORDMARK
 
     def on_mount(self) -> None:
         self.repaint()
@@ -513,7 +541,7 @@ class Wordmark(Static):
         # padded to a rectangle before it is centred: the art is ragged on the
         # right, and `text-align: center` centres every line on its own, which
         # shears a six-row letterform into a staircase
-        art = WORDMARK_BIG if self.app.has_class("grand") else WORDMARK
+        art = self.art()
         width = max(len(line) for line in art)
         self.update(Content.from_markup(
-            "\n".join(f"[$accent]{line:<{width}}[/]" for line in art)))
+            "\n".join(f"[$accent b]{line:<{width}}[/]" for line in art)))
