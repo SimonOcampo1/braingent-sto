@@ -477,8 +477,10 @@ class Split(Levels, Container):
             # wide enough for the word inside the chip: a button with no label
             # is a glyph, and a glyph is not something anybody tries to click
             cols = [("", 11), ("", 8)] + cols
-        yield Card(t("sec_projects"), Table(*cols, id="t-groups"), id="groups")
-        yield Card(self.TITLE, self.make_table(), id="rows")
+        # padded: a title sitting on a rule instead of inside a box touches the
+        # line at both ends, and `PROJECTS` welded to a dash is not a heading
+        yield Card(f" {t('sec_projects')} ", Table(*cols, id="t-groups"), id="groups")
+        yield Card(f" {self.TITLE} ", self.make_table(), id="rows")
 
     def on_mount(self) -> None:
         self.q = ""          # the search text; `self.query` is the DOM query
