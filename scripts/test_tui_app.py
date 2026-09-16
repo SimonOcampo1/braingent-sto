@@ -120,6 +120,27 @@ def test_a_screen_renders_with_its_chrome_pinned():
     asyncio.run(go())
 
 
+def _is_tint(hex_colour, ground, accent):
+    """Is this the accent laid over the ground at some opacity?
+
+    A cursor is allowed to be one — that is how a highlight stays legible
+    without repainting the text. A *tone* is not: the grey `background-tint`
+    Textual adds by itself lands between the ground and the foreground, so its
+    channels move by three different fractions. A real blend moves all three by
+    the same one, which is what this checks.
+    """
+    def rgb(value):
+        value = value.lstrip("#")
+        return [int(value[i:i + 2], 16) for i in (0, 2, 4)]
+    here, base, top = rgb(hex_colour), rgb(ground), rgb(accent)
+    ratios = []
+    for got, a, b in zip(here, base, top):
+        if abs(b - a) < 8:
+            continue                  # that channel says nothing about the mix
+        ratios.append((got - a) / (b - a))
+    return bool(ratios) and max(ratios) - min(ratios) < 0.08
+
+
 def test_pure_black_is_pure_black_everywhere():
     """A theme is one ground, and what separates a panel from the screen is its
     outline — not a second shade behind it.
@@ -157,8 +178,72 @@ def test_pure_black_is_pure_black_everywhere():
                             col = getattr(style, "bgcolor", None)
                             if col is not None:
                                 painted.add(col.get_truecolor().hex.lower())
-                    stray = painted - allowed
+                    stray = {c for c in painted - allowed
+                             if not _is_tint(c, theme.background, theme.accent)}
                     assert not stray, (ground, key, sorted(stray), sorted(allowed))
+
+    asyncio.run(go())
+
+
+def _polarity(app, table, y):
+    """(text luminance, ground luminance) averaged over one painted row."""
+    def lum(color):
+        out = 0.0
+        for channel, weight in zip(color.get_truecolor(), (0.2126, 0.7152, 0.0722)):
+            c = channel / 255
+            out += weight * (c / 12.92 if c <= 0.03928
+                             else ((c + 0.055) / 1.055) ** 2.4)
+        return out
+    ink, ground, n = 0.0, 0.0, 0
+    for seg in app.screen._compositor.render_strips()[y]:
+        style = getattr(seg.style, "rich_style", seg.style)
+        if not seg.text.strip() or style.color is None or style.bgcolor is None:
+            continue
+        ink += lum(style.color) * len(seg.text)
+        ground += lum(style.bgcolor) * len(seg.text)
+        n += len(seg.text)
+    assert n, "nothing with ink on that row"
+    return ink / n, ground / n
+
+
+def test_the_row_cursor_keeps_the_polarity_of_the_screen():
+    """The selected row goes monochrome — `DataTable` applies the cursor's own
+    foreground over the cell's spans and it carries one by default, so every
+    table works that way and this one is no exception.
+
+    What must not change is the direction. The screen is light text on a dark
+    ground; the cursor used to paint the row a slab of accent and force the
+    text to `$background`, so one row came out dark-on-bright — the row you
+    selected in order to look at it turned into a different design, the grey
+    outline of its buttons went black, and the dimmed states disappeared. A
+    tint keeps the ground recognisably the ground.
+
+    Checked against every accent, because "is this legible" is not a question a
+    single colour can answer for the other five.
+    """
+    async def go():
+        for _, code in tui_app.ui.ACCENTS:
+            app = tui_app.StoApp()
+            async with app.run_test(size=(132, 30)) as pilot:
+                tui_app.ui.ACCENT = code
+                app.apply_theme()
+                await app.workers.wait_for_complete()
+                await pilot.press("2")
+                await pilot.pause()
+                table = app.query_one("#t-groups", tui_app.Table)
+                if table.row_count < 3:
+                    continue
+                table.focus()
+                table.move_cursor(row=2)
+                await pilot.pause()
+                head = table.region.y + 1
+                plain_ink, plain_bg = _polarity(app, table, head + 1)
+                ink, bg = _polarity(app, table, head + 2)
+                assert (ink > bg) is (plain_ink > plain_bg), \
+                    (code, "the cursor row inverted", round(ink, 3), round(bg, 3))
+                # and a tint, not a slab: the ground stays nearer the screen's
+                # own than the accent's
+                assert abs(bg - plain_bg) < 0.25, (code, round(bg, 3), round(plain_bg, 3))
 
     asyncio.run(go())
 
@@ -478,28 +563,43 @@ def test_a_narrow_split_shows_one_level_and_walks_between_them():
     asyncio.run(go())
 
 
-def test_a_split_is_a_hierarchy_at_every_width():
-    """Sessions and memories show one panel at a time however wide the window
-    is: the projects, and then what one project holds.
+def test_a_split_lays_the_hierarchy_out_or_walks_it():
+    """Sessions and memories are two lists — the projects, and what one project
+    holds — and the window decides whether you see both or one.
 
-    They used to sit side by side above 100 columns, which put a project rail
-    too narrow to read a name in next to five hundred rows belonging to
-    projects nobody had chosen yet. `Esc` climbs back out.
+    Wide enough for two lists: side by side, each in its own box, and the
+    search box on top belongs to this tab and filters this tab. Under that, the
+    same hierarchy walked instead of laid out: the rail would be too narrow to
+    read a project name in, and the rows would belong to projects nobody had
+    chosen. `→` goes in and `←` comes back out, and the widgets stay mounted
+    either way, so resizing across the breakpoint keeps your place.
     """
     async def go():
         app = tui_app.StoApp()
-        async with app.run_test(size=(140, 30)) as pilot:
+        async with app.run_test(size=(170, 30)) as pilot:
+            await app.workers.wait_for_complete()
+            for tab in ("2", "3"):
+                await pilot.press(tab)
+                await pilot.pause()
+                assert app.query_one("#groups").display, tab
+                assert app.query_one("#rows").display, tab
+                # every tab's own box filters its own tab
+                pane = app.panes[app.tab]
+                assert pane.query_one("#search").display, tab
+
+        app = tui_app.StoApp()
+        async with app.run_test(size=(120, 30)) as pilot:
             await app.workers.wait_for_complete()
             await pilot.press("2")
             await pilot.pause()
             assert app.query_one("#groups").display
             assert not app.query_one("#rows").display, "the sessions were on screen"
-            await pilot.press("enter")
+            await pilot.press("right")
             await pilot.pause()
-            assert not app.query_one("#groups").display
             assert app.query_one("#rows").display
+            assert not app.query_one("#groups").display
             assert app.query_one("#t-rows", tui_app.Table).has_focus
-            await pilot.press("escape")
+            await pilot.press("left")
             await pilot.pause()
             assert app.query_one("#groups").display
 
@@ -1182,6 +1282,7 @@ if __name__ == "__main__":
     test_the_accent_and_the_ground_are_one_theme_each()
     test_a_screen_renders_with_its_chrome_pinned()
     test_pure_black_is_pure_black_everywhere()
+    test_the_row_cursor_keeps_the_polarity_of_the_screen()
     test_a_document_has_its_own_keys()
     test_focus_starts_on_the_left_and_a_project_hands_it_to_the_right()
     test_the_last_column_takes_the_width_the_others_leave()
@@ -1195,7 +1296,7 @@ if __name__ == "__main__":
     test_the_wordmark_shrinks_before_it_disappears()
     test_the_whole_home_is_reachable_in_a_short_window()
     test_a_narrow_split_shows_one_level_and_walks_between_them()
-    test_a_split_is_a_hierarchy_at_every_width()
+    test_a_split_lays_the_hierarchy_out_or_walks_it()
     test_tab_walks_tabs_and_the_arrows_walk_everything_inside_one()
     test_s_cycles_the_sort_and_comes_back_to_the_natural_order()
     test_a_column_sorts_the_datum_and_not_the_cell()

@@ -172,43 +172,30 @@ Search:focus { border: round $accent; border-title-color: $accent; }
 #stats-body { width: 100%; height: auto; text-align: center; margin-bottom: 2; }
 #usage-body { width: auto; height: auto; }
 
-/* Sessions and memories are a hierarchy, so they are one panel at a time at
- * every width: the projects, and then what one project holds. Two columns side
- * by side meant a project rail too narrow to read a name in, next to five
- * hundred rows belonging to projects you had not chosen. */
-.split { layout: vertical; }
-.split > Search { width: 100%; margin-bottom: 1; }
-/* one panel at a time is one thing on screen, so there is nothing to frame:
- * the box around it becomes a rule with the panel's name on it. The title is
- * the only thing left saying which project you walked into, which is why the
- * top edge stays. */
-.split > .card {
-    height: 1fr;
-    min-height: 6;
-    border: none;
-    border-top: solid $foreground 25%;
-    padding: 0;
-}
-.split > .card:focus-within { border: none; border-top: solid $accent; }
+/* Sessions and memories are two lists: the projects, and what one project
+ * holds. Side by side while there is room for two lists — under that the rail
+ * is too narrow to read a name in and the rows belong to projects nobody has
+ * chosen — and one panel at a time below it, which is the same hierarchy
+ * walked instead of laid out.
+ */
+.split { layout: grid; grid-size: 2 2; grid-columns: 1fr 2fr; grid-rows: 3 1fr; grid-gutter: 1 1; }
+.split > Search { column-span: 2; margin-bottom: 0; }
+.split > .card { height: 1fr; min-height: 6; }
 .split DataTable { height: 1fr; max-height: 100%; }
 /* tools is three panels: the kinds stay put on the left and the two on the
- * right are what changes as you walk in */
-/* the list gets more room than the detail beside it: the list is what you
- * read and the panel next to it is the footnote */
-.split.three-way {
-    layout: grid; grid-size: 3 2; grid-columns: 18 3fr 2fr;
-    grid-rows: 3 1fr; grid-gutter: 1 1;
-}
-.split.three-way > Search { column-span: 3; margin-bottom: 0; }
-/* three panels side by side is the one case where a rule is not enough: the
- * boxes are what say where one ends and the next begins. The flat rule above
- * is for a screen showing a single panel, which has nothing to be told apart
- * from. */
-.split.three-way > .card {
-    border: round $foreground 25%;
-    padding: 0 1;
-}
-.split.three-way > .card:focus-within { border: round $accent; }
+ * right are what changes as you walk in. The list gets more room than the
+ * detail beside it: the list is what you read and the panel next to it is the
+ * footnote. */
+.split.three-way { grid-size: 3 2; grid-columns: 18 3fr 2fr; }
+.split.three-way > Search { column-span: 3; }
+
+/* one panel at a time, at whichever width its own pane says */
+.stacked .split.two-way, .narrow .split.three-way { layout: vertical; }
+.stacked .split.two-way > Search,
+.narrow .split.three-way > Search { width: 100%; margin-bottom: 1; }
+.stacked .split.two-way > .card,
+.narrow .split.three-way > .card { height: 1fr; min-height: 6; }
+
 .three { layout: grid; grid-size: 2 2; grid-columns: 1fr 1fr; grid-rows: 1fr 1fr; grid-gutter: 1 1; }
 #prefs { column-span: 1; }
 #remote { column-span: 2; }
@@ -248,11 +235,33 @@ DataTable > .datatable--header {
     color: $foreground 50%;
     text-style: none;
 }
-/* the cursor is bright only where the keys are going; elsewhere it is a
- * remembered place, not an active one */
-DataTable > .datatable--cursor { background: $panel; color: $foreground; }
-DataTable:focus > .datatable--cursor { background: $accent; color: $background; }
-DataTable > .datatable--hover { background: $panel; }
+/* The cursor is a tint of the accent, never a slab of it.
+ *
+ * A cell carries its own colours — a button outline, an error count in red, a
+ * machine name in the accent — and every one of those was picked to be legible
+ * on the ground. Replacing the ground with solid accent and forcing the text
+ * to `$background` made a button's grey label black-on-cyan and its outline
+ * invisible: markup that sets a colour ignores the cursor's, and markup that
+ * does not gets a colour chosen for a different background. A tint leaves the
+ * ground recognisably the ground, so every cell in the row stays as legible as
+ * it was — whatever the accent happens to be.
+ *
+ * The row still goes monochrome — `DataTable` applies the cursor's foreground
+ * over the cell's own spans and it carries one by default, so there is no way
+ * to keep a span's colour under a cursor. Every table does that. What must not
+ * change is the *direction*: the screen is light text on a dark ground, and
+ * one row of dark text on a bright ground is the row you were looking at
+ * turning into a different design. That is why it is a tint and not a slab.
+ *
+ * Bright only where the keys are going; elsewhere it is a remembered place,
+ * not an active one. */
+DataTable > .datatable--cursor { background: $accent 12%; color: $foreground; }
+DataTable:focus > .datatable--cursor {
+    background: $accent 35%;
+    color: $foreground;
+    text-style: bold;
+}
+DataTable > .datatable--hover { background: $accent 8%; }
 
 /* ── a reader: one document, scrolled ── */
 
@@ -331,12 +340,6 @@ Toast.-error { border-left: outer $error; }
 .narrow #wordmark { margin: 0 0 1 0; }
 .narrow #search-wrap > Search { margin-bottom: 1; }
 .narrow #stats-body { margin-bottom: 1; }
-/* not a grid here: a grid keeps a row for a panel that is hidden, so the one
- * panel on screen inherited the three rows reserved for the search box and
- * the list vanished under its own header. A vertical stack only lays out what
- * is displayed. */
-.narrow .split { layout: vertical; }
-.narrow .split > Search { width: 100%; margin-bottom: 1; }
 .narrow .three { grid-size: 1 3; grid-columns: 1fr; grid-rows: auto auto auto; }
 .narrow #prefs, .narrow #remote { column-span: 1; }
 .narrow .two { grid-size: 1 2; grid-columns: 1fr; grid-rows: auto auto; }
@@ -349,14 +352,18 @@ Toast.-error { border-left: outer $error; }
 .narrow .card DataTable { height: auto; max-height: 14; }
 .narrow .card VerticalScroll { height: auto; max-height: 14; }
 
-/* A split in one column shows one panel at a time, and one panel takes the
- * screen -- there is nothing under it to leave room for. So these keep `1fr`
- * while the stacking panes go to `auto`, and they scroll inside the table the
- * way they always did rather than scrolling the pane.
+/* A split showing one panel at a time gives it the screen -- there is nothing
+ * under it to leave room for. So these keep `1fr` while the stacking panes go
+ * to `auto`, and they scroll inside the table the way they always did rather
+ * than scrolling the pane.
  *
  * `height: auto` on a `DataTable` is not the answer here: it measures to one
- * row and the list disappears under its own header. */
-.narrow .split > .card { height: 1fr; min-height: 6; }
+ * row and the list disappears under its own header.
+ *
+ * And not a grid: a grid keeps a row for a panel that is hidden, so the one
+ * panel on screen inherited the three rows reserved for the search box and
+ * vanished under its own header. A vertical stack only lays out what is
+ * displayed. Both live in the block above, next to the breakpoint they answer. */
 .narrow .split DataTable { height: 1fr; max-height: 100%; }
 .narrow .split VerticalScroll { height: 1fr; max-height: 100%; }
 
