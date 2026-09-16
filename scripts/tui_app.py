@@ -32,7 +32,7 @@ from textual.screen import ModalScreen, Screen  # noqa: E402
 from textual.widgets import Footer, Input, Markdown, Static  # noqa: E402
 
 from tui_widgets import (  # noqa: E402
-    GROUNDS, WORDMARK_BIG_W, WORDMARK_W, Card, Search, Table, Wordmark,
+    GROUNDS, WORDMARK_STACK_W, WORDMARK_W, Card, Search, Table, Wordmark,
     ago, chip, clip, esc, gauge, pill, spark, theme_for)
 
 t = i18n.t
@@ -281,8 +281,6 @@ class Reader(Screen):
         self._markdown = markdown and isinstance(body, str)
 
     def compose(self) -> ComposeResult:
-        with Container(id="chrome"):
-            yield Static(self.app.topbar_content(), id="topbar")
         with Container(id="reader"):
             with Card(self._title, upper=False):
                 with VerticalScroll(id="doc-scroll"):
@@ -461,6 +459,17 @@ class Split(Levels, Container):
     highlighted, hovered and took focus differently, on one screen.
     """
     GROUP_W = 30
+
+    @staticmethod
+    def _btn_w(*keys):
+        """How wide a button column has to be for the words it will hold.
+
+        Measured, not guessed: `[ ▲ Guardar ]` is three characters longer than
+        `[ ▲ Keep ]`, and a column tuned to the English label cuts the Spanish
+        one in half the moment somebody switches language.
+        """
+        return max(len(t(k)) for k in keys) + 6   # "[ " + glyph + " " + label + " ]"
+
     # two panels: the third thing you look at is a whole document and it has
     # its own screen
     LEVELS = ("groups", "rows")
@@ -476,7 +485,8 @@ class Split(Levels, Container):
         if self.ROW_BUTTONS:
             # wide enough for the word inside the chip: a button with no label
             # is a glyph, and a glyph is not something anybody tries to click
-            cols = [("", 11), ("", 8)] + cols
+            cols = [("", self._btn_w("btn_keep", "btn_local")),
+                    ("", self._btn_w("btn_path"))] + cols
         # padded: a title sitting on a rule instead of inside a box touches the
         # line at both ends, and `PROJECTS` welded to a dash is not a heading
         yield Card(f" {t('sec_projects')} ", Table(*cols, id="t-groups"), id="groups")
@@ -516,7 +526,7 @@ class Split(Levels, Container):
             todo = entry[3] if len(entry) > 3 else 0
             buttons = [Content.from_markup(
                            chip(f"\u25b2 {t('btn_keep')}") if todo
-                           else chip(f"\u25cf {t('btn_done')}", "off")),
+                           else chip(t('btn_local'), "off")),
                        Content.from_markup(
                            chip(f"\u2302 {t('btn_path')}", "quiet"
                                 if known.get(name, {}).get(srv.LOCAL_MACHINE)
@@ -574,7 +584,13 @@ class Split(Levels, Container):
         self.fill()
 
     def on_input_submitted(self, event) -> None:
-        self.query_one("#t-rows", Table).focus()
+        """`↵` in the box goes to what it filtered.
+
+        Through `open()` and not straight to the table: with one panel on
+        screen at a time the row list is not displayed yet, and focusing a
+        hidden widget focuses nothing.
+        """
+        self.open()
 
     def preview(self, index) -> None:
         pass
@@ -627,7 +643,9 @@ class Sessions(Split):
         # the buttons are two-tuples: a column with a third element is one `s`
         # will stop on, and the same glyph for every row in a state sorts by
         # nothing
-        return Table(("", 11), ("", 8),
+        return Table(("", self._btn_w("btn_keep", "btn_bring",
+                                      "btn_local", "btn_remote")),
+                     ("", self._btn_w("btn_path")),
                      (t("col_when"), 10, "data"), (t("col_project"), 18, "data"),
                      (t("col_prompts"), 7, "data"),
                      (t("col_errors"), 7, "data"), (t("col_machine"), 12, "data"),
@@ -676,7 +694,11 @@ class Sessions(Split):
             return chip(f"▲ {t('btn_keep')}")
         if todo == "bring":
             return chip(f"▼ {t('btn_bring')}")
-        return chip(f"● {t('btn_done')}", "off")
+        # not "done": the two rows that have nothing to do got there by
+        # opposite routes, and which one you are looking at is the thing worth
+        # knowing. One is here and in the repo; the other is only elsewhere.
+        return chip(t("btn_local") if not row.get("machine") else t("btn_remote"),
+                    "off")
 
     def _home(self, project):
         """The path button. Filled while this machine has not said where the
@@ -1146,6 +1168,9 @@ class Home(Container):
             yield Static(id="stats-body")
             with Container(id="usage-wrap"):
                 yield Static(id="usage-body")
+            # where the top bar went: standing facts, at the foot of the one
+            # screen that is about standing facts
+            yield Static(id="where-body")
 
     # the box fires per keystroke and a search is a tenth of a second even with
     # the index warm -- `difflib` is doing real work. It runs when you stop
@@ -1270,7 +1295,7 @@ class Home(Container):
                                              ("\u25bc", "to_pull")))
         else:
             arrows = "   ".join(
-                chip(f"{a} {n}  {t(k)}", "on" if n else "off")
+                chip(f"{a} {n}  {t(k)}", "accent" if n else "off")
                 for a, n, k in (("\u25b2", app.to_push, "to_push"),
                                 ("\u25bc", app.to_pull, "to_pull")))
             parts = " \u00b7 ".join(ui.preview_parts(up) + ui.preview_parts(down))
@@ -1308,6 +1333,7 @@ class Home(Container):
                          f"[$foreground 45%]   {costs[-1]:.0f}[/]")
         self.query_one("#usage-body", Static).update(Content.from_markup(
             "\n".join(usage) or f"[$foreground 60%]{t('no_usage')}[/]"))
+        self.query_one("#where-body", Static).update(app.where_content())
 
 
 class Config(Container):
@@ -1462,24 +1488,14 @@ class Help(Container):
 # ── the app ──
 
 class TabBar(Container):
-    """The row of tabs, and a place the keyboard can stand.
+    """The row of tabs. Nothing focuses it, because nothing has to.
 
-    `Tab` is the natural key for walking the panels inside a screen and it was
-    spent on walking the screens themselves, which left the panels reachable
-    only with a mouse. Moving it means the bar needs its own way in, so it
-    takes focus like anything else: from `Tab` wrapping round the end of the
-    pane, or from `↑` at the top of the first list.
+    It used to be a place the keyboard could stand, reachable by `Tab` wrapping
+    past the last panel or by `↑` at the top of a list — two hatches that
+    existed only because `Tab` had been spent on walking panels. `Tab` walks
+    tabs again, from anywhere, so the bar has no keys of its own and no state:
+    it is a row of six things you can also click.
     """
-    can_focus = True
-
-    BINDINGS = [
-        Binding("left", "app.prev_tab", "", show=False),
-        Binding("right", "app.next_tab", "", show=False),
-        Binding("down,enter,escape", "leave", "", show=False),
-    ]
-
-    def action_leave(self) -> None:
-        self.app.action_panel_next()
 
 
 class StoApp(App):
@@ -1491,10 +1507,15 @@ class StoApp(App):
 
     BINDINGS = [
         *[Binding(str(i + 1), f"tab({i})", "", show=False) for i in range(len(TABS))],
-        # priority: Tab is the library's focus-next by default, and ours has to
-        # wrap through the tab bar rather than wander the whole DOM
-        Binding("tab", "panel_next", "panel", priority=True),
-        Binding("shift+tab", "panel_prev", "", show=False, priority=True),
+        # `Tab` walks tabs and nothing else -- that is what the key is called
+        # and what every other tabbed thing does with it. It has to be
+        # `priority` or the library spends it on its own focus-next.
+        Binding("tab", "next_tab", "tabs", priority=True),
+        Binding("shift+tab", "prev_tab", "", show=False, priority=True),
+        # and the panels inside a screen are the horizontal axis: `←` out, `→`
+        # in. Not priority, so an `Input` keeps its own cursor keys.
+        Binding("left", "panel_prev", "", show=False),
+        Binding("right", "panel_next", "", show=False),
         Binding("enter", "open", "", show=False, priority=True),
         Binding("escape", "back", "", show=False),
         Binding("p", "sync('push')", "PUSH"),
@@ -1601,24 +1622,30 @@ class StoApp(App):
 
     # ── chrome ──
 
-    def topbar_content(self) -> Content:
+    def where_content(self) -> Content:
+        """Which repo, which agent, which machine.
+
+        It was a bar pinned over every screen, saying the name of the app on a
+        screen with the name of the app on it and then three facts that change
+        about once a year. Three lines of chrome for one line of standing
+        information. It lives at the foot of the home now: still one glance
+        away, and not in the way of the six screens that do change.
+        """
         remote = (self.sync.get("remote") or "").replace("https://", "").removesuffix(".git")
-        sep = "[$foreground 30%]  │  [/]"
+        sep = "[$foreground 20%]   ·   [/]"
         return Content.from_markup(
-            f"[$accent b]braingent STO[/]{sep}"
-            f"[$foreground 60%]repo [/]{esc(remote) or t('no_remote')}{sep}"
-            f"[$foreground 60%]agent [/]{srv.agents.label()}{sep}"
-            f"[$foreground 60%]{t('col_machine')} [/]{srv.LOCAL_MACHINE}")
+            f"[$foreground 40%]repo [/][$foreground 65%]{esc(remote) or t('no_remote')}[/]{sep}"
+            f"[$foreground 40%]agent [/][$foreground 65%]{srv.agents.label()}[/]{sep}"
+            f"[$foreground 40%]{t('col_machine')} [/][$foreground 65%]{srv.LOCAL_MACHINE}[/]")
 
     def compose(self) -> ComposeResult:
         # one container docked to the top and not two widgets each docked to it:
         # docking is to an edge, so two of them land on the same row and the
         # second draws over the first
         with Container(id="chrome"):
-            yield Static(self.topbar_content(), id="topbar")
             with TabBar(id="tabs"):
                 for i, key in enumerate(TABS):
-                    yield Static(f" {t(key)} ", classes="tab", id=f"tab-{i}")
+                    yield Static(t(key).upper(), classes="tab", id=f"tab-{i}")
         yield Home(id="home", classes="home")
         yield Sessions(id="sessions", classes="split")
         yield Memory(id="memory", classes="split")
@@ -1655,18 +1682,22 @@ class StoApp(App):
         # here: a resize that re-ran the screens made dragging a window feel
         # like mud.
         #
-        # Three and not one, because they answer three different questions.
-        # `narrow` is "do two columns fit"; `tiny` and `short` are "does the
-        # wordmark fit", which is a smaller box with its own pair of numbers.
+        # `narrow` is "do two columns fit"; `short` is "is there height to
+        # spend on a banner at all"; the two `mark-` classes are which of the
+        # wordmark's three sizes the window can hold.
         self.set_class(self.size.width < 100, "narrow")
-        self.set_class(self.size.width < WORDMARK_W + 5, "tiny")
         self.set_class(self.size.height < 24, "short")
-        # the tall face needs both a wide window and the rows to spend on it;
-        # under either, the flat one still says the name
-        grand = (self.size.width >= WORDMARK_BIG_W + 6
-                 and self.size.height >= 30)
-        if grand != self.has_class("grand"):
-            self.set_class(grand, "grand")
+        # One typeface, three sizes: the name on one line while it fits, wrapped
+        # to two blocks while *that* fits, and plain text when there is no room
+        # for a logo at all. `tiny` is the same question the wordmark asks, so
+        # it is answered here rather than kept as a second breakpoint that has
+        # to be remembered to agree with this one.
+        w, h = self.size.width, self.size.height
+        stack = w < WORDMARK_W + 6 and h >= 32
+        flat = w < WORDMARK_STACK_W + 6 or (w < WORDMARK_W + 6 and h < 32)
+        if (stack, flat) != (self.has_class("mark-stack"), self.has_class("mark-flat")):
+            self.set_class(stack, "mark-stack")
+            self.set_class(flat, "mark-flat")
             self.query_one("#wordmark", Wordmark).repaint()
         # re-applied because which panels are displayed depends on `narrow`,
         # and this is the moment it changed. Toggling `display` on three
@@ -1695,7 +1726,6 @@ class StoApp(App):
         # before the first frame.
         self._repaint()
         self.query_one("#wordmark", Wordmark).repaint()
-        self.query_one("#topbar", Static).update(self.topbar_content())
 
     @property
     def panes(self):
@@ -1725,10 +1755,7 @@ class StoApp(App):
             # a hidden pane has no size, so its columns were never fitted; the
             # width is only knowable once the pane is the one on screen
             table.call_after_refresh(table.fit)
-        # not while the bar itself has the focus: changing tab from up there is
-        # how you look around, and being dropped into the content every time
-        # means you can only ever move one tab
-        if tables and not self.query_one("#tabs", TabBar).has_focus:
+        if tables:
             tables[0].focus()
         self.call_after_refresh(self._more_check)
 
@@ -1774,7 +1801,6 @@ class StoApp(App):
 
     def _painted(self) -> None:
         self._repaint()
-        self.query_one("#topbar", Static).update(self.topbar_content())
 
     # ── the status strip ──
 
@@ -1862,7 +1888,7 @@ class StoApp(App):
         self.show_tab(self.tab + 1)
 
     def focus_ring(self):
-        """The tab bar, then every panel of the pane on screen, in DOM order.
+        """Every panel of the pane on screen, in DOM order.
 
         Written out rather than left to `focus_next`: the library walks the
         whole screen, and a widget's `focusable` asks about `visibility`, not
@@ -1880,28 +1906,36 @@ class StoApp(App):
                     yield child
                 yield from panels(child)
 
-        return [self.query_one("#tabs", TabBar)] + list(panels(self.panes[self.tab]))
+        return list(panels(self.panes[self.tab]))
 
     def _step(self, delta: int) -> None:
         ring = self.focus_ring()
+        if not ring:
+            return
         # not in the ring (a tab just changed, a modal just closed): the first
         # panel is a better landing than the bar you were trying to leave
         index = ring.index(self.focused) if self.focused in ring else 0
         ring[(index + delta) % len(ring)].focus()
 
     def action_panel_next(self) -> None:
-        """The next panel of the pane you are on.
+        """`→`: one panel further in.
 
-        The tab bar is the first stop of the ring, so wrapping past the last
-        panel lands on it — which is what makes it reachable at all.
+        On a screen that shows one level at a time, "further in" is the level
+        below — picking a project and reading what it holds is the same motion
+        as moving right across three panels that all fit. The pane answers
+        whether it moved; if it did not, the focus walks the ring instead.
         """
+        pane = self.panes[self.tab]
+        if hasattr(pane, "drill") and pane.drill():
+            return
         self._step(1)
 
     def action_panel_prev(self) -> None:
+        """`←`: one panel back out, and out of a level before out of the ring."""
+        pane = self.panes[self.tab]
+        if hasattr(pane, "back") and pane.back():
+            return
         self._step(-1)
-
-    def focus_tabs(self) -> None:
-        self.query_one("#tabs", TabBar).focus()
 
     def action_open(self) -> None:
         """`↵` opens what the screen is pointed at — unless a box owns it.

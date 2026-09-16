@@ -20,6 +20,7 @@ except ImportError:
 
 from textual.geometry import Offset
 
+import sessions_server as srv
 import tui_app  # noqa: E402
 import tui_widgets  # noqa: E402
 from textual.widgets import Markdown  # noqa: E402
@@ -45,23 +46,29 @@ async def on_kind(app, pilot, kind="skills"):
     return pane
 
 
-def test_both_wordmarks_are_rectangles_once_painted():
-    """Pasted art goes crooked the moment somebody edits one line of it.
+def test_the_wordmark_has_one_typeface_and_three_sizes():
+    """Pasted art goes crooked the moment somebody edits one line of it, and a
+    second typeface for the narrow case is worse than a smaller logo: the
+    product looks like two products.
 
-    Two faces now: the tall one is the product's own, the flat one is what
-    still fits when the window cannot hold it. Neither is stored as a
-    rectangle — the generator right-strips — so the widget pads before it
-    centres, and it is the padded block that has to be square. Centring a
-    ragged block shears a six-row letterform into a staircase.
+    So the name wraps to two blocks before it changes how it is drawn, and only
+    gives up the face when even the wrapped one does not fit. None of the three
+    is stored as a rectangle — the generator right-strips — so the widget pads
+    before it centres, and it is the padded block that has to be square.
+    Centring a ragged block shears a six-row letterform into a staircase.
     """
-    for art, rows, cap in ((tui_widgets.WORDMARK, 2, 60),
-                           (tui_widgets.WORDMARK_BIG, 6, 110)):
-        assert len(art) == rows, len(art)
+    one, stack = tui_widgets.WORDMARK, tui_widgets.WORDMARK_STACK
+    for art in (one, stack):
         width = max(len(r) for r in art)
-        assert width < cap, width
         padded = [f"{r:<{width}}" for r in art]
         assert len({len(r) for r in padded}) == 1, [len(r) for r in padded]
-    assert tui_widgets.WORDMARK_BIG_W > tui_widgets.WORDMARK_W
+    # the wrapped one is the same letters on two lines: narrower and taller
+    assert tui_widgets.WORDMARK_STACK_W < tui_widgets.WORDMARK_W
+    assert len(stack) > len(one)
+    # and the same face, which is what "one typeface" means here: every glyph
+    # of the wrapped art appears in the single-line art
+    assert set("".join(stack)) <= set("".join(one)), "the narrow face drifted"
+    assert tui_widgets.WORDMARK_FLAT.strip(), "no name is left at the last size"
 
 
 def test_the_accent_and_the_ground_are_one_theme_each():
@@ -76,30 +83,82 @@ def test_the_accent_and_the_ground_are_one_theme_each():
 
 
 def test_a_screen_renders_with_its_chrome_pinned():
-    """The header, the tab bar and the footer are on screen at every height.
+    """The tab bar and the footer are on screen at every height.
 
-    They are the three things that must not scroll away, and the way that is
-    arranged — one container docked top, `Footer` docked bottom — is exactly
-    the kind of thing that keeps working in code and stops working on screen.
+    The two things that must not scroll away, arranged the way that keeps
+    working in code and stops working on screen: one container docked top,
+    `Footer` docked bottom. There used to be three — a title bar saying the
+    name of the app above a screen with the name of the app on it, plus three
+    facts that change about once a year. Those moved to the foot of the home.
     """
     async def go():
         app = tui_app.StoApp()
         async with app.run_test(size=(124, 28)) as pilot:
             await app.workers.wait_for_complete()
             await pilot.pause()
-            lines = screen_text(app)
-            assert "braingent STO" in lines[0], lines[0]
-            assert "Home" in lines[1] and "Config" in lines[1], lines[1]
-            assert "PUSH" in lines[-1], lines[-1]
+            bar = "\n".join(screen_text(app)[:3])
+            assert "HOME" in bar and "CONFIG" in bar, bar
+            assert "PUSH" in screen_text(app)[-1]
             # the library's own way out of the product is not in our footer
-            assert "palette" not in lines[-1], lines[-1]
+            assert "palette" not in screen_text(app)[-1]
+            # the facts the title bar carried are at the foot of the home, which
+            # is a scroll away rather than pinned over every screen
+            app.query_one("#home").scroll_end(animate=False)
+            await pilot.pause()
+            home = "\n".join(screen_text(app))
+            assert "agent" in home and srv.LOCAL_MACHINE in home, home
+            app.query_one("#home").scroll_home(animate=False)
+            await pilot.pause()
 
             for key in "23456":
                 await pilot.press(key)
                 await pilot.pause()
                 painted = screen_text(app)
-                assert "braingent STO" in painted[0], key
+                assert "HOME" in "\n".join(painted[:3]), key
                 assert "PUSH" in painted[-1], key
+
+    asyncio.run(go())
+
+
+def test_pure_black_is_pure_black_everywhere():
+    """A theme is one ground, and what separates a panel from the screen is its
+    outline — not a second shade behind it.
+
+    Three tones used to be on screen at once: a background, a card a little
+    lighter, a bar lighter again. "Pure black" was black only in the gaps.
+    Textual 8 adds a fourth by itself — `background-tint`, `$foreground 5%` by
+    default on several widgets — which put a table at #0b0b0b on a screen
+    painted #000000, so the one thing you were reading was the one thing that
+    was not black.
+
+    Every ground the compositor paints has to be a colour this design chose:
+    the ground itself, the raised tone behind a button, or the accent under a
+    cursor.
+    """
+    async def go():
+        for ground in ("black", "dark", "light"):
+            app = tui_app.StoApp()
+            app.ground = ground
+            async with app.run_test(size=(126, 30)) as pilot:
+                app.apply_theme()
+                await app.workers.wait_for_complete()
+                for key in "12456":
+                    await pilot.press(key)
+                    await pilot.pause()
+                    theme = app.current_theme
+                    allowed = {c.lower() for c in
+                               (theme.background, theme.panel, theme.surface,
+                                theme.accent, theme.primary, theme.error,
+                                theme.warning, theme.success)}
+                    painted = set()
+                    for strip in app.screen._compositor.render_strips():
+                        for seg in strip:
+                            style = getattr(seg.style, "rich_style", seg.style)
+                            col = getattr(style, "bgcolor", None)
+                            if col is not None:
+                                painted.add(col.get_truecolor().hex.lower())
+                    stray = painted - allowed
+                    assert not stray, (ground, key, sorted(stray), sorted(allowed))
 
     asyncio.run(go())
 
@@ -321,21 +380,32 @@ def test_a_pane_off_screen_is_rebuilt_when_you_reach_it_and_not_before():
     asyncio.run(go())
 
 
-def test_the_wordmark_goes_when_it_does_not_fit_and_not_before():
-    """It is 51 columns and two rows, and it was hidden below 100 — at 70 it
-    fits with nineteen to spare.
+def test_the_wordmark_shrinks_before_it_disappears():
+    """It used to be hidden the moment it did not fit, and the only thing that
+    fit was one flat face. Now the window picks a size, not a typeface.
 
-    What was actually broken at 70 was everything under it being pushed off
-    the screen, which is a different bug with a different fix. Width and height
-    get their own breakpoints so the banner answers for its own size.
+    One line while the window is wide enough for it, the same letters wrapped
+    to two blocks while *that* fits, and the bare name when there is no room
+    for a logo at all. It still goes entirely on a terminal too short to spend
+    six rows on a banner, which is a height question and not a width one.
     """
     async def go():
-        for size, want in (((70, 30), True), ((50, 30), False), ((120, 20), False)):
+        cases = (((120, 34), 6),     # one line of ansi_shadow
+                 ((90, 34), 13),     # the same letters, wrapped
+                 ((90, 24), 1),      # no rows to wrap into: the name, plainly
+                 ((60, 30), 1))      # too narrow even for the wrapped face
+        for size, rows in cases:
             app = tui_app.StoApp()
             async with app.run_test(size=size) as pilot:
                 await pilot.pause()
-                mark = app.query_one("#wordmark")
-                assert mark.display is want, (size, mark.display, want)
+                mark = app.query_one("#wordmark", tui_widgets.Wordmark)
+                assert mark.display, size
+                assert len(mark.art()) == rows, (size, len(mark.art()), rows)
+
+        app = tui_app.StoApp()
+        async with app.run_test(size=(120, 20)) as pilot:
+            await pilot.pause()
+            assert not app.query_one("#wordmark").display, "a banner on 20 rows"
 
     asyncio.run(go())
 
@@ -436,95 +506,81 @@ def test_a_split_is_a_hierarchy_at_every_width():
     asyncio.run(go())
 
 
-def test_tab_walks_panels_and_the_tab_bar_is_somewhere_you_can_stand():
-    """`Tab` used to cycle the six tabs, which left nothing for the panels
-    inside one — so half the interface could only be reached with a mouse.
+def test_tab_walks_tabs_and_the_arrows_walk_everything_inside_one():
+    """One key, one axis.
 
-    Now it walks the panels of the pane you are on and wraps through the tab
-    bar, which is focusable: standing there the arrows change tab and `↓` drops
-    back into the content. `1`-`6` still jump directly, from anywhere.
+    `Tab` used to walk the panels inside a screen, which left the six screens
+    themselves reachable only by digit or by mouse and forced two escape
+    hatches into existence so the bar could be focused at all. Now `Tab` walks
+    tabs — which is what the key is called — `←`/`→` walk the panels of the
+    screen you are on, and `↑`/`↓` walk the rows of the panel you are in.
+
+    In a hierarchy "the next panel" is the next level, so `→` opens the project
+    and `←` comes back out.
     """
     async def go():
         app = tui_app.StoApp()
-        async with app.run_test(size=(140, 30)) as pilot:
+        async with app.run_test(size=(140, 34)) as pilot:
             await app.workers.wait_for_complete()
             await pilot.press("2")
             await pilot.pause()
-            seen = set()
-            for _ in range(6):
-                await pilot.press("tab")
-                await pilot.pause()
-                assert app.tab == 1, "tab changed the pestana, not the panel"
-                if app.focused is not None:
-                    seen.add(app.focused.id)
-            # the ring is the panels *on screen*, and a hierarchy shows one
-            # level at a time: the projects and the box that filters them
-            assert {"t-groups", "search"} <= seen, seen
-            assert "t-rows" not in seen, seen
-            assert "tabs" in seen, seen
-
-            # one level in, the ring is the level you are on
-            app.query_one("#t-groups", tui_app.Table).focus()
-            await pilot.press("enter")
-            await pilot.pause()
-            assert app.focused is not None and app.focused.id == "t-rows"
-            await pilot.press("escape")
-            await pilot.pause()
-
-            app.query_one("#tabs").focus()
-            await pilot.pause()
-            await pilot.press("right")
-            await pilot.pause()
-            assert app.tab == 2, app.tab
-            await pilot.press("left")
-            await pilot.pause()
-            assert app.tab == 1, app.tab
-            await pilot.press("down")
-            await pilot.pause()
-            assert app.focused is not None and app.focused.id != "tabs"
-
-            # `↓` lands on the first panel, which is the search box, and there
-            # a digit is a digit — that is what the box is for. `↑` is the way
-            # back out of it, and one `Tab` is the way on to the list
-            assert app.focused.id == "search", app.focused.id
-            await pilot.press("5")
-            await pilot.pause()
-            assert app.tab == 1, "a digit typed in the search box changed tab"
-            app.query_one("#sessions").query_one("#search").value = ""
 
             await pilot.press("tab")
             await pilot.pause()
+            assert app.tab == 2, app.tab
+            await pilot.press("shift+tab")
+            await pilot.pause()
+            assert app.tab == 1, app.tab
+
+            pane = app.query_one("#sessions")
+            groups = pane.query_one("#t-groups", tui_app.Table)
+            groups.focus()
+            await pilot.pause()
+
+            await pilot.press("right")            # into the project
+            await pilot.pause()
+            assert pane.level == 1, pane.level
+            assert app.focused is not None and app.focused.id == "t-rows"
+            await pilot.press("left")             # and back out
+            await pilot.pause()
+            assert pane.level == 0, pane.level
+
+            # out of the outermost level, the arrows walk what is left: the
+            # list and the box that filters it
+            await pilot.press("left")
+            await pilot.pause()
+            assert app.focused is not None and app.focused.id == "search"
+            # and a digit typed in the box is a digit -- that is what it is for
+            await pilot.press("5")
+            await pilot.pause()
+            assert app.tab == 1, "a digit typed in the search box changed tab"
+            pane.query_one("#search").value = ""
+
+            # `←`/`→` belong to the text while the box has the focus, so the
+            # way back down into the list it filters is `↓`
+            await pilot.press("down")
+            await pilot.pause()
+            table = app.focused
+            assert isinstance(table, tui_app.Table), app.focused
+            if table.row_count > 2:
+                table.move_cursor(row=0)
+                await pilot.pause()
+                await pilot.press("down")
+                await pilot.pause()
+                assert table.cursor_row == 1, table.cursor_row
+                await pilot.press("up")
+                await pilot.pause()
+                assert table.cursor_row == 0, table.cursor_row
+                # at the top it stays: there is no hatch to fall through any
+                # more, because there is nothing above a list to reach
+                await pilot.press("up")
+                await pilot.pause()
+                assert app.focused is table, "up left the list from its first row"
+                assert table.cursor_row == 0, table.cursor_row
+
             await pilot.press("5")
             await pilot.pause()
             assert app.tab == 4, app.tab
-
-    asyncio.run(go())
-
-
-def test_up_leaves_a_list_only_from_its_first_row():
-    """The escape hatch upward cannot eat ordinary navigation: holding `↑` to
-    reach the top of a list has to reach the top of the list."""
-    async def go():
-        app = tui_app.StoApp()
-        async with app.run_test(size=(140, 30)) as pilot:
-            await app.workers.wait_for_complete()
-            await pilot.press("2")
-            await pilot.pause()
-            table = app.query_one("#t-groups", tui_app.Table)
-            table.focus()
-            table.move_cursor(row=3)
-            await pilot.pause()
-            await pilot.press("up")
-            await pilot.pause()
-            assert app.focused is table, "up left the list from row 3"
-            assert table.cursor_row == 2, table.cursor_row
-            for _ in range(2):
-                await pilot.press("up")
-                await pilot.pause()
-            assert table.cursor_row == 0, table.cursor_row
-            await pilot.press("up")
-            await pilot.pause()
-            assert app.focused is app.query_one("#tabs"), app.focused
 
     asyncio.run(go())
 
@@ -655,8 +711,11 @@ def test_the_marquee_runs_only_where_text_is_cut_and_only_with_focus():
                       if r == 0 and c < len(widths))
             assert (table._marquee is not None) is cut, (cut, table._marquee)
 
-            app.query_one("#tabs").focus()
+            # the tab bar is not a place the keyboard stands any more, so the
+            # focus goes somewhere that is: the box above the list
+            await pilot.press("left")
             await pilot.pause()
+            assert not table.has_focus, app.focused
             assert table._marquee is None, "the marquee outlived the focus"
 
     asyncio.run(go())
@@ -1119,9 +1178,10 @@ def test_the_footer_offers_a_verb_only_where_it_does_something():
     asyncio.run(go())
 
 if __name__ == "__main__":
-    test_both_wordmarks_are_rectangles_once_painted()
+    test_the_wordmark_has_one_typeface_and_three_sizes()
     test_the_accent_and_the_ground_are_one_theme_each()
     test_a_screen_renders_with_its_chrome_pinned()
+    test_pure_black_is_pure_black_everywhere()
     test_a_document_has_its_own_keys()
     test_focus_starts_on_the_left_and_a_project_hands_it_to_the_right()
     test_the_last_column_takes_the_width_the_others_leave()
@@ -1132,12 +1192,11 @@ if __name__ == "__main__":
     test_the_home_does_not_pay_for_ccusage_before_it_paints()
     test_a_count_nobody_has_run_yet_is_not_a_zero()
     test_a_pane_off_screen_is_rebuilt_when_you_reach_it_and_not_before()
-    test_the_wordmark_goes_when_it_does_not_fit_and_not_before()
+    test_the_wordmark_shrinks_before_it_disappears()
     test_the_whole_home_is_reachable_in_a_short_window()
     test_a_narrow_split_shows_one_level_and_walks_between_them()
     test_a_split_is_a_hierarchy_at_every_width()
-    test_tab_walks_panels_and_the_tab_bar_is_somewhere_you_can_stand()
-    test_up_leaves_a_list_only_from_its_first_row()
+    test_tab_walks_tabs_and_the_arrows_walk_everything_inside_one()
     test_s_cycles_the_sort_and_comes_back_to_the_natural_order()
     test_a_column_sorts_the_datum_and_not_the_cell()
     test_the_marquee_runs_only_where_text_is_cut_and_only_with_focus()

@@ -11,45 +11,72 @@
 
 Screen { background: $background; }
 
+/* Textual 8 lifts a widget off its own ground with `background-tint`, which
+ * defaults to `$foreground 5%` on several of its widgets -- so a table sat at
+ * #0b0b0b on a screen painted #000000 and "pure black" was black everywhere
+ * except under the thing you were reading. The tint is the third tone this
+ * design does not have; it is turned off where it is applied.
+ */
+Screen, .card, DataTable, Table, Input, Search, VerticalScroll, Footer,
+FooterKey, Static, Container, TabBar {
+    background-tint: $background 0%;
+}
+
+/* and a scrollbar is part of the panel it scrolls, not a strip of some other
+ * theme laid over it -- the library's default track is its own near-black */
+* {
+    scrollbar-size-vertical: 1;
+    scrollbar-background: $background;
+    scrollbar-background-hover: $background;
+    scrollbar-background-active: $background;
+    scrollbar-color: $foreground 25%;
+    scrollbar-color-hover: $foreground 45%;
+    scrollbar-color-active: $accent;
+    scrollbar-corner-color: $background;
+}
+
 /* ── chrome: pinned top and bottom, never scrolls ── */
+/*
+ * One tone for the whole screen. A bar in `$panel` over a pane in `$background`
+ * over a card in `$surface` meant "pure black" was black only in the gaps, and
+ * every theme had to be looked at three times. Now nothing paints its own
+ * ground and what separates a panel from the screen is its outline.
+ */
 
 #chrome {
     dock: top;
     height: auto;
-    background: $panel;
-}
-#topbar {
-    height: 1;
-    padding: 0 1;
-    color: $foreground 60%;
-}
-#tabs {
-    layout: horizontal;
-    height: 1;
-    padding: 0 1;
+    background: $background;
 }
 
-/* the active tab is a filled rectangle in the accent, the way `sto ui` draws
- * it — same product, same chip. The rest are quiet and unframed: a box around
- * every tab is six boxes and no answer to which one you are on. */
+/* the tabs are the navigation of the whole product, so they are the size of
+ * navigation: three rows, centred, and readable from across the room. The row
+ * used to be six small words flush left under a title bar, which made the
+ * title bar look like the important part. */
+#tabs {
+    layout: horizontal;
+    height: 3;
+    width: 100%;
+    align-horizontal: center;
+    padding: 0 1;
+}
 .tab {
     width: auto;
-    height: 1;
-    margin-right: 2;
-    color: $foreground 50%;
+    height: 3;
+    padding: 1 3;
+    margin: 0 1;
+    color: $foreground 45%;
+    text-style: bold;
 }
+/* the one you are on is a filled block in the accent -- the same chip `sto ui`
+ * draws. The rest are quiet and unframed: a box around every tab is six boxes
+ * and no answer to which one you are on. */
 .tab.on {
     background: $accent;
     color: $background;
-    text-style: bold;
 }
 .tab:hover { color: $accent; }
-
-/* a bar that is taking your arrow keys and a bar that is not have to look
- * different, the same rule the cards already follow */
-TabBar:focus { background: $surface; }
-TabBar:focus .tab { color: $foreground 80%; }
-TabBar:focus .tab.on { background: $accent; color: $background; }
+.tab.on:hover { color: $background; }
 
 /* the two rows above the keys: what is running now and what the last thing
  * that ran had to say, plus the arrow that says the pane goes on below.
@@ -58,12 +85,12 @@ TabBar:focus .tab.on { background: $accent; color: $background; }
 #bottom {
     dock: bottom;
     height: auto;
-    background: $panel;
+    background: $background;
 }
 #status {
     height: 1;
     padding: 0 1;
-    background: $panel;
+    background: $background;
 }
 
 /* a key cap is the key in the accent, not a filled block: reversed, six of them
@@ -71,17 +98,20 @@ TabBar:focus .tab.on { background: $accent; color: $background; }
 /* not docked: it lives inside `#bottom`, which is the one thing docked to
  * that edge. Left docked it claimed the edge for itself and painted over the
  * status strip sharing it. */
-Footer { dock: initial; height: 1; background: $panel; }
+Footer { dock: initial; height: 1; background: $background; }
 #reader Footer, ModalScreen Footer { dock: bottom; }
-FooterKey { background: $panel; color: $foreground 60%; }
-FooterKey > .footer-key--key { background: $panel; color: $accent; text-style: bold; }
+FooterKey { background: $background; color: $foreground 60%; }
+FooterKey > .footer-key--key { background: $background; color: $accent; text-style: bold; }
 FooterKey > .footer-key--description { color: $foreground 60%; }
-FooterKey:hover { background: $surface; }
-FooterKey:hover > .footer-key--key { background: $surface; color: $accent; }
+FooterKey:hover { background: $panel; }
+FooterKey:hover > .footer-key--key { background: $panel; color: $accent; }
 
 /* ── the panes ── */
 
 .home, .split, .three, .two { padding: 1; }
+/* the home starts lower than the others: it is a masthead, and a masthead
+ * pinned to the first available row is a header, not a title page */
+.home { padding: 2 1 1 1; }
 
 /* it is the name of the thing, and it was sitting flush left over a search box
  * like a label for it. `auto` because there are two faces: six rows of
@@ -93,9 +123,9 @@ FooterKey:hover > .footer-key--key { background: $surface; color: $accent; }
 Search {
     height: 3;
     margin-bottom: 1;
-    border: round $foreground 30%;
+    border: round $foreground 25%;
     border-title-color: $foreground 50%;
-    background: $surface;
+    background: $background;
 }
 Search:focus { border: round $accent; border-title-color: $accent; }
 
@@ -105,7 +135,10 @@ Search:focus { border: round $accent; border-title-color: $accent; }
  * so there is nothing to tell apart and nothing to frame. What is left is a
  * masthead: the name, the box you type in, the numbers, the gauges.
  */
-.home { layout: vertical; }
+/* the pane itself scrolls, at every width: the masthead, the counts, the
+ * gauges and the standing facts are taller than a short window whether or not
+ * that window is also narrow */
+.home { layout: vertical; overflow-y: auto; scrollbar-size-vertical: 1; }
 #wordmark { width: 100%; text-align: center; }
 /* the results take the dashboard's room rather than squeezing beside it */
 #results { width: 100%; height: 1fr; display: none; }
@@ -122,15 +155,20 @@ Search:focus { border: round $accent; border-title-color: $accent; }
  * border: on this screen it is the thing you reach for, and a thin grey box at
  * full width reads as a form you have to fill in. */
 #search-wrap > Search {
-    width: 66;
+    width: 68;
     max-width: 100%;
     margin: 0 0 2 0;
-    border: heavy $foreground 25%;
-    background: $panel;
+    border: round $foreground 25%;
+    background: $background;
 }
-#search-wrap > Search:focus { border: heavy $accent; }
+#search-wrap > Search:focus { border: round $accent; }
 
-#home-grid { width: 100%; layout: vertical; height: 1fr; }
+/* `auto` and not `1fr`: a `1fr` box clips whatever does not fit instead of
+ * making the pane taller, and the pane is what scrolls. The foot of the home
+ * was laid out one row past the bottom edge of a container that could not
+ * scroll, so no key and no mouse could reach it. */
+#home-grid { width: 100%; layout: vertical; height: auto; }
+#where-body { width: 100%; height: auto; text-align: center; margin-top: 2; }
 #stats-body { width: 100%; height: auto; text-align: center; margin-bottom: 2; }
 #usage-body { width: auto; height: auto; }
 
@@ -162,6 +200,15 @@ Search:focus { border: round $accent; border-title-color: $accent; }
     grid-rows: 3 1fr; grid-gutter: 1 1;
 }
 .split.three-way > Search { column-span: 3; margin-bottom: 0; }
+/* three panels side by side is the one case where a rule is not enough: the
+ * boxes are what say where one ends and the next begins. The flat rule above
+ * is for a screen showing a single panel, which has nothing to be told apart
+ * from. */
+.split.three-way > .card {
+    border: round $foreground 25%;
+    padding: 0 1;
+}
+.split.three-way > .card:focus-within { border: round $accent; }
 .three { layout: grid; grid-size: 2 2; grid-columns: 1fr 1fr; grid-rows: 1fr 1fr; grid-gutter: 1 1; }
 #prefs { column-span: 1; }
 #remote { column-span: 2; }
@@ -170,33 +217,34 @@ Search:focus { border: round $accent; border-title-color: $accent; }
 /* ── cards: one definition, so every panel is the same object ── */
 
 .card {
-    border: round $foreground 30%;
-    border-title-color: $foreground 60%;
+    border: round $foreground 25%;
+    border-title-color: $foreground 55%;
     border-title-style: bold;
     padding: 0 1;
     height: 1fr;
-    background: $surface;
+    background: $background;
 }
 /* the card that holds the focus says so: a table that is taking your arrow
  * keys and a table that is not have to look different from across the screen */
 .card:focus-within {
     border: round $accent;
     border-title-color: $accent;
-    background: $surface;
+    background: $background;
 }
 
 /* ── tables ── */
 
 DataTable, Table {
     height: 1fr;
-    background: $surface;
+    background: $background;
     scrollbar-size-vertical: 1;
-    scrollbar-background: $surface;
+    scrollbar-background: $background;
     scrollbar-color: $foreground 30%;
     scrollbar-color-hover: $accent;
 }
 DataTable > .datatable--header {
-    background: $surface;
+    background: $background;
+    background-tint: $background 0%;
     color: $foreground 50%;
     text-style: none;
 }
@@ -229,7 +277,7 @@ DataTable > .datatable--hover { background: $panel; }
 #reader #links { height: 10; }
 VerticalScroll {
     scrollbar-size-vertical: 1;
-    scrollbar-background: $surface;
+    scrollbar-background: $background;
     scrollbar-color: $foreground 30%;
     scrollbar-color-hover: $accent;
 }
@@ -248,7 +296,7 @@ VerticalScroll {
     max-width: 90%;
     height: auto;
     max-height: 70%;
-    background: $surface;
+    background: $background;
     border: round $accent;
     border-title-color: $accent;
 }
@@ -314,7 +362,7 @@ Toast.-error { border-left: outer $error; }
 
 /* the pane itself is what scrolls: no extra container, so the widget tree is
  * the same at every width and a resize moves nothing */
-.narrow .home, .narrow .three, .narrow .two {
+.narrow .three, .narrow .two {
     overflow-y: auto;
     scrollbar-size-vertical: 1;
 }
@@ -329,7 +377,7 @@ Toast.-error { border-left: outer $error; }
     background: $panel;
     display: none;
 }
-#more:hover { background: $surface; }
+#more:hover { background: $panel; }
 
 /* ── a transcript, as the conversation it was ── */
 
@@ -353,13 +401,12 @@ Toast.-error { border-left: outer $error; }
 
 /* ── the wordmark answers for its own size ──
  *
- * It is 51 columns by two rows, and it was hidden along with everything else
- * that did not fit in one column — which is why it disappeared at 70 columns
- * with nineteen to spare. `short` is the other half: on a wide, low terminal
- * the banner costs three of maybe fifteen usable rows to say what the screen
- * already says. */
+ * Which of its three sizes is on screen is decided in `on_resize`, because it
+ * is a choice of *content* and CSS cannot swap the art. What is left here is
+ * the last step: on a terminal too short to spare six rows, a banner costs
+ * most of the usable height to say what the screen already says. */
 
-.tiny #wordmark, .short #wordmark { display: none; }
+.short #wordmark { display: none; }
 
 /* A verb belongs to the tab that can do it. Textual dims a key its
    `check_action` turned off; dimming still spends footer width on `delete
