@@ -812,6 +812,40 @@ def test_s_on_the_project_rail_sorts_the_projects_and_not_the_rows():
     asyncio.run(go())
 
 
+def test_typing_in_a_stacked_search_shows_the_rows_it_filters():
+    """In one column the rows a query narrows live one level under the rail,
+    off screen, so the filter ran on every key and nothing visible changed
+    until `↵`. Typing has to bring them up, keep the keys in the box, and
+    clearing the box has to put the rail back."""
+    async def go():
+        app = tui_app.StoApp()
+        async with app.run_test(size=(120, 30)) as pilot:
+            await app.workers.wait_for_complete()
+            await pilot.press("2")
+            await pilot.pause()
+            pane = app.query_one("#sessions")
+            if not pane.all_rows:
+                return
+            box = pane.query_one("#search", tui_app.Search)
+            box.focus()
+            await pilot.pause()
+            assert pane.stacked and pane.level == 0
+            await pilot.press(*pane.all_rows[0]["project"][:3])
+            await pilot.pause()
+            assert pane.level == 1, "the rows stayed off screen"
+            assert box.display and app.focused is box, "the box lost the keys"
+            assert pane.query_one("#rows").display
+            await pilot.press("down")
+            await pilot.pause()
+            assert app.focused is pane.query_one("#t-rows"), app.focused
+            box.focus()
+            box.value = ""
+            await pilot.pause()
+            assert pane.level == 0 and app.focused is box
+
+    asyncio.run(go())
+
+
 def test_the_marquee_runs_only_where_text_is_cut_and_only_with_focus():
     """The selected row scrolls what its column cut off — that row and no
     other, and only while the table has the keys.
@@ -1340,6 +1374,7 @@ if __name__ == "__main__":
     test_s_cycles_the_sort_and_comes_back_to_the_natural_order()
     test_a_column_sorts_the_datum_and_not_the_cell()
     test_s_on_the_project_rail_sorts_the_projects_and_not_the_rows()
+    test_typing_in_a_stacked_search_shows_the_rows_it_filters()
     test_the_marquee_runs_only_where_text_is_cut_and_only_with_focus()
     test_a_memory_renders_as_markdown_and_a_transcript_does_not()
     test_tools_reaches_every_config_module_and_reads_one()
