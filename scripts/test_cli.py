@@ -84,6 +84,39 @@ def test_cached_sessions_drops_deleted_and_survives_corrupt_cache():
         assert len(cli.cached_sessions(**args)[0]) == 1  # an old version is discarded
 
 
+def test_cached_sessions_fills_the_project_path_registry():
+    """The TUI reads sessions through here and never through `list_sessions`,
+    so the hook that records where a project lives has to be on this side too.
+
+    The cwd a local transcript was recorded in *is* that path, which is why
+    nobody has to type it; see `srv.remember_project_paths`.
+    """
+    real = cli.srv.KNOWLEDGE_PROJECTS
+    with tempfile.TemporaryDirectory() as d:
+        cli.srv.KNOWLEDGE_PROJECTS = Path(d) / "registry"
+        try:
+            proj = Path(d) / "projects" / "projA"
+            proj.mkdir(parents=True)
+            _fake_session(proj, "aaaaaaaa-0000-0000-0000-000000000000.jsonl")
+            args = {"projects_dir": Path(d) / "projects",
+                    "knowledge_dir": Path(d) / "knowledge",
+                    "cache_path": Path(d) / "cache.json"}
+
+            rows, _ = cli.cached_sessions(**args)
+            paths = cli.srv.project_paths()
+            assert paths.get(rows[0]["project"], {}).get(cli.srv.LOCAL_MACHINE) \
+                == str(proj), paths
+
+            # a warm cache still answers: an entry stored before `cwd` existed
+            # is reparsed once rather than hiding the project forever
+            cli.srv.KNOWLEDGE_PROJECTS = Path(d) / "registry2"
+            cli.cached_sessions(**args)
+            assert cli.srv.project_paths().get(rows[0]["project"]), \
+                "the warm-cache run lost the path"
+        finally:
+            cli.srv.KNOWLEDGE_PROJECTS = real
+
+
 def test_search_finds_prompts_reloaded_from_cache():
     """Closes the cache -> _PROMPTS_INDEX -> search_sessions seam.
 
@@ -758,6 +791,7 @@ def test_the_graph_html_survives_a_memory_that_quotes_markup():
 if __name__ == "__main__":
     test_cached_sessions_reuses_entry_and_reparses_on_change()
     test_cached_sessions_drops_deleted_and_survives_corrupt_cache()
+    test_cached_sessions_fills_the_project_path_registry()
     test_search_finds_prompts_reloaded_from_cache()
     test_color_off_emits_no_ansi()
     test_unknown_command_lists_valid_ones()

@@ -82,7 +82,11 @@ def cached_sessions(projects_dir=None, knowledge_dir=None, cache_path=None,
         except OSError:
             continue
         hit = old.get(key)
-        if hit and hit.get("mtime") == mtime:
+        # `cwd` is what the project-path registry is filled from, and an entry
+        # cached before it existed does not carry it. Asking for the key (not
+        # for a value: a knowledge export has no cwd and stores `None`) reparses
+        # each such file once and then settles.
+        if hit and hit.get("mtime") == mtime and "cwd" in hit.get("meta", {}):
             entry = hit
         else:
             meta = srv.session_meta(p)
@@ -104,7 +108,13 @@ def cached_sessions(projects_dir=None, knowledge_dir=None, cache_path=None,
         _save_cache(entries, path)
     srv._PROMPTS_INDEX.update(prompts)
     rows.sort(key=lambda r: r["mtime"], reverse=True)
-    return rows[:srv.MAX_SESSIONS], prompts
+    rows = rows[:srv.MAX_SESSIONS]
+    # the same line `srv.list_sessions` runs, because this is the other door
+    # into the same list -- the TUI never calls `list_sessions`, so leaving the
+    # hook on that side only meant the registry was never filled by the screen
+    # that shows it
+    srv.remember_project_paths(rows)
+    return rows, prompts
 
 
 def _day(mtime):
