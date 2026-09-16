@@ -83,7 +83,9 @@ FooterKey:hover > .footer-key--key { background: $surface; color: $accent; }
 
 .home, .split, .three, .two { padding: 1; }
 
-#wordmark { height: 2; margin-bottom: 1; }
+/* centred and given room: it is the name of the thing, and it was sitting
+ * flush left over a search box like a label for it */
+#wordmark { height: 2; width: 100%; margin: 1 0 2 0; text-align: center; }
 
 /* the search box is part of the screen, not a thing a key summons */
 Search {
@@ -98,23 +100,29 @@ Search:focus { border: round $accent; border-title-color: $accent; }
 .home { layout: vertical; }
 /* the results take the dashboard's room rather than squeezing beside it */
 #results { height: 1fr; display: none; }
-#home-grid {
-    layout: grid;
-    grid-size: 2 2;
-    grid-columns: 1fr 2fr;
-    grid-rows: 1fr 1fr;
-    grid-gutter: 1 1;
-}
+/* two cards, stacked, not a grid of four. The counts are a headline of fixed
+ * height and the gauges take whatever is left. */
+#home-grid { layout: vertical; height: 1fr; }
+#stats { height: auto; margin-bottom: 1; }
+#usage { height: 1fr; min-height: 7; }
 
-/* sessions, memories and skills: the box on top, then the two lists */
-.split { layout: grid; grid-size: 2 2; grid-columns: 1fr 2fr; grid-rows: 3 1fr; grid-gutter: 1 1; }
+/* Sessions and memories are a hierarchy, so they are one panel at a time at
+ * every width: the projects, and then what one project holds. Two columns side
+ * by side meant a project rail too narrow to read a name in, next to five
+ * hundred rows belonging to projects you had not chosen. */
+.split { layout: vertical; }
+.split > Search { width: 100%; margin-bottom: 1; }
+.split > .card { height: 1fr; min-height: 6; }
+.split DataTable { height: 1fr; max-height: 100%; }
 /* tools is three panels: the kinds stay put on the left and the two on the
  * right are what changes as you walk in */
 /* the list gets more room than the detail beside it: the list is what you
  * read and the panel next to it is the footnote */
-.split.three-way { grid-size: 3 2; grid-columns: 18 3fr 2fr; }
-.split.three-way > Search { column-span: 3; }
-.split > Search { column-span: 2; margin-bottom: 0; }
+.split.three-way {
+    layout: grid; grid-size: 3 2; grid-columns: 18 3fr 2fr;
+    grid-rows: 3 1fr; grid-gutter: 1 1;
+}
+.split.three-way > Search { column-span: 3; margin-bottom: 0; }
 .three { layout: grid; grid-size: 2 2; grid-columns: 1fr 1fr; grid-rows: 1fr 1fr; grid-gutter: 1 1; }
 #prefs { column-span: 1; }
 #remote { column-span: 2; }
@@ -229,7 +237,8 @@ Toast.-error { border-left: outer $error; }
  * child is clipped to the pane instead of making it taller. The scroll then
  * belongs to the grid, which has no scrollbar and no keys pointed at it, so
  * the cards past the fold are cut off exactly as before. */
-.narrow #home-grid { grid-size: 1 4; grid-columns: 1fr; grid-rows: auto auto auto auto; height: auto; }
+.narrow #home-grid { height: auto; }
+.narrow #usage { height: auto; }
 /* not a grid here: a grid keeps a row for a panel that is hidden, so the one
  * panel on screen inherited the three rows reserved for the search box and
  * the list vanished under its own header. A vertical stack only lays out what
@@ -314,3 +323,12 @@ Toast.-error { border-left: outer $error; }
 Footer FooterKey.-disabled {
     display: none;
 }
+
+/* ── where a project lives on this machine ── */
+
+#path-input {
+    margin-top: 1;
+    border: round $foreground 30%;
+    background: $panel;
+}
+#path-input:focus { border: round $accent; }

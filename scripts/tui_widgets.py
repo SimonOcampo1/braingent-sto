@@ -27,9 +27,15 @@ from textual.widgets import DataTable, Input, Static  # noqa: E402
 t = i18n.t
 
 
-# `[x]` is a tag to Textual's markup parser and disappears; escaped, it is a
-# checkbox again. Named here so no f-string has to carry a backslash.
-BOX_ON, BOX_OFF = r"\[x]", r"\[ ]"
+def pill(on):
+    """A switch reads as ON / OFF, not as a cross in a box.
+
+    `[x]` and `[ ]` need a legend — a cross means "on" in a checkbox and "gone"
+    three columns to the left in the Tools table, on the same screen. The word
+    carries its own meaning and the colour repeats it.
+    """
+    return (f"[$success b]{t('on'):^5}[/]" if on
+            else f"[$foreground 40% b]{t('off'):^5}[/]")
 
 # The accent is a preference of the whole OS, stored as an SGR code; Textual
 # wants a colour it can put in a stylesheet.

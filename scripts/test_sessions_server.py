@@ -1663,6 +1663,77 @@ def test_keep_then_resume_lands_where_claude_resume_actually_looks():
         assert len(landed.read_text(encoding="utf-8").splitlines()) == len(SAMPLE)
 
 
+def test_a_project_path_is_per_machine_and_merges_without_a_conflict():
+    """The same project is `/home/me/x` here and `D:\\Projects\\x` there, and both
+    answers are right.
+
+    One JSON per machine, so two machines never edit the same line of the same
+    file: the registry is the union of the files, and a push that carries both
+    is a fast-forward and not a merge.
+    """
+    real_dir, real_machine = srv.KNOWLEDGE_PROJECTS, srv.LOCAL_MACHINE
+    with tempfile.TemporaryDirectory() as reg:
+        srv.KNOWLEDGE_PROJECTS = Path(reg)
+        try:
+            srv.LOCAL_MACHINE = "EstaMaquina"
+            srv.set_project_path("agentic-os", "/home/me/repos/agentic-os")
+            srv.LOCAL_MACHINE = "LaOtra"
+            srv.set_project_path("agentic-os", r"D:\Projects\agentic-os")
+
+            paths = srv.project_paths()["agentic-os"]
+            assert paths == {"EstaMaquina": "/home/me/repos/agentic-os",
+                             "LaOtra": r"D:\Projects\agentic-os"}, paths
+            assert len(list(Path(reg).glob("*.json"))) == 2
+            assert srv.local_project_path("agentic-os") == Path(r"D:\Projects\agentic-os")
+
+            # the cwd a local transcript was recorded in is the answer already:
+            # nobody has to type it, and a row from another machine carries
+            # their path and must not overwrite ours
+            srv.remember_project_paths([
+                {"project": "agentic-os", "cwd": r"D:\Projects\moved", "machine": None},
+                {"project": "otro", "cwd": "/no/es/mio", "machine": "EstaMaquina"}])
+            fresh = srv.project_paths()
+            assert fresh["agentic-os"]["LaOtra"] == r"D:\Projects\moved", fresh
+            assert "otro" not in fresh, fresh
+
+            # and forgetting is saying nothing, not saying ""
+            srv.set_project_path("agentic-os", None)
+            assert srv.local_project_path("agentic-os") is None
+            assert srv.project_paths()["agentic-os"] == {
+                "EstaMaquina": "/home/me/repos/agentic-os"}
+        finally:
+            srv.KNOWLEDGE_PROJECTS, srv.LOCAL_MACHINE = real_dir, real_machine
+
+
+def test_resume_files_against_the_path_this_machine_has_for_the_project():
+    """Without a registry entry a brought transcript lands against the current
+    directory, which is only ever right by luck.
+
+    `project_slug` is the absolute path with every non-alphanumeric character
+    dashed, so `claude --resume` looks in exactly one directory: the project's
+    own. That is what the registry is for.
+    """
+    real_dir, real_machine = srv.KNOWLEDGE_PROJECTS, srv.LOCAL_MACHINE
+    with tempfile.TemporaryDirectory() as proj, tempfile.TemporaryDirectory() as kn, \
+         tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as reg, \
+         tempfile.TemporaryDirectory() as checkout:
+        srv.KNOWLEDGE_PROJECTS = Path(reg)
+        try:
+            pdir = Path(proj) / "D--repo"
+            pdir.mkdir()
+            src = _write_session(pdir)
+            srv.keep_session(src.stem, projects_dir=Path(proj), dest=Path(kn) / "OtherPC")
+            project = srv.archived_sessions(Path(kn))[0]["project"]
+            srv.set_project_path(project, checkout)
+
+            res = srv.resume_session(src.stem[:8], claude_dir=Path(home),
+                                     knowledge_dir=Path(kn))
+            assert res.get("ok"), res
+            assert Path(res["path"]).parent.name == srv.project_slug(checkout), res
+        finally:
+            srv.KNOWLEDGE_PROJECTS, srv.LOCAL_MACHINE = real_dir, real_machine
+
+
 def test_resume_refuses_to_clobber_a_session_already_on_this_machine():
     """Half-overwriting a live transcript is worse than refusing."""
     with tempfile.TemporaryDirectory() as proj, tempfile.TemporaryDirectory() as kn, \
@@ -1784,6 +1855,8 @@ if __name__ == "__main__":
     test_project_slug_dashes_every_character_that_is_not_alphanumeric()
     test_keep_archives_the_untrimmed_transcript_and_still_masks_secrets()
     test_keep_then_resume_lands_where_claude_resume_actually_looks()
+    test_a_project_path_is_per_machine_and_merges_without_a_conflict()
+    test_resume_files_against_the_path_this_machine_has_for_the_project()
     test_resume_refuses_to_clobber_a_session_already_on_this_machine()
     test_resume_without_an_archive_says_which_command_creates_one()
     test_sync_push_forces_a_fetch_before_the_behind_check()

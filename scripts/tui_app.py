@@ -26,14 +26,14 @@ import ui_data as ui  # noqa: E402
 from textual import work  # noqa: E402
 from textual.app import App, ComposeResult  # noqa: E402
 from textual.binding import Binding  # noqa: E402
-from textual.containers import Container, Grid, VerticalScroll  # noqa: E402
+from textual.containers import Container, VerticalScroll  # noqa: E402
 from textual.content import Content  # noqa: E402
 from textual.screen import ModalScreen, Screen  # noqa: E402
 from textual.widgets import Footer, Input, Markdown, Static  # noqa: E402
 
 from tui_widgets import (  # noqa: E402
-    BOX_OFF, BOX_ON, GROUNDS, WORDMARK, WORDMARK_W, Card,
-    Search, Table, Wordmark, ago, bar, clip, esc, spark, theme_for)
+    GROUNDS, WORDMARK, WORDMARK_W, Card,
+    Search, Table, Wordmark, ago, bar, clip, esc, pill, spark, theme_for)
 
 t = i18n.t
 
@@ -144,6 +144,64 @@ class Confirm(ModalScreen[bool]):
         self.dismiss(False)
 
 
+class PathPrompt(ModalScreen[str]):
+    """Where a project lives on this machine. One line of text, per machine.
+
+    A modal and not a cell you type into: the answer is an absolute path, it is
+    the same shape on every row of the table, and the other machines' answers
+    have to be on screen while you write yours — that is how you recognise the
+    project you are naming.
+    """
+    BINDINGS = [
+        Binding("escape", "cancel", ""),
+        Binding("enter", "submit", ""),
+    ]
+
+    def __init__(self, project, current, others):
+        super().__init__()
+        self._project, self._current = project, current or ""
+        self._others = {m: p for m, p in (others or {}).items()
+                        if m != srv.LOCAL_MACHINE}
+        self._answered = False
+
+    def compose(self) -> ComposeResult:
+        lines = [f"[$foreground 60%]"
+                 f"{esc(t('path_what', project=self._project))}[/]"]
+        if self._others:
+            lines += ["", f"[$foreground 50%]{t('path_others')}[/]"]
+            lines += [f"[$accent]{esc(m):<18}[/][$foreground 70%]{esc(path)}[/]"
+                      for m, path in sorted(self._others.items())]
+        with Container(id="confirm-wrap"):
+            with Card(f"{t('path_title')} \u00b7 {self._project}", upper=False):
+                yield Static(Content.from_markup("\n".join(lines)), id="confirm-body")
+                yield Input(value=self._current, placeholder=t("path_placeholder"),
+                            id="path-input")
+                yield Static(Content.from_markup(
+                    f"[$accent b] \u21b5 [/] {t('confirm_go')}"
+                    f"[$foreground 50%]     esc {t('confirm_no')}[/]"), id="confirm-keys")
+
+    def on_mount(self) -> None:
+        self.query_one("#path-input", Input).focus()
+
+    def _answer(self, value) -> None:
+        # the key reaches the Input and the screen binding both, depending on
+        # which of the two Textual hands it to first; either way it is answered
+        # once
+        if self._answered:
+            return
+        self._answered = True
+        self.dismiss(value)
+
+    def on_input_submitted(self, event) -> None:
+        self._answer(event.value.strip())
+
+    def action_submit(self) -> None:
+        self._answer(self.query_one("#path-input", Input).value.strip())
+
+    def action_cancel(self) -> None:
+        self._answer(None)
+
+
 def manifest(data):
     """What a push or a pull would move, by kind, in the order it matters.
 
@@ -197,7 +255,7 @@ class Reader(Screen):
         # a screen binding shadows the app's. Reading a transcript with PUSH
         # one keystroke away is an accident waiting to happen, and hidden they
         # also stop being offered in the footer of a screen that cannot use them
-        *[Binding(k, "nothing", "", show=False) for k in "plfgrus"],
+        *[Binding(k, "nothing", "", show=False) for k in "plfgrusew"],
         # Tab belongs to this screen's own two panels -- the document and the
         # neighbours -- not to the panes of the screen underneath it
         Binding("tab", "next_panel", "", show=False, priority=True),
@@ -332,6 +390,17 @@ class Levels:
 
         return sorted(pool, key=key, reverse=reverse)
 
+    # A hierarchy shows one level at a time at every width. Sessions and
+    # memories are folders: you pick the project, *then* you look at what is
+    # inside it. Showing both columns at once meant the project list was a
+    # 14-column rail nobody could read a name in, and the row list was showing
+    # 500 sessions from every project before you had chosen one.
+    ALWAYS_DRILL = False
+
+    @property
+    def stacked(self) -> bool:
+        return self.ALWAYS_DRILL or self.app.has_class("narrow")
+
     def set_level(self, n) -> None:
         """Which panel is on screen when only one fits.
 
@@ -343,7 +412,7 @@ class Levels:
         a stack is a resize that loses your place.
         """
         self.level = max(0, min(n, len(self.LEVELS) - 1))
-        narrow = self.app.has_class("narrow")
+        narrow = self.stacked
         for i, name in enumerate(self.LEVELS):
             self.query_one(f"#{name}").display = not narrow or i == self.level
         # the search box belongs to the outermost level: it filters the list
@@ -366,7 +435,7 @@ class Levels:
 
     def back(self) -> bool:
         """`Esc`. True if it moved, so the app knows the key was used."""
-        if self.app.has_class("narrow") and self.level > 0:
+        if self.stacked and self.level > 0:
             self.set_level(self.level - 1)
             return True
         return False
@@ -377,7 +446,7 @@ class Levels:
         Only in one column: in a wide window every panel is already on screen
         and `↵` means what it has always meant.
         """
-        if self.app.has_class("narrow") and self.level < len(self.LEVELS) - 1:
+        if self.stacked and self.level < len(self.LEVELS) - 1:
             self.set_level(self.level + 1)
             return True
         return False
@@ -395,14 +464,18 @@ class Split(Levels, Container):
     # two panels: the third thing you look at is a whole document and it has
     # its own screen
     LEVELS = ("groups", "rows")
+    ALWAYS_DRILL = True
+    # the two primary verbs, drawn on the row itself. Off by default: a button
+    # that does nothing is worse than no button
+    ROW_BUTTONS = False
 
     def compose(self) -> ComposeResult:
         yield Search(id="search")
-        yield Card(t("n_projects"),
-                   Table((t("col_project"), self.GROUP_W - 16, "text"),
-                         (t("col_total"), 5, "num"),
-                         (t("col_machine"), None, "text"), id="t-groups"),
-                   id="groups")
+        cols = [(t("col_project"), 34, "text"), (t("col_total"), 6, "num"),
+                (t("col_machine"), None, "text")]
+        if self.ROW_BUTTONS:
+            cols = [("", 2), ("", 2)] + cols
+        yield Card(t("sec_projects"), Table(*cols, id="t-groups"), id="groups")
         yield Card(self.TITLE, self.make_table(), id="rows")
 
     def on_mount(self) -> None:
@@ -427,11 +500,21 @@ class Split(Levels, Container):
         table = self.query_one("#t-groups", Table)
         keep = table.cursor_row
         table.clear()
-        every = sorted({m for _, _, ms in pairs for m in ms})
-        table.add_row(Content.from_markup(f"[$accent b]{t('show_all')}[/]"),
+        self.group_names = [p[0] for p in pairs]
+        every = sorted({m for p in pairs for m in p[2]})
+        pad = [Content("")] * 2 if self.ROW_BUTTONS else []
+        table.add_row(*pad, Content.from_markup(f"[$accent b]{t('show_all')}[/]"),
                       str(total), Content(" ".join(every)))
-        for name, n, machines in pairs:
-            table.add_row(clip(name, self.GROUP_W - 17), str(n),
+        known = srv.project_paths() if self.ROW_BUTTONS else {}
+        for entry in pairs:
+            name, n, machines = entry[:3]
+            todo = entry[3] if len(entry) > 3 else 0
+            buttons = [Content.from_markup(f"[$accent b]\u25b2[/]" if todo
+                                           else "[$foreground 30%]\u25cf[/]"),
+                       Content.from_markup(
+                           "[$accent]\u2302[/]" if known.get(name, {}).get(srv.LOCAL_MACHINE)
+                           else "[$foreground 30%]\u2302[/]")] if self.ROW_BUTTONS else []
+            table.add_row(*buttons, clip(name, 34), str(n),
                           Content.from_markup(
                               " ".join(f"[$accent]{m}[/]" if m == srv.LOCAL_MACHINE
                                        else f"[$foreground 60%]{m}[/]"
@@ -439,11 +522,25 @@ class Split(Levels, Container):
         table.fit()
         if 0 < keep < table.row_count:
             table.move_cursor(row=keep)
+        self.retitle()
+
+    def retitle(self) -> None:
+        """The second panel is named after the project you walked into.
+
+        One panel at a time means the heading is the only thing left saying
+        which project you are inside -- without it, drilling into a project and
+        drilling into `all` look identical.
+        """
+        names = getattr(self, "group_names", [])
+        name = names[self.index - 1] if 0 < self.index <= len(names) else None
+        self.query_one("#rows", Card).border_title = (
+            f"{self.TITLE} · {name}" if name else self.TITLE).upper()
 
     def on_data_table_row_highlighted(self, event) -> None:
         if event.data_table.id == "t-groups":
             self.index = event.cursor_row
             self.fill()
+            self.retitle()
         else:
             self.preview(event.cursor_row)
 
@@ -475,21 +572,50 @@ class Split(Levels, Container):
     def preview(self, index) -> None:
         pass
 
+    def on_click(self, event) -> None:
+        """The first two columns are buttons, and a button is something you can
+        click. The cursor moves to the row under the pointer first: the table
+        sets it from the same coordinate, but only after this bubbles."""
+        if not self.ROW_BUTTONS:
+            return
+        table = event.widget
+        if not isinstance(table, Table) or table.id not in ("t-groups", "t-rows"):
+            return
+        cell = table.hover_coordinate
+        if cell.column > 1 or cell.row < 0:
+            return
+        table.move_cursor(row=cell.row)
+        table.focus()
+        self.act("row_sync" if cell.column == 0 else "row_path")
+
 
 class Sessions(Split):
     TITLE = t("tab_sessions")
-    VERBS = ("keep", "bring")
-    SORT_FIELDS = ("mtime", "project", "n_prompts", "n_tools", "errors",
-                   "machine", "kept", "title")
+    # the two primary verbs and nothing else on the footer. `k` and `a` still
+    # work -- `act` answers to both names -- they are just not four key caps
+    # for two things
+    VERBS = ("row_sync", "row_path")
+    ROW_BUTTONS = True
+    # the two button columns never sort: they are the same glyph for every row
+    # in the same state, so ordering by them orders by nothing
+    SORT_FIELDS = (None, None, "mtime", "project", "n_prompts", "errors",
+                   "machine", "title")
 
     def make_table(self):
         # every column sorts, including the two whose cell is not the datum:
         # `when` renders `5 d` and sorts by `mtime`, `errors` renders markup
-        # and sorts by the count behind it
-        return Table((t("col_when"), 10, "data"), (t("col_project"), 18, "data"),
-                     (t("col_prompts"), 7, "data"), (t("col_tools"), 6, "data"),
+        # and sorts by the count behind it.
+        #
+        # `tools` and `kept` are gone. The tool count never decided anything --
+        # it is a number you read and forget -- and `kept` is what the first
+        # button column already says, in the place where you can act on it.
+        # the buttons are two-tuples: a column with a third element is one `s`
+        # will stop on, and the same glyph for every row in a state sorts by
+        # nothing
+        return Table(("", 2), ("", 2),
+                     (t("col_when"), 10, "data"), (t("col_project"), 18, "data"),
+                     (t("col_prompts"), 7, "data"),
                      (t("col_errors"), 7, "data"), (t("col_machine"), 12, "data"),
-                     (t("col_kept"), 5, "data"),
                      (t("col_title"), None, "data"), id="t-rows")
 
     def refresh_data(self) -> None:
@@ -505,9 +631,35 @@ class Sessions(Split):
             groups.setdefault(r["project"], []).append(r)
         self.groups = sorted(groups.items(), key=lambda kv: -kv[1][0]["mtime"])
         self.set_groups([(name, len(items),
-                          {i.get("machine") or srv.LOCAL_MACHINE for i in items})
+                          {i.get("machine") or srv.LOCAL_MACHINE for i in items},
+                          sum(1 for i in items if self._todo(i)))
                          for name, items in self.groups], len(rows))
         self.fill()
+
+    @staticmethod
+    def _todo(row):
+        """Whether this conversation has somewhere to travel.
+
+        Recorded here and never archived → it can be kept, so the other
+        machines can resume it. Recorded elsewhere and archived → it can be
+        brought down. Anything else is already where it belongs.
+        """
+        if not row.get("machine"):
+            return None if row.get("kept") else "keep"
+        return "bring" if row.get("kept") else None
+
+    @staticmethod
+    def _button(row):
+        """The first column: what `e` would do to this row, as one glyph."""
+        return {"keep": "[$accent b]▲[/]",
+                "bring": "[$accent b]▼[/]"}.get(
+                    Sessions._todo(row), "[$foreground 30%]●[/]")
+
+    def _home(self, project):
+        """The house glyph, lit when this machine has said where the project is."""
+        return ("[$accent]⌂[/]"
+                if srv.project_paths().get(project, {}).get(srv.LOCAL_MACHINE)
+                else "[$foreground 30%]⌂[/]")
 
     def fill(self) -> None:
         pool = (self.all_rows if self.index == 0 or self.index > len(self.groups)
@@ -520,19 +672,18 @@ class Sessions(Split):
                     if q in f"{r['project']} {r['title']} {r.get('machine') or ''}".lower()]
         pool = self.ordered(pool)
         self.rows = pool
+        self._paths = srv.project_paths()
         table = self.query_one("#t-rows", Table)
         table.clear()
         for r in pool:
-            table.add_row(ago(r["mtime"]), clip(r["project"], 18), str(r["n_prompts"]),
-                          str(r["n_tools"]),
+            table.add_row(Content.from_markup(self._button(r)),
+                          Content.from_markup(self._home(r["project"])),
+                          ago(r["mtime"]), clip(r["project"], 18), str(r["n_prompts"]),
                           Content.from_markup(f"[$error]{r['errors']}[/]"
                                               if r["errors"] else "0"),
                           # not clipped to the column width: the marquee needs
                           # something longer than the column to scroll
                           clip(r.get("machine") or srv.LOCAL_MACHINE, 60),
-                          # a dot and not a word: it is a yes/no you scan down
-                          # the column for, and the header already names it
-                          Content.from_markup("[$success]●[/]" if r.get("kept") else ""),
                           clip(r["title"], 200), key=r["id"])
         table.fit()
         if not pool:
@@ -546,14 +697,37 @@ class Sessions(Split):
         r = self.rows[table.cursor_row]
         self.app.push_screen(Reader(clip(r["title"], 60), transcript(r)))
 
-    def act(self, verb: str) -> None:
-        """`k` keeps this conversation whole, `a` brings it to this machine.
+    # ── the project the two buttons are pointed at ──
 
-        The same two verbs the Tools tab spends on skills, pointed at
-        transcripts: one machine archives, the other one brings. Which of the
-        two applies is never a guess — the machine column says where the
-        session was recorded and the kept column says whether it travelled.
+    def current_project(self):
+        """Whichever list has the keys: the project you are standing on."""
+        if self.query_one("#t-groups", Table).has_focus:
+            if 0 < self.index <= len(self.groups):
+                return self.groups[self.index - 1][0]
+            return None               # "all" is not a project
+        if self.rows:
+            return self.rows[self.query_one("#t-rows", Table).cursor_row]["project"]
+        return None
+
+    def act(self, verb: str) -> None:
+        """The two buttons on the row, and the two old key names behind them.
+
+        `e` syncs what the row is asking for and `w` says where the project
+        lives here. Which way `e` goes is never a guess: the machine column
+        says where the conversation was recorded and the archive says whether
+        it has travelled.
         """
+        if verb == "row_path":
+            return self.ask_path()
+        if verb == "row_sync":
+            if self.query_one("#t-groups", Table).has_focus:
+                return self.sync_project()
+            if not self.rows:
+                return
+            todo = self._todo(self.rows[self.query_one("#t-rows", Table).cursor_row])
+            if todo is None:
+                return self.app.notify(t("all_synced"))
+            verb = todo
         table = self.query_one("#t-rows", Table)
         if not self.rows:
             return
@@ -589,11 +763,71 @@ class Sessions(Split):
                       "error" in res)
 
     def _resume(self, sid, short) -> None:
-        """Filed against the directory the TUI was launched from: that is the
-        checkout the user is standing in, and the slug `claude --resume` reads."""
-        res = srv.resume_session(sid, project_dir=Path.cwd())
+        """Filed against the path this machine has for the project, and only
+        against the current directory when nobody has said what that path is.
+
+        `project_slug` is the absolute path with every non-alphanumeric
+        character turned into a dash, so a transcript only resumes under the
+        directory it was filed against. That is the whole reason the registry
+        exists: the same repo is `/home/me/x` here and `D:\\Projects\\x` there,
+        and a conversation brought down against the wrong one is a file
+        `claude --resume` will never look at.
+        """
+        res = srv.resume_session(sid)
         self.app.done(res.get("error") or t("resumed_ok", short=short, id=sid),
                       "error" in res)
+
+    # ── the two buttons ──
+
+    def sync_project(self) -> None:
+        """`e` on a project keeps every conversation of it that is not kept yet.
+
+        Only the local ones: keeping reads a raw transcript out of
+        `~/.claude/projects`, and a session another machine recorded is not
+        there to read.
+        """
+        project = self.current_project()
+        pool = (self.all_rows if project is None
+                else [r for r in self.all_rows if r["project"] == project])
+        todo = [r for r in pool if self._todo(r) == "keep"]
+        name = project or t("show_all")
+        if not todo:
+            return self.app.notify(t("sync_project_none", project=name))
+        lines = [f"[$foreground 60%]{esc(t('sync_project_what', n=len(todo), project=name))}[/]", ""]
+        lines += [f"[$accent]{esc(clip(r['title'], 86))}[/]" for r in todo[:12]]
+        if len(todo) > 12:
+            lines.append(f"[$foreground 60%]\u2026+{len(todo) - 12}[/]")
+        self.ask(t("sync_project_title"), lines, False,
+                 lambda: self._keep_many([r["id"] for r in todo]))
+
+    def _keep_many(self, ids) -> None:
+        ok = sum(1 for sid in ids if "error" not in srv.keep_session(sid))
+        self.app.done(t("sync_project_done", ok=ok, fail=len(ids) - ok),
+                      ok < len(ids))
+
+    def ask_path(self) -> None:
+        """`w` — where this project lives on this machine.
+
+        Per machine and stored in `knowledge/`, so it travels: every machine
+        ends up knowing every path of a project, its own included, which is
+        what lets a transcript recorded somewhere else land in the right
+        checkout here.
+        """
+        project = self.current_project()
+        if not project:
+            return self.app.notify(t("path_none"))
+        paths = srv.project_paths().get(project, {})
+
+        def answered(value):
+            if value is None:
+                return
+            srv.set_project_path(project, value)
+            self.app.done(t("path_saved", project=project, path=value) if value
+                          else t("path_cleared", project=project))
+            self.refresh_data()
+
+        self.app.push_screen(
+            PathPrompt(project, paths.get(srv.LOCAL_MACHINE, ""), paths), answered)
 
 
 class Memory(Split):
@@ -860,14 +1094,16 @@ class Home(Container):
                    Table((t("sec_kinds"), 9, "text"), (t("col_name"), 46, "text"),
                          (t("col_project"), None, "text"), id="t-results"),
                    id="results")
-        with Grid(id="home-grid"):
-            yield Card(t("sec_sync"), Static(id="sync-body"))
-            yield Card(t("sec_parity"),
-                       Table((t("sec_modules"), 16), (t("local"), 6),
-                             (t("in_repo"), 7), ("Δ L", 4), ("Δ R", 4),
-                             id="t-parity"))
-            yield Card(t("sec_usage"), Static(id="usage-body"))
-            yield Card(t("sec_general"), Static(id="overall-body"))
+        # two cards, stacked, and no grid of four. The dashboard used to answer
+        # four questions at once -- what would travel, how far the two sides
+        # are apart, what the plan has left, how much of everything there is --
+        # in four boxes of different densities, and the one number anybody
+        # opens the screen for (is there anything to sync?) was a cell in a
+        # table. Now the counts are the headline and the parity detail lives on
+        # the Config tab, which is the screen that can actually change it.
+        with Container(id="home-grid"):
+            yield Card(t("sec_stats"), Static(id="stats-body"), id="stats")
+            yield Card(t("sec_usage"), Static(id="usage-body"), id="usage")
 
     # the box fires per keystroke and a search is a tenth of a second even with
     # the index warm -- `difflib` is doing real work. It runs when you stop
@@ -952,92 +1188,87 @@ class Home(Container):
         self.run_search()
         return True
 
+    # the tiles of the headline row, in the order the questions come
+    TILE_W = 12
+
+    def _tiles(self, pairs):
+        """Numbers on one line, their names under them, one column each.
+
+        A count is read by looking at it, not by parsing `43 sessions · 12
+        projects · …` -- the old strip put five numbers and five words on one
+        line and made you find the boundaries yourself.
+        """
+        w = self.TILE_W
+        nums = "".join(f"[$accent b]{str(n):^{w}}[/]" for _, n in pairs)
+        names = "".join(f"[$foreground 50%]{clip(t(k), w - 1).upper():^{w}}[/]"
+                        for k, _ in pairs)
+        return f"{nums}\n{names}"
+
     def refresh_data(self) -> None:
         app = self.app
-        sy, p = app.sync, app.parity
+        sy = app.sync
         up, down = app.preview
 
-        drift_l = drift_r = 0
-        table = self.query_one("#t-parity", Table)
-        table.clear()
-        for m in p["modules"]:
-            dl, dr = app.deltas(m)
-            drift_l, drift_r = drift_l + dl, drift_r + dr
-            dot = ("[$success]●[/]" if dl == dr == 0 and m["localFiles"]
-                   else "[$warning]◐[/]" if dl
-                   else "[$primary]◑[/]" if dr
-                   else "[$foreground 40%]○[/]")
-            name = m["id"] if m["enabled"] else f"[$foreground 50%]{m['id']}[/]"
-            table.add_row(
-                Content.from_markup(f"{dot} {name}"),
-                str(m["localFiles"]), str(m["repoFiles"]),
-                Content.from_markup(f"[$warning]{dl}[/]" if dl else "[$foreground 40%]·[/]"),
-                Content.from_markup(f"[$primary]{dr}[/]" if dr else "[$foreground 40%]·[/]"))
+        counts = dict(ui.counters())
+        tiles = self._tiles([(k, counts.get(k, 0)) for k in
+                             ("n_sessions", "n_projects", "n_memories",
+                              "n_skills", "n_machines")])
 
-        lines = []
+        # the two arrows are the headline, not a row in a table: "is there
+        # anything to do" is the question the screen exists to answer
+        w = self.TILE_W
         if not sy.get("remote"):
-            # the one state where every number on this screen is meaningless
-            lines.append(f"[$warning]{t('no_remote')}[/]")
-            lines.append(f"[$foreground 60%]{t('guide_hint')} · {t('tab_help')}[/]")
+            arrows = f"[$warning]{t('no_remote')}[/]  [$foreground 60%]{t('guide_hint')}[/]"
         elif not app.counted:
-            # the counts land one phase after the git status, and `0` there
-            # reads as "nothing to sync" — the opposite of "not known yet"
-            for arrow, key in (("▲", "to_push"), ("▼", "to_pull")):
-                lines.append(f"[$foreground 50%]{arrow} ···[/]  "
-                             f"[$foreground 60%]{t(key)}[/]")
-            lines.append("")
-        elif not (drift_l or drift_r or app.to_push or app.to_pull
-                  or sy["ahead"] or sy["behind"]):
-            # "in sync" is not a percentage. A parity bar at 100 % answered a
-            # question nobody asked and left the one that matters — is there
-            # anything to do? — to be inferred from a full bar.
-            lines.append(f"[$success]● {t('all_synced')}[/]")
+            # the counts land a phase after the git status, and `0` there reads
+            # as "nothing to sync" -- the opposite of "not known yet"
+            arrows = "".join(f"[$foreground 40%]{f'{a} ···':^{w * 2}}[/]"
+                             for a in ("\u25b2", "\u25bc"))
         else:
-            for arrow, n, parts, key in (("▲", app.to_push, ui.preview_parts(up), "to_push"),
-                                         ("▼", app.to_pull, ui.preview_parts(down), "to_pull")):
-                colour = "$accent" if n else "$foreground 50%"
-                lines.append(f"[{colour}]{arrow} {n}[/]  [b]{t(key)}[/b]")
-                lines += [f"    [$foreground 60%]{x}[/]" for x in (parts or [t("nothing")])]
-                lines.append("")
-        lines += [
-            f"[$foreground 60%]{t('last_sync'):<12}[/]{ui.last_sync()}",
-            f"[$foreground 60%]{'git':<12}[/][$accent]↑{sy['ahead']} ↓{sy['behind']}[/]"
-            f"[$foreground 40%] · [/]"
-            + (f"[$warning]{t('dirty')}[/]" if sy["dirty"] else f"[$success]{t('clean')}[/]"),
-            f"[$foreground 60%]{t('checked', ago=ui.checked_ago())}[/]",
-        ]
+            arrows = ""
+            for arrow, n, data, key in (("\u25b2", app.to_push, up, "to_push"),
+                                        ("\u25bc", app.to_pull, down, "to_pull")):
+                colour = "$accent b" if n else "$foreground 40%"
+                arrows += f"[{colour}]{f'{arrow} {n}':^{w * 2}}[/]"
+            parts = " \u00b7 ".join(ui.preview_parts(up) + ui.preview_parts(down))
+            if parts:
+                # its own line: appended to the arrows it wrapped under them in
+                # a narrow window and the two numbers stopped lining up with
+                # the tiles above
+                arrows += f"\n[$foreground 60%]{clip(parts, 64)}[/]"
+            elif not (sy["ahead"] or sy["behind"]):
+                arrows += f"\n[$success]{t('all_synced')}[/]"
+
+        lines = [tiles, "", arrows, "",
+                 f"[$foreground 60%]{t('last_sync')} [/]{ui.last_sync()}"
+                 f"[$foreground 40%]  ·  [/]"
+                 f"[$foreground 60%]git [/][$accent]\u2191{sy['ahead']} \u2193{sy['behind']}[/]"
+                 f"[$foreground 40%]  ·  [/]"
+                 + (f"[$warning]{t('dirty')}[/]" if sy["dirty"]
+                    else f"[$success]{t('clean')}[/]")
+                 + f"[$foreground 40%]  ·  [/]"
+                   f"[$foreground 60%]{t('checked', ago=ui.checked_ago())}[/]"]
         if app.update.get("available"):
-            lines.append(f"[$success]▲ {t('update_available')}: "
+            lines.append(f"[$success]\u25b2 {t('update_available')}: "
                          f"{app.update['available']}[/]  [$accent b]u[/]")
-        self.query_one("#sync-body", Static).update(Content.from_markup("\n".join(lines)))
+        self.query_one("#stats-body", Static).update(
+            Content.from_markup("\n".join(lines)))
 
         usage = []
         for lim in (app.usage.get("limits") or []):
             pct = lim.get("percent") or 0
-            name = clip((lim.get("label") or lim.get("kind") or "?").replace("_", " "), 16)
+            name = clip((lim.get("label") or lim.get("kind") or "?").replace("_", " "), 22)
             usage.append(f"[b]{name}[/b]  [$accent]{pct}%[/]"
                          f"[$foreground 60%]   {ui._reset_at(lim.get('resetsAt'))}[/]")
-            usage.append(bar(pct, width=24))
+            usage.append(bar(pct, width=40))
             usage.append("")
         costs = [d.get("totalCost") or 0 for d in (app.usage.get("daily") or [])]
         if costs:
             usage.append(f"[$foreground 60%]{t('usage_daily')}[/]")
-            usage.append(f"[$accent]{spark(costs, 24)}[/]"
+            usage.append(f"[$accent]{spark(costs, 40)}[/]"
                          f"[$foreground 60%]  {costs[-1]:.0f}[/]")
         self.query_one("#usage-body", Static).update(Content.from_markup(
             "\n".join(usage) or f"[$foreground 60%]{t('no_usage')}[/]"))
-
-        counters = "   ".join(f"[$accent b]{n}[/] [$foreground 60%]{t(k)}[/]"
-                              for k, n in ui.counters())
-        machines = " · ".join(name + (f" ({t('this_one')})" if d["local"] else "")
-                              for name, d in sorted(srv.list_machines().items()))
-        always = " · ".join(f"{n} {t('n_' + k)}"
-                            for k, n in ui.knowledge_counts().items())
-        self.query_one("#overall-body", Static).update(Content.from_markup(
-            f"{counters}\n\n"
-            f"[$foreground 60%]{t('sec_machines'):<16}[/]{machines}\n"
-            f"[$foreground 60%]{t('sec_always'):<16}[/]{always}\n"
-            f"[$foreground 60%]{'agent':<16}[/]{srv.agents.label()}"))
 
 
 class Config(Container):
@@ -1053,7 +1284,7 @@ class Config(Container):
                    Table(("", 22), ("", None), id="t-prefs", show_header=False),
                    id="prefs")
         yield Card(t("sec_modules"),
-                   Table(("", 16), ("", 6), ("", None), id="t-modules",
+                   Table(("", 14), ("", 6), ("", None), id="t-modules",
                          show_header=False), id="modules")
         yield Card(t("sec_remote"), Static(id="remote-body"), id="remote")
 
@@ -1072,9 +1303,7 @@ class Config(Container):
                       Content.from_markup(f"[$accent b]{t('ground_' + self.app.ground)}[/]"))
         prefs.add_row(t("language"), Content.from_markup(f"[$accent b]{i18n.LANG}[/]"))
         on = srv.badge_status()["on"]
-        prefs.add_row(t("badge_row"), Content.from_markup(
-            f"[$accent]{BOX_ON if on else BOX_OFF}[/] "
-            f"[$foreground 60%]{t('badge_on') if on else t('badge_off')}[/]"))
+        prefs.add_row(t("badge_row"), Content.from_markup(pill(on)))
         prefs.fit()
         if 0 <= keep < prefs.row_count:
             prefs.move_cursor(row=keep)
@@ -1083,16 +1312,23 @@ class Config(Container):
         keep = mods.cursor_row
         mods.clear()
         for key, n in ui.knowledge_counts().items():
-            mods.add_row(Content.from_markup(f"[$success]●[/] {t('n_' + key)}"), str(n),
-                         Content.from_markup(f"[$foreground 60%]{t('always_syncing')}[/]"))
+            mods.add_row(t("n_" + key), Content.from_markup(pill(True)),
+                         Content.from_markup(
+                             f"[$foreground 60%]{n} · {t('always_syncing')}[/]"))
         self.modules = srv.config_status()
         for m in self.modules:
+            # the drift the home used to keep in a table of its own: two file
+            # counts and how far apart they are, on the row that can turn the
+            # module off
+            dl, dr = self.app.deltas(m)
+            drift = (f"[$warning]ΔL{dl}[/] " if dl else "") + \
+                    (f"[$primary]ΔR{dr}[/]" if dr else "")
             mods.add_row(
                 m["id"],
-                Content.from_markup(f"[$accent]{BOX_ON if m['enabled'] else BOX_OFF}[/]"),
+                Content.from_markup(pill(m["enabled"])),
                 Content.from_markup(
-                    f"[$foreground 60%]{t('syncing') if m['enabled'] else t('not_syncing')}"
-                    f"   {m['localFiles']} {t('local')} · {m['repoFiles']} {t('in_repo')}[/]"))
+                    f"[$foreground 60%]{m['localFiles']} {t('local')} · "
+                    f"{m['repoFiles']} {t('in_repo')}[/]   {drift}"))
         mods.fit()
         if 0 <= keep < mods.row_count:
             mods.move_cursor(row=keep)
@@ -1233,6 +1469,8 @@ class StoApp(App):
         # shown, not hidden: `check_action` below offers each one only on the
         # tab that can do it, so the footer names the verbs instead of leaving
         # them to be discovered by accident
+        Binding("e", "verb('row_sync')", t("k_row_sync")),
+        Binding("w", "verb('row_path')", t("k_row_path")),
         Binding("k", "verb('keep')", t("k_keep")),
         Binding("a", "verb('bring')", t("k_bring")),
         Binding("d", "verb('delete')", t("k_delete")),
@@ -1620,8 +1858,18 @@ class StoApp(App):
         self.query_one("#tabs", TabBar).focus()
 
     def action_open(self) -> None:
-        if isinstance(self.focused, Input):
-            return
+        """`↵` opens what the screen is pointed at — unless a box owns it.
+
+        The binding is `priority`, so the app gets the key before the focused
+        widget does and an `Input` never saw its own `enter`: every
+        `on_input_submitted` in this file was dead code, and the path prompt
+        could be typed into but not answered. Returning early is not enough —
+        the key is already consumed — so the message the box would have sent is
+        sent for it.
+        """
+        focused = self.focused
+        if isinstance(focused, Input):
+            return focused.post_message(Input.Submitted(focused, focused.value))
         pane = self.panes[self.tab]
         if hasattr(pane, "open"):
             pane.open()

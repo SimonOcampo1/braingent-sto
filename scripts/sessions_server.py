@@ -59,6 +59,7 @@ def session_meta(path: Path) -> dict:
     return {
         "id": path.stem,
         "project": project_name(path, d.get("cwd")),
+        "cwd": d.get("cwd"),
         "mtime": path.stat().st_mtime,
         "title": (d["prompts"][0][:TITLE_CAP] if d["prompts"] else "(no prompt)"),
         "n_prompts": len(d["prompts"]),
@@ -254,6 +255,7 @@ def list_sessions(projects_dir=None, knowledge_dir=None) -> list[dict]:
     rows.sort(key=lambda r: r["mtime"], reverse=True)
     rows = rows[:MAX_SESSIONS]
     if cacheable:
+        remember_project_paths(rows)
         _sessions_cache.update(ts=_t.time(), data=rows)
     return rows
 
@@ -931,6 +933,71 @@ def project_slug(path) -> str:
     return re.sub(r"[^A-Za-z0-9]", "-", str(Path(path).resolve()))
 
 
+KNOWLEDGE_PROJECTS = REPO_ROOT / "knowledge" / "projects"
+
+
+def project_paths() -> dict:
+    """{project: {machine: absolute path}} — where each project lives, per machine.
+
+    One JSON file per machine and not one shared map: the same project sits at
+    `/home/simon/repos/x` here and at `D:\\Projects\\x` there, both answers are
+    right, and two machines editing the same line of the same file is a merge
+    conflict on every push. A file each merges by itself.
+    """
+    out: dict[str, dict[str, str]] = {}
+    if not KNOWLEDGE_PROJECTS.is_dir():
+        return out
+    for f in sorted(KNOWLEDGE_PROJECTS.glob("*.json")):
+        try:
+            data = json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        for project, path in (data or {}).items():
+            out.setdefault(project, {})[f.stem] = path
+    return out
+
+
+def local_project_path(project: str) -> Path | None:
+    """Where this machine keeps `project`, if anybody ever said."""
+    path = project_paths().get(project, {}).get(LOCAL_MACHINE)
+    return Path(path) if path else None
+
+
+def set_project_path(project: str, path) -> dict:
+    """Record (or, with a falsy `path`, forget) where this machine keeps it."""
+    f = KNOWLEDGE_PROJECTS / f"{LOCAL_MACHINE}.json"
+    try:
+        data = json.loads(f.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        data = {}
+    if path:
+        data[project] = str(Path(path).expanduser())
+    else:
+        data.pop(project, None)
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return data
+
+
+def remember_project_paths(rows) -> None:
+    """The cwd a local transcript was recorded in *is* the path of the project
+    on this machine, so nobody has to type it. Only what is new gets written:
+    this runs on every session listing."""
+    known = project_paths()
+    fresh = {}
+    for r in rows:
+        cwd = r.get("cwd")
+        if not cwd or r.get("machine"):
+            continue          # a row from another machine carries their path
+        if known.get(r["project"], {}).get(LOCAL_MACHINE) != cwd:
+            fresh.setdefault(r["project"], cwd)
+    for project, cwd in fresh.items():
+        try:
+            set_project_path(project, cwd)
+        except OSError:
+            return            # a read-only checkout is not worth a crash
+
+
 def _local_session(sid: str, projects_dir=None):
     """(path, error) — a raw local session from an id or a unique id prefix."""
     pd = projects_dir or dx.PROJECTS_DIR
@@ -1010,7 +1077,8 @@ def resume_session(sid: str, project_dir=None, claude_dir=None,
         return {"error": "ambiguous id: " + ", ".join(r["id"][:12] for r in hits[:5])}
     row = hits[0]
     cd = Path(claude_dir) if claude_dir else CLAUDE_DIR
-    target = cd / "projects" / project_slug(project_dir or Path.cwd())
+    target = cd / "projects" / project_slug(
+        project_dir or local_project_path(row.get("project") or "") or Path.cwd())
     out = target / (row["id"] + ".jsonl")
     if out.exists():
         return {"error": f"{out} already exists: this session is already here"}
