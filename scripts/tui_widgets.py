@@ -405,7 +405,7 @@ class Table(DataTable):
             # sort by a timestamp while the cell says "5 d". A table that has
             # no pane behind it -- the kinds rail, the preferences -- falls
             # through and sorts what it can see.
-            return owner.sort_rows(self.sort_by)
+            return owner.sort_rows(self.sort_by, self)
         if self.sort_by is None:
             return self.refill()
         index, reverse = self.sort_by
@@ -486,38 +486,34 @@ class Search(Input):
 
 # ── the wordmark ──
 #
-# figlet's `double_blocky`: solid `█▀▄` at two rows a line, so the whole name
-# fits on one line, in two rows and fifty-one columns. The face of the
-# prototype is `ansi_shadow`, and the same name in it is 103 columns and six
-# rows — most of the screen spent saying what the screen already is.
+# figlet's `smmono9`: five rows and fifty-two columns. `ansi_shadow` was the
+# face before it, at six rows and 103 columns, and the name was the loudest
+# thing on a screen whose job is the search box under it.
 #
 # Pasted rather than generated: it is two strings, and a dependency to produce
 # two strings is a dependency to keep working forever. To change the face:
 #     uv run --no-project --with pyfiglet python -c
-#       "import pyfiglet; print(pyfiglet.Figlet(font='double_blocky').renderText('BRAINGENT STO'))"
+#       "import pyfiglet; print(pyfiglet.Figlet(font='smmono9').renderText('BRAINGENT STO'))"
 WORDMARK = [
-    "██████╗ ██████╗  █████╗ ██╗███╗   ██╗ ██████╗ ███████╗███╗   ██╗████████╗    ███████╗████████╗ ██████╗",
-    "██╔══██╗██╔══██╗██╔══██╗██║████╗  ██║██╔════╝ ██╔════╝████╗  ██║╚══██╔══╝    ██╔════╝╚══██╔══╝██╔═══██╗",
-    "██████╔╝██████╔╝███████║██║██╔██╗ ██║██║  ███╗█████╗  ██╔██╗ ██║   ██║       ███████╗   ██║   ██║   ██║",
-    "██╔══██╗██╔══██╗██╔══██║██║██║╚██╗██║██║   ██║██╔══╝  ██║╚██╗██║   ██║       ╚════██║   ██║   ██║   ██║",
-    "██████╔╝██║  ██║██║  ██║██║██║ ╚████║╚██████╔╝███████╗██║ ╚████║   ██║       ███████║   ██║   ╚██████╔╝",
-    "╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚═╝  ╚═══╝ ╚═════╝ ╚══════╝╚═╝  ╚═══╝   ╚═╝       ╚══════╝   ╚═╝    ╚═════╝",
+    "▗▄▄ ▗▄▄  ▗▖ ▗▄▄ ▗▖ ▖ ▗▄ ▗▄▄▖▗▖ ▖▄▄▄▖     ▄▄ ▄▄▄▖ ▄▄",
+    "▐  ▌▐ ▝▌ ▐▌  ▐  ▐▚ ▌▗▘ ▘▐   ▐▚ ▌ ▐      ▐▘ ▘ ▐  ▗▘▝▖",
+    "▐▄▄▘▐▄▄▘ ▌▐  ▐  ▐▐▖▌▐ ▗▖▐▄▄▖▐▐▖▌ ▐      ▝▙▄  ▐  ▐  ▌",
+    "▐  ▌▐ ▝▖ ▙▟  ▐  ▐ ▌▌▐  ▌▐   ▐ ▌▌ ▐        ▝▌ ▐  ▐  ▌",
+    "▐▄▄▘▐  ▘▐  ▌▗▟▄ ▐ ▐▌ ▚▄▘▐▄▄▖▐ ▐▌ ▐      ▝▄▟▘ ▐   ▙▟",
 ]
 
 WORDMARK_STACK = [
-    "██████╗ ██████╗  █████╗ ██╗███╗   ██╗ ██████╗ ███████╗███╗   ██╗████████╗",
-    "██╔══██╗██╔══██╗██╔══██╗██║████╗  ██║██╔════╝ ██╔════╝████╗  ██║╚══██╔══╝",
-    "██████╔╝██████╔╝███████║██║██╔██╗ ██║██║  ███╗█████╗  ██╔██╗ ██║   ██║",
-    "██╔══██╗██╔══██╗██╔══██║██║██║╚██╗██║██║   ██║██╔══╝  ██║╚██╗██║   ██║",
-    "██████╔╝██║  ██║██║  ██║██║██║ ╚████║╚██████╔╝███████╗██║ ╚████║   ██║",
-    "╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚═╝  ╚═══╝ ╚═════╝ ╚══════╝╚═╝  ╚═══╝   ╚═╝",
+    "▗▄▄ ▗▄▄  ▗▖ ▗▄▄ ▗▖ ▖ ▗▄ ▗▄▄▖▗▖ ▖▄▄▄▖",
+    "▐  ▌▐ ▝▌ ▐▌  ▐  ▐▚ ▌▗▘ ▘▐   ▐▚ ▌ ▐",
+    "▐▄▄▘▐▄▄▘ ▌▐  ▐  ▐▐▖▌▐ ▗▖▐▄▄▖▐▐▖▌ ▐",
+    "▐  ▌▐ ▝▖ ▙▟  ▐  ▐ ▌▌▐  ▌▐   ▐ ▌▌ ▐",
+    "▐▄▄▘▐  ▘▐  ▌▗▟▄ ▐ ▐▌ ▚▄▘▐▄▄▖▐ ▐▌ ▐",
     "",
-    "    ███████╗████████╗ ██████╗",
-    "    ██╔════╝╚══██╔══╝██╔═══██╗",
-    "    ███████╗   ██║   ██║   ██║",
-    "    ╚════██║   ██║   ██║   ██║",
-    "    ███████║   ██║   ╚██████╔╝",
-    "    ╚══════╝   ╚═╝    ╚═════╝",
+    "            ▄▄ ▄▄▄▖ ▄▄",
+    "           ▐▘ ▘ ▐  ▗▘▝▖",
+    "           ▝▙▄  ▐  ▐  ▌",
+    "             ▝▌ ▐  ▐  ▌",
+    "           ▝▄▟▘ ▐   ▙▟",
 ]
 
 WORDMARK_W = max(len(line) for line in WORDMARK)
