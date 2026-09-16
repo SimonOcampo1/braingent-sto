@@ -414,7 +414,7 @@ class Levels:
     def stacked(self) -> bool:
         return self.app.has_class(self.STACK_CLASS)
 
-    def set_level(self, n) -> None:
+    def set_level(self, n, focus=True) -> None:
         """Which panel is on screen when only one fits.
 
         A number on the pane and not a `push_screen` per level: the widgets
@@ -431,8 +431,11 @@ class Levels:
         # the search box belongs to the outermost level: it filters the list
         # you are about to pick from, and over a document it is a box that does
         # nothing
-        self.query_one("#search", Search).display = not narrow or self.level == 0
-        if narrow:
+        # -- unless there is a query in it: then it is the thing you are typing
+        # into, and the level under it is where the answer shows up
+        self.query_one("#search", Search).display = (
+            not narrow or self.level == 0 or bool(getattr(self, "q", "")))
+        if narrow and focus:
             # the first thing in the panel that can take keys, whatever it is:
             # a list is a table and a document is a scroll, and a level nobody
             # can focus is a level where no key does anything
@@ -460,7 +463,34 @@ class Levels:
         and `↵` means what it has always meant.
         """
         if self.stacked and self.level < len(self.LEVELS) - 1:
+            # from the search box the way down is the list it filtered, which
+            # is already on screen: walking the ring gets there, a level deeper
+            # does not
+            if self.level > 0 and self.query_one("#search", Search).has_focus:
+                return False
             self.set_level(self.level + 1)
+            return True
+        return False
+
+    def follow_query(self) -> None:
+        """Show what the box filtered while you type into it.
+
+        In one column the outermost level is the rail, and the rows the query
+        narrows live one level down, off screen: the filter ran on every key
+        and nothing visible changed until `↵` drilled in. So typing walks to
+        the rows and clearing the box walks back, the box keeping the focus.
+        """
+        if not self.stacked:
+            return
+        if self.q and self.level == 0:
+            self.set_level(1, focus=False)
+        elif not self.q and self.level == 1:
+            self.set_level(0, focus=False)
+
+    def submit_query(self) -> bool:
+        """`↵` in the box when the rows are already on screen: go to them."""
+        if self.stacked and self.level > 0:
+            self.query_one("#t-rows", Table).focus()
             return True
         return False
 
@@ -611,15 +641,17 @@ class Split(Levels, Container):
     def on_input_changed(self, event) -> None:
         self.q = event.value
         self.fill()
+        self.follow_query()
 
     def on_input_submitted(self, event) -> None:
         """`↵` in the box goes to what it filtered.
 
         Through `open()` and not straight to the table: with one panel on
-        screen at a time the row list is not displayed yet, and focusing a
-        hidden widget focuses nothing.
+        screen at a time and an empty box the row list is not displayed yet,
+        and focusing a hidden widget focuses nothing.
         """
-        self.open()
+        if not self.submit_query():
+            self.open()
 
     def preview(self, index) -> None:
         pass
@@ -1042,6 +1074,7 @@ class Tools(Levels, Container):
         # only the rows: the kinds are the modules and no query changes those
         self.q = event.value
         self.fill()
+        self.follow_query()
 
     def on_input_submitted(self, event) -> None:
         self.query_one("#t-rows", Table).focus()
