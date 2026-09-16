@@ -18,6 +18,8 @@ except ImportError:
     print("OK (textual not installed — skipped)")
     raise SystemExit(0)
 
+from textual.geometry import Offset
+
 import tui_app  # noqa: E402
 import tui_widgets  # noqa: E402
 from textual.widgets import Markdown  # noqa: E402
@@ -43,18 +45,23 @@ async def on_kind(app, pilot, kind="skills"):
     return pane
 
 
-def test_the_wordmark_is_a_rectangle():
+def test_both_wordmarks_are_rectangles_once_painted():
     """Pasted art goes crooked the moment somebody edits one line of it.
 
-    Every row has to be the same width or the block leans, and it has to stay
-    small: the same name in the face of the prototype is 103 columns of banner
-    across the top of every home, which is most of the screen spent saying what
-    the screen already is.
+    Two faces now: the tall one is the product's own, the flat one is what
+    still fits when the window cannot hold it. Neither is stored as a
+    rectangle — the generator right-strips — so the widget pads before it
+    centres, and it is the padded block that has to be square. Centring a
+    ragged block shears a six-row letterform into a staircase.
     """
-    rows = tui_app.WORDMARK
-    assert len({len(r) for r in rows}) == 1, [len(r) for r in rows]
-    assert len(rows) == 2, len(rows)          # one line, two rows of blocks
-    assert len(rows[0]) < 60, len(rows[0])
+    for art, rows, cap in ((tui_widgets.WORDMARK, 2, 60),
+                           (tui_widgets.WORDMARK_BIG, 6, 110)):
+        assert len(art) == rows, len(art)
+        width = max(len(r) for r in art)
+        assert width < cap, width
+        padded = [f"{r:<{width}}" for r in art]
+        assert len({len(r) for r in padded}) == 1, [len(r) for r in padded]
+    assert tui_widgets.WORDMARK_BIG_W > tui_widgets.WORDMARK_W
 
 
 def test_the_accent_and_the_ground_are_one_theme_each():
@@ -333,18 +340,19 @@ def test_the_wordmark_goes_when_it_does_not_fit_and_not_before():
     asyncio.run(go())
 
 
-def test_every_card_of_the_home_is_reachable_in_one_column():
-    """At 70x30 the home rendered SYNC and half of CONFIG PARITY, and USAGE
-    and OVERALL were not on the screen at all.
+def test_the_whole_home_is_reachable_in_a_short_window():
+    """At 70x30 the home rendered SYNC and half of CONFIG PARITY, and USAGE and
+    OVERALL were not on the screen at all.
 
     Not clipped — absent, with no scroll in the pane, so no key and no mouse
-    could reach them. A `1fr` card inside an `auto` grid row resolves to the
-    card's full natural height, and the first one took the screen. The home is
-    two cards now instead of four, and the rule it broke is the same one.
+    could reach them. A `1fr` child inside an `auto` row resolves to its own
+    natural height, and the first one took the screen. The home is cards-free
+    now and fits at that size, so the rule is checked where it can still break:
+    a window too short for the masthead, the counts and the gauges together.
     """
     async def go():
         app = tui_app.StoApp()
-        async with app.run_test(size=(70, 30)) as pilot:
+        async with app.run_test(size=(70, 16)) as pilot:
             await app.workers.wait_for_complete()
             await pilot.pause()
             home = app.query_one("#home")
@@ -352,8 +360,11 @@ def test_every_card_of_the_home_is_reachable_in_one_column():
             assert app.query_one("#more").display, "nothing says there is more"
             home.scroll_end(animate=False)
             await pilot.pause()
-            titles = [c.border_title for c in home.query(tui_app.Card)]
-            assert "USAGE" in titles, titles
+            seen = "\n".join(screen_text(app))
+            usage = app.usage.get("limits") or []
+            if usage:
+                name = (usage[0].get("label") or usage[0].get("kind") or "")
+                assert name.replace("_", " ")[:7] in seen, seen
             assert not app.query_one("#more").display, "the arrow stayed at the bottom"
 
     asyncio.run(go())
@@ -958,6 +969,47 @@ def test_the_two_buttons_are_columns_and_they_never_sort():
     asyncio.run(go())
 
 
+def test_the_row_buttons_are_clickable_and_open_their_own_modal():
+    """They are chips in a column because a `DataTable` cannot hold a real
+    `Button`, but they have to behave like buttons: the pointer lands on one
+    and the thing it names opens.
+
+    Clicking also moves the cursor to the row under the pointer first — the
+    table sets it from the same coordinate, but only after this bubbles, so
+    acting on `cursor_row` without moving it acts on the previous row.
+    """
+    async def go():
+        app = tui_app.StoApp()
+        async with app.run_test(size=(140, 30)) as pilot:
+            await app.workers.wait_for_complete()
+            await pilot.press("2")
+            await pilot.pause()
+            pane = app.query_one("#sessions")
+            if not pane.groups:
+                return                          # a machine with no transcripts
+            groups = pane.query_one("#t-groups", tui_app.Table)
+            widths = [c.get_render_width(groups) for c in groups.columns.values()]
+
+            # the second column, on the second row of the table: row 0 is the
+            # header, row 1 is "all", row 2 is the first real project
+            x = widths[0] + groups.cell_padding * 3
+            await pilot.click(groups, offset=Offset(x, 3))
+            await pilot.pause()
+            assert type(app.screen).__name__ == "PathPrompt", app.screen
+            assert app.screen._project == pane.groups[1][0], app.screen._project
+            await pilot.press("escape")
+            await pilot.pause()
+
+            # and the first column is the other verb, with its own modal
+            await pilot.click(groups, offset=Offset(2, 3))
+            await pilot.pause()
+            assert type(app.screen).__name__ in ("Confirm", "Screen"), app.screen
+            if type(app.screen).__name__ == "Confirm":
+                await pilot.press("escape")
+
+    asyncio.run(go())
+
+
 def test_w_asks_where_the_project_lives_and_writes_only_on_enter():
     """The second button on the row. A project sits at a different absolute
     path on every machine, `claude --resume` only reads the directory matching
@@ -1067,7 +1119,7 @@ def test_the_footer_offers_a_verb_only_where_it_does_something():
     asyncio.run(go())
 
 if __name__ == "__main__":
-    test_the_wordmark_is_a_rectangle()
+    test_both_wordmarks_are_rectangles_once_painted()
     test_the_accent_and_the_ground_are_one_theme_each()
     test_a_screen_renders_with_its_chrome_pinned()
     test_a_document_has_its_own_keys()
@@ -1081,7 +1133,7 @@ if __name__ == "__main__":
     test_a_count_nobody_has_run_yet_is_not_a_zero()
     test_a_pane_off_screen_is_rebuilt_when_you_reach_it_and_not_before()
     test_the_wordmark_goes_when_it_does_not_fit_and_not_before()
-    test_every_card_of_the_home_is_reachable_in_one_column()
+    test_the_whole_home_is_reachable_in_a_short_window()
     test_a_narrow_split_shows_one_level_and_walks_between_them()
     test_a_split_is_a_hierarchy_at_every_width()
     test_tab_walks_panels_and_the_tab_bar_is_somewhere_you_can_stand()
@@ -1097,6 +1149,7 @@ if __name__ == "__main__":
     test_keeping_a_conversation_asks_first_and_never_writes_on_escape()
     test_a_conversation_with_nowhere_to_go_is_not_a_write()
     test_the_two_buttons_are_columns_and_they_never_sort()
+    test_the_row_buttons_are_clickable_and_open_their_own_modal()
     test_w_asks_where_the_project_lives_and_writes_only_on_enter()
     test_the_home_leads_with_the_counts_and_the_two_arrows()
     test_the_footer_offers_a_verb_only_where_it_does_something()

@@ -32,8 +32,8 @@ from textual.screen import ModalScreen, Screen  # noqa: E402
 from textual.widgets import Footer, Input, Markdown, Static  # noqa: E402
 
 from tui_widgets import (  # noqa: E402
-    GROUNDS, WORDMARK, WORDMARK_W, Card,
-    Search, Table, Wordmark, ago, bar, clip, esc, pill, spark, theme_for)
+    GROUNDS, WORDMARK_BIG_W, WORDMARK_W, Card, Search, Table, Wordmark,
+    ago, chip, clip, esc, gauge, pill, spark, theme_for)
 
 t = i18n.t
 
@@ -471,10 +471,12 @@ class Split(Levels, Container):
 
     def compose(self) -> ComposeResult:
         yield Search(id="search")
-        cols = [(t("col_project"), 34, "text"), (t("col_total"), 6, "num"),
+        cols = [(t("col_project"), 30, "text"), (t("col_total"), 6, "num"),
                 (t("col_machine"), None, "text")]
         if self.ROW_BUTTONS:
-            cols = [("", 2), ("", 2)] + cols
+            # wide enough for the word inside the chip: a button with no label
+            # is a glyph, and a glyph is not something anybody tries to click
+            cols = [("", 11), ("", 8)] + cols
         yield Card(t("sec_projects"), Table(*cols, id="t-groups"), id="groups")
         yield Card(self.TITLE, self.make_table(), id="rows")
 
@@ -483,6 +485,7 @@ class Split(Levels, Container):
         self.index = 0
         self.rows = []
         self.level = 0
+        self._wire_buttons()
         self.refresh_data()
         # focus starts on the left: you pick the project first, and the
         # right-hand list is what you move to once you have
@@ -509,12 +512,14 @@ class Split(Levels, Container):
         for entry in pairs:
             name, n, machines = entry[:3]
             todo = entry[3] if len(entry) > 3 else 0
-            buttons = [Content.from_markup(f"[$accent b]\u25b2[/]" if todo
-                                           else "[$foreground 30%]\u25cf[/]"),
+            buttons = [Content.from_markup(
+                           chip(f"\u25b2 {t('btn_keep')}") if todo
+                           else chip(f"\u25cf {t('btn_done')}", "off")),
                        Content.from_markup(
-                           "[$accent]\u2302[/]" if known.get(name, {}).get(srv.LOCAL_MACHINE)
-                           else "[$foreground 30%]\u2302[/]")] if self.ROW_BUTTONS else []
-            table.add_row(*buttons, clip(name, 34), str(n),
+                           chip(f"\u2302 {t('btn_path')}", "quiet"
+                                if known.get(name, {}).get(srv.LOCAL_MACHINE)
+                                else "on"))] if self.ROW_BUTTONS else []
+            table.add_row(*buttons, clip(name, 30), str(n),
                           Content.from_markup(
                               " ".join(f"[$accent]{m}[/]" if m == srv.LOCAL_MACHINE
                                        else f"[$foreground 60%]{m}[/]"
@@ -534,7 +539,7 @@ class Split(Levels, Container):
         names = getattr(self, "group_names", [])
         name = names[self.index - 1] if 0 < self.index <= len(names) else None
         self.query_one("#rows", Card).border_title = (
-            f"{self.TITLE} · {name}" if name else self.TITLE).upper()
+            f" {self.TITLE} · {name} " if name else f" {self.TITLE} ").upper()
 
     def on_data_table_row_highlighted(self, event) -> None:
         if event.data_table.id == "t-groups":
@@ -572,21 +577,29 @@ class Split(Levels, Container):
     def preview(self, index) -> None:
         pass
 
-    def on_click(self, event) -> None:
-        """The first two columns are buttons, and a button is something you can
-        click. The cursor moves to the row under the pointer first: the table
-        sets it from the same coordinate, but only after this bubbles."""
+    def _wire_buttons(self) -> None:
+        """Both lists carry the same two buttons in the same two columns.
+
+        The cursor moves to the row under the pointer before the verb runs: a
+        button read through `cursor_row` would act on the row you clicked last
+        time.
+        """
         if not self.ROW_BUTTONS:
             return
-        table = event.widget
-        if not isinstance(table, Table) or table.id not in ("t-groups", "t-rows"):
-            return
-        cell = table.hover_coordinate
-        if cell.column > 1 or cell.row < 0:
-            return
-        table.move_cursor(row=cell.row)
-        table.focus()
-        self.act("row_sync" if cell.column == 0 else "row_path")
+        for name in ("t-groups", "t-rows"):
+            table = self.query_one(f"#{name}", Table)
+            table.buttons = 2
+            table.button_handler = self._button_click
+
+    def _button_click(self, table, row, column) -> None:
+        # `move_cursor` sets the coordinate now and posts the highlight for
+        # later, so `cursor_row` is already right and `self.index` -- which the
+        # highlight handler writes -- still points at the project you were on.
+        # The click says which row it was; nothing has to wait for a message.
+        if table.id == "t-groups":
+            self.index = row
+            self.fill()
+        self.act("row_sync" if column == 0 else "row_path")
 
 
 class Sessions(Split):
@@ -612,7 +625,7 @@ class Sessions(Split):
         # the buttons are two-tuples: a column with a third element is one `s`
         # will stop on, and the same glyph for every row in a state sorts by
         # nothing
-        return Table(("", 2), ("", 2),
+        return Table(("", 11), ("", 8),
                      (t("col_when"), 10, "data"), (t("col_project"), 18, "data"),
                      (t("col_prompts"), 7, "data"),
                      (t("col_errors"), 7, "data"), (t("col_machine"), 12, "data"),
@@ -650,16 +663,30 @@ class Sessions(Split):
 
     @staticmethod
     def _button(row):
-        """The first column: what `e` would do to this row, as one glyph."""
-        return {"keep": "[$accent b]▲[/]",
-                "bring": "[$accent b]▼[/]"}.get(
-                    Sessions._todo(row), "[$foreground 30%]●[/]")
+        """The first column: what `e` would do to this row, spelled out.
+
+        Three states and three labels, because a row whose button does nothing
+        has to look different from one whose button writes to the repo. A word
+        and not a triangle: a glyph is not something anybody tries to click.
+        """
+        todo = Sessions._todo(row)
+        if todo == "keep":
+            return chip(f"▲ {t('btn_keep')}")
+        if todo == "bring":
+            return chip(f"▼ {t('btn_bring')}")
+        return chip(f"● {t('btn_done')}", "off")
 
     def _home(self, project):
-        """The house glyph, lit when this machine has said where the project is."""
-        return ("[$accent]⌂[/]"
-                if srv.project_paths().get(project, {}).get(srv.LOCAL_MACHINE)
-                else "[$foreground 30%]⌂[/]")
+        """The path button. Filled while this machine has not said where the
+        project is, quiet once it has -- the same chip either way, because it
+        opens the same prompt either way.
+
+        Off `self._paths`, refreshed once per `fill()`: reading the registry
+        per row is five hundred file reads to paint one screen.
+        """
+        known = (getattr(self, "_paths", None) or {}).get(
+            project, {}).get(srv.LOCAL_MACHINE)
+        return chip(f"⌂ {t('btn_path')}", "quiet" if known else "on")
 
     def fill(self) -> None:
         pool = (self.all_rows if self.index == 0 or self.index > len(self.groups)
@@ -1087,7 +1114,14 @@ class Home(Container):
 
     def compose(self) -> ComposeResult:
         yield Wordmark(id="wordmark")
-        yield Search(id="search")
+        # a wrapper whose only job is to centre one child. Textual's `align`
+        # places the *group* of children, so a screen holding one narrow widget
+        # and one full-width one centres nothing: the group is already as wide
+        # as the screen. One box per thing to centre is what actually centres.
+        with Container(id="search-wrap"):
+            # the box says what it searches, inside itself: on this screen it
+            # is the thing you reach for, not a labelled field in a form
+            yield Search(placeholder=t("search_all"), id="search")
         # the kind is a column and not a glyph in front: it is the thing you
         # scan for, and a column aligns and sorts where a glyph does neither
         yield Card(t("sec_results"),
@@ -1101,9 +1135,15 @@ class Home(Container):
         # opens the screen for (is there anything to sync?) was a cell in a
         # table. Now the counts are the headline and the parity detail lives on
         # the Config tab, which is the screen that can actually change it.
+        # no cards. Four boxes became two and two became none: a border is for
+        # telling panels apart, and there is one thing here -- the state of
+        # your OS, read top to bottom. Framing each half of it drew two
+        # rectangles whose only job was to separate numbers from gauges, which
+        # a blank line already does.
         with Container(id="home-grid"):
-            yield Card(t("sec_stats"), Static(id="stats-body"), id="stats")
-            yield Card(t("sec_usage"), Static(id="usage-body"), id="usage")
+            yield Static(id="stats-body")
+            with Container(id="usage-wrap"):
+                yield Static(id="usage-body")
 
     # the box fires per keystroke and a search is a tenth of a second even with
     # the index warm -- `difflib` is doing real work. It runs when you stop
@@ -1189,7 +1229,7 @@ class Home(Container):
         return True
 
     # the tiles of the headline row, in the order the questions come
-    TILE_W = 12
+    TILE_W = 14
 
     def _tiles(self, pairs):
         """Numbers on one line, their names under them, one column each.
@@ -1200,7 +1240,7 @@ class Home(Container):
         """
         w = self.TILE_W
         nums = "".join(f"[$accent b]{str(n):^{w}}[/]" for _, n in pairs)
-        names = "".join(f"[$foreground 50%]{clip(t(k), w - 1).upper():^{w}}[/]"
+        names = "".join(f"[$foreground 45%]{clip(t(k), w - 2).upper():^{w}}[/]"
                         for k, _ in pairs)
         return f"{nums}\n{names}"
 
@@ -1215,58 +1255,55 @@ class Home(Container):
                               "n_skills", "n_machines")])
 
         # the two arrows are the headline, not a row in a table: "is there
-        # anything to do" is the question the screen exists to answer
-        w = self.TILE_W
+        # anything to do" is the question the screen exists to answer, and a
+        # bare `▲ 12` next to a bare `▼ 0` made you work out which was which
         if not sy.get("remote"):
-            arrows = f"[$warning]{t('no_remote')}[/]  [$foreground 60%]{t('guide_hint')}[/]"
+            arrows = (f"[$warning]{t('no_remote')}[/]"
+                      f"   [$foreground 55%]{t('guide_hint')}[/]")
         elif not app.counted:
             # the counts land a phase after the git status, and `0` there reads
             # as "nothing to sync" -- the opposite of "not known yet"
-            arrows = "".join(f"[$foreground 40%]{f'{a} ···':^{w * 2}}[/]"
-                             for a in ("\u25b2", "\u25bc"))
+            arrows = "   ".join(chip(f"{a} \u00b7\u00b7\u00b7 {t(k)}", "off")
+                                for a, k in (("\u25b2", "to_push"),
+                                             ("\u25bc", "to_pull")))
         else:
-            arrows = ""
-            for arrow, n, data, key in (("\u25b2", app.to_push, up, "to_push"),
-                                        ("\u25bc", app.to_pull, down, "to_pull")):
-                colour = "$accent b" if n else "$foreground 40%"
-                arrows += f"[{colour}]{f'{arrow} {n}':^{w * 2}}[/]"
+            arrows = "   ".join(
+                chip(f"{a} {n}  {t(k)}", "on" if n else "off")
+                for a, n, k in (("\u25b2", app.to_push, "to_push"),
+                                ("\u25bc", app.to_pull, "to_pull")))
             parts = " \u00b7 ".join(ui.preview_parts(up) + ui.preview_parts(down))
             if parts:
-                # its own line: appended to the arrows it wrapped under them in
-                # a narrow window and the two numbers stopped lining up with
-                # the tiles above
-                arrows += f"\n[$foreground 60%]{clip(parts, 64)}[/]"
+                arrows += f"\n\n[$foreground 55%]{clip(parts, 72)}[/]"
             elif not (sy["ahead"] or sy["behind"]):
-                arrows += f"\n[$success]{t('all_synced')}[/]"
+                arrows += f"\n\n[$success]{t('all_synced')}[/]"
 
         lines = [tiles, "", arrows, "",
-                 f"[$foreground 60%]{t('last_sync')} [/]{ui.last_sync()}"
-                 f"[$foreground 40%]  ·  [/]"
-                 f"[$foreground 60%]git [/][$accent]\u2191{sy['ahead']} \u2193{sy['behind']}[/]"
-                 f"[$foreground 40%]  ·  [/]"
+                 f"[$foreground 45%]{t('last_sync')} [/][$foreground 70%]{ui.last_sync()}[/]"
+                 f"[$foreground 25%]   \u00b7   [/]"
+                 f"[$foreground 45%]git [/][$accent]\u2191{sy['ahead']} \u2193{sy['behind']}[/]"
+                 f"[$foreground 25%]   \u00b7   [/]"
                  + (f"[$warning]{t('dirty')}[/]" if sy["dirty"]
                     else f"[$success]{t('clean')}[/]")
-                 + f"[$foreground 40%]  ·  [/]"
-                   f"[$foreground 60%]{t('checked', ago=ui.checked_ago())}[/]"]
+                 + f"[$foreground 25%]   \u00b7   [/]"
+                   f"[$foreground 45%]{t('checked', ago=ui.checked_ago())}[/]"]
         if app.update.get("available"):
-            lines.append(f"[$success]\u25b2 {t('update_available')}: "
-                         f"{app.update['available']}[/]  [$accent b]u[/]")
+            lines.append("")
+            lines.append(chip(f"\u25b2 {t('update_available')}: "
+                              f"{app.update['available']}   u", "quiet"))
         self.query_one("#stats-body", Static).update(
             Content.from_markup("\n".join(lines)))
 
         usage = []
         for lim in (app.usage.get("limits") or []):
-            pct = lim.get("percent") or 0
-            name = clip((lim.get("label") or lim.get("kind") or "?").replace("_", " "), 22)
-            usage.append(f"[b]{name}[/b]  [$accent]{pct}%[/]"
-                         f"[$foreground 60%]   {ui._reset_at(lim.get('resetsAt'))}[/]")
-            usage.append(bar(pct, width=40))
-            usage.append("")
+            usage.append(gauge((lim.get("label") or lim.get("kind") or "?").replace("_", " "),
+                               lim.get("percent") or 0,
+                               ui._reset_at(lim.get("resetsAt"))))
         costs = [d.get("totalCost") or 0 for d in (app.usage.get("daily") or [])]
         if costs:
-            usage.append(f"[$foreground 60%]{t('usage_daily')}[/]")
-            usage.append(f"[$accent]{spark(costs, 40)}[/]"
-                         f"[$foreground 60%]  {costs[-1]:.0f}[/]")
+            usage.append("")
+            usage.append(f"[$foreground 65%]{t('usage_daily'):<15}[/]"
+                         f"[$accent]{spark(costs, 36)}[/]"
+                         f"[$foreground 45%]   {costs[-1]:.0f}[/]")
         self.query_one("#usage-body", Static).update(Content.from_markup(
             "\n".join(usage) or f"[$foreground 60%]{t('no_usage')}[/]"))
 
@@ -1622,6 +1659,13 @@ class StoApp(App):
         self.set_class(self.size.width < 100, "narrow")
         self.set_class(self.size.width < WORDMARK_W + 5, "tiny")
         self.set_class(self.size.height < 24, "short")
+        # the tall face needs both a wide window and the rows to spend on it;
+        # under either, the flat one still says the name
+        grand = (self.size.width >= WORDMARK_BIG_W + 6
+                 and self.size.height >= 30)
+        if grand != self.has_class("grand"):
+            self.set_class(grand, "grand")
+            self.query_one("#wordmark", Wordmark).repaint()
         # re-applied because which panels are displayed depends on `narrow`,
         # and this is the moment it changed. Toggling `display` on three
         # widgets, not recomposing a screen: that was tried, and it made

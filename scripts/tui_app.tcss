@@ -83,9 +83,11 @@ FooterKey:hover > .footer-key--key { background: $surface; color: $accent; }
 
 .home, .split, .three, .two { padding: 1; }
 
-/* centred and given room: it is the name of the thing, and it was sitting
- * flush left over a search box like a label for it */
-#wordmark { height: 2; width: 100%; margin: 1 0 2 0; text-align: center; }
+/* it is the name of the thing, and it was sitting flush left over a search box
+ * like a label for it. `auto` because there are two faces: six rows of
+ * `ansi_shadow` where the window can hold them, two of `double_blocky` where
+ * it cannot. */
+#wordmark { height: auto; width: auto; margin: 1 0 2 0; }
 
 /* the search box is part of the screen, not a thing a key summons */
 Search {
@@ -97,14 +99,40 @@ Search {
 }
 Search:focus { border: round $accent; border-title-color: $accent; }
 
+/* ── the home: one column, centred, and no boxes ──
+ *
+ * Everything on this screen answers one question — what state is your OS in —
+ * so there is nothing to tell apart and nothing to frame. What is left is a
+ * masthead: the name, the box you type in, the numbers, the gauges.
+ */
 .home { layout: vertical; }
+#wordmark { width: 100%; text-align: center; }
 /* the results take the dashboard's room rather than squeezing beside it */
-#results { height: 1fr; display: none; }
-/* two cards, stacked, not a grid of four. The counts are a headline of fixed
- * height and the gauges take whatever is left. */
-#home-grid { layout: vertical; height: 1fr; }
-#stats { height: auto; margin-bottom: 1; }
-#usage { height: 1fr; min-height: 7; }
+#results { width: 100%; height: 1fr; display: none; }
+
+/* one wrapper per thing that has to sit in the middle. Textual's `align`
+ * positions the group of children, not each of them, so a pane holding one
+ * 66-wide box and one full-width panel centres neither. */
+#search-wrap, #usage-wrap {
+    width: 100%;
+    height: auto;
+    align-horizontal: center;
+}
+/* wider than a field, narrower than the screen, and heavier than a panel
+ * border: on this screen it is the thing you reach for, and a thin grey box at
+ * full width reads as a form you have to fill in. */
+#search-wrap > Search {
+    width: 66;
+    max-width: 100%;
+    margin: 0 0 2 0;
+    border: heavy $foreground 25%;
+    background: $panel;
+}
+#search-wrap > Search:focus { border: heavy $accent; }
+
+#home-grid { width: 100%; layout: vertical; height: 1fr; }
+#stats-body { width: 100%; height: auto; text-align: center; margin-bottom: 2; }
+#usage-body { width: auto; height: auto; }
 
 /* Sessions and memories are a hierarchy, so they are one panel at a time at
  * every width: the projects, and then what one project holds. Two columns side
@@ -112,7 +140,18 @@ Search:focus { border: round $accent; border-title-color: $accent; }
  * hundred rows belonging to projects you had not chosen. */
 .split { layout: vertical; }
 .split > Search { width: 100%; margin-bottom: 1; }
-.split > .card { height: 1fr; min-height: 6; }
+/* one panel at a time is one thing on screen, so there is nothing to frame:
+ * the box around it becomes a rule with the panel's name on it. The title is
+ * the only thing left saying which project you walked into, which is why the
+ * top edge stays. */
+.split > .card {
+    height: 1fr;
+    min-height: 6;
+    border: none;
+    border-top: solid $foreground 25%;
+    padding: 0;
+}
+.split > .card:focus-within { border: none; border-top: solid $accent; }
 .split DataTable { height: 1fr; max-height: 100%; }
 /* tools is three panels: the kinds stay put on the left and the two on the
  * right are what changes as you walk in */
@@ -238,7 +277,12 @@ Toast.-error { border-left: outer $error; }
  * belongs to the grid, which has no scrollbar and no keys pointed at it, so
  * the cards past the fold are cut off exactly as before. */
 .narrow #home-grid { height: auto; }
-.narrow #usage { height: auto; }
+.narrow #usage-body { height: auto; }
+/* the masthead breathes where there is room and stops breathing where there is
+ * not: four blank rows spent on air is one gauge pushed under the fold */
+.narrow #wordmark { margin: 0 0 1 0; }
+.narrow #search-wrap > Search { margin-bottom: 1; }
+.narrow #stats-body { margin-bottom: 1; }
 /* not a grid here: a grid keeps a row for a panel that is hidden, so the one
  * panel on screen inherited the three rows reserved for the search box and
  * the list vanished under its own header. A vertical stack only lays out what
