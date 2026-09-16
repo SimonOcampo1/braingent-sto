@@ -70,21 +70,59 @@ def theme_for(ground, accent_code):
 
 # ── small renderers ──
 
-def bar(pct, width=24, warn=80):
+def level(pct):
+    """The colour of a percentage. Three steps, not two.
+
+    A single threshold at 80 % meant a plan at 72 % looked exactly as calm as
+    one at 3 %, and then went red with nothing in between. Amber is the step
+    where you start deciding what to spend the rest on.
+    """
+    pct = pct or 0
+    return "$error" if pct >= 85 else "$warning" if pct >= 60 else "$accent"
+
+
+def bar(pct, width=24):
     """A gauge with eighth-of-a-cell resolution.
 
     Rounded to whole cells, 4 % and 11 % drew the same picture — the opposite
     of what a gauge is for. The track is a dim block rather than `░`: a field
-    of dots lets the terminal show through and reads as grain next to a border
-    that is one clean line.
+    of dots lets the terminal show through and reads as grain.
     """
     eighths = " ▏▎▍▌▋▊▉"
     exact = max(0.0, min(1.0, (pct or 0) / 100)) * width
     full = int(exact)
     tip = eighths[int((exact - full) * 8)].strip()
-    colour = "$error" if (pct or 0) >= warn else "$accent"
     rest = max(0, width - full - len(tip))
-    return f"[{colour}]{'█' * full}{tip}[/][$foreground 20%]{'█' * rest}[/]"
+    return f"[{level(pct)}]{'█' * full}{tip}[/][$foreground 15%]{'█' * rest}[/]"
+
+
+def gauge(label, pct, note, width=36, label_w=15):
+    """One limit as one line: what it is, how full, and when it comes back.
+
+    Three stacked rows per limit — name, then bar, then a blank — spent nine
+    rows saying what three say, and put the percentage a line away from the bar
+    it belongs to. On one line the eye reads left to right once.
+    """
+    pct = max(0, min(100, int(pct or 0)))
+    return (f"[$foreground 65%]{clip(label, label_w):<{label_w}}[/]"
+            f"{bar(pct, width)}"
+            f"  [{level(pct)} b]{pct:>3} %[/]"
+            f"   [$foreground 45%]{esc(note)}[/]")
+
+
+def chip(text, state="on"):
+    """A cell that reads as a button, because it is one.
+
+    A `DataTable` cannot hold a real `Button`, and a lone glyph in a column is
+    not something anybody tries to click. A filled rectangle in the accent with
+    a word in it is, and the word says what the click will do rather than
+    leaving it to be guessed from a triangle.
+    """
+    if state == "on":
+        return f"[$background on $accent b] {text} [/]"
+    if state == "quiet":
+        return f"[$accent on $panel] {text} [/]"
+    return f"[$foreground 35%] {text} [/]"
 
 
 def spark(values, width=24):
@@ -163,6 +201,26 @@ class Table(DataTable):
         # a wider column can un-cut the row that was scrolling, and a narrower
         # one can cut the row that was not
         self.marquee_later()
+
+    # How many leading columns are buttons rather than data, and who to tell
+    # when one is clicked. The hook lives here and not on the pane because
+    # `DataTable._on_click` calls `event.stop()`: a click on a table never
+    # bubbles, so a pane listening for one hears nothing. It also posts
+    # `RowSelected` when you click the row the cursor is already on — which,
+    # on a table whose first column is a button, meant one click both opened
+    # the modal and opened the document behind it.
+    buttons = 0
+    button_handler = None      # (table, row, column) -> None
+
+    async def _on_click(self, event) -> None:
+        meta = event.style.meta
+        row, column = meta.get("row", -1), meta.get("column", -1)
+        if self.button_handler and row >= 0 and 0 <= column < self.buttons:
+            self.move_cursor(row=row)
+            self.focus()
+            event.stop()
+            return self.button_handler(self, row, column)
+        await super()._on_click(event)
 
     def add_row(self, *cells, **kw):
         row = super().add_row(*cells, **kw)
@@ -404,9 +462,12 @@ class Search(Input):
 
     def __init__(self, **kw):
         # the label is the border title, not a placeholder: with both, the word
-        # "search" sat on the box twice
+        # "search" sat on the box twice. On the home it is the other way round
+        # -- the box is the thing you are meant to type in, so it says what it
+        # searches inside itself and wears no label at all.
         super().__init__(**kw)
-        self.border_title = t("k_search")
+        if kw.get("placeholder") is None:
+            self.border_title = t("k_search")
 
 
 # ── the wordmark ──
@@ -424,13 +485,35 @@ WORDMARK = [
     "██▄ █▀█ ▄▀█ ▀█▀ █▄░█ █▀▀ █▀▀ █▄░█ ▀█▀  ▄▀▀ ▀█▀ █▀█",
     "█▄█ █▀▄ █▀█ ▄█▄ █░▀█ █▄█ ██▄ █░▀█ ░█░  ▄██ ░█░ █▄█",
 ]
+WORDMARK_BIG = [
+    "██████╗ ██████╗  █████╗ ██╗███╗   ██╗ ██████╗ ███████╗███╗   ██╗████████╗    ███████╗████████╗ ██████╗",
+    "██╔══██╗██╔══██╗██╔══██╗██║████╗  ██║██╔════╝ ██╔════╝████╗  ██║╚══██╔══╝    ██╔════╝╚══██╔══╝██╔═══██╗",
+    "██████╔╝██████╔╝███████║██║██╔██╗ ██║██║  ███╗█████╗  ██╔██╗ ██║   ██║       ███████╗   ██║   ██║   ██║",
+    "██╔══██╗██╔══██╗██╔══██║██║██║╚██╗██║██║   ██║██╔══╝  ██║╚██╗██║   ██║       ╚════██║   ██║   ██║   ██║",
+    "██████╔╝██║  ██║██║  ██║██║██║ ╚████║╚██████╔╝███████╗██║ ╚████║   ██║       ███████║   ██║   ╚██████╔╝",
+    "╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚═╝  ╚═══╝ ╚═════╝ ╚══════╝╚═╝  ╚═══╝   ╚═╝       ╚══════╝   ╚═╝    ╚═════╝",
+]
+WORDMARK_BIG_W = max(len(line) for line in WORDMARK_BIG)
 WORDMARK_W = max(len(line) for line in WORDMARK)
 
 
 class Wordmark(Static):
+    """The name of the thing, as big as the window can hold.
+
+    Two faces and not one: the tall one is the face of the product and the flat
+    one is what still fits when the window cannot take it. Which of the two is
+    on screen is a class the app puts on itself from `on_resize`, the same way
+    every other breakpoint here works.
+    """
+
     def on_mount(self) -> None:
         self.repaint()
 
     def repaint(self) -> None:
+        # padded to a rectangle before it is centred: the art is ragged on the
+        # right, and `text-align: center` centres every line on its own, which
+        # shears a six-row letterform into a staircase
+        art = WORDMARK_BIG if self.app.has_class("grand") else WORDMARK
+        width = max(len(line) for line in art)
         self.update(Content.from_markup(
-            "\n".join(f"[$accent]{line}[/]" for line in WORDMARK)))
+            "\n".join(f"[$accent]{line:<{width}}[/]" for line in art)))
