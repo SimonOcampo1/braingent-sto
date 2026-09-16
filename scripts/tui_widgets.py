@@ -116,20 +116,30 @@ def gauge(label, pct, note, width=36, label_w=15):
             f"   [$foreground 45%]{esc(note)}[/]")
 
 
-def chip(text, state="on"):
+def chip(text, state="on", width=None):
     """A cell that reads as a button, because it is one.
 
     A `DataTable` cannot hold a real `Button` and cannot draw a border inside a
     cell, so the outline is two brackets in grey with the label between them —
     which is what a button has looked like in a terminal since before there
-    were terminals. Filling the whole chip with the accent was tried first: on
-    every row of a long list it reads as a selection, not as something to
-    press, and it fought the cursor for the same colour.
+    were terminals.
+
+    `width` pads the label so every button in a column is the same button.
+    Sized to its own word, `[ Local ]` and `[ ▲ Guardar ]` are two different
+    shapes in the same column and the column stops reading as a column of
+    buttons; and the row you are on would change width as its state changed.
+
+    No fill. A chip with its own background is a chip that has to look right on
+    two grounds — the screen's and whatever the cursor paints under it — which
+    is not a thing a fixed colour can do. The outline carries the whole button.
     """
-    body = {"on": "$foreground 90% on $panel",
-            "quiet": "$foreground 55% on $panel",
-            "accent": "$accent b on $panel"}.get(state, "$foreground 35%")
-    edge = "$foreground 20%" if state == "off" else "$foreground 40%"
+    if width:
+        text = f"{text:^{width}}"
+    body, edge = {
+        "on":     ("$foreground 95%", "$foreground 45%"),
+        "quiet":  ("$foreground 60%", "$foreground 30%"),
+        "accent": ("$accent b", "$accent 55%"),
+    }.get(state, ("$foreground 45%", "$foreground 22%"))
     return f"[{edge}]\\[[/][{body}] {text} [/][{edge}]][/]"
 
 

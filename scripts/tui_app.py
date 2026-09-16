@@ -388,16 +388,14 @@ class Levels:
 
         return sorted(pool, key=key, reverse=reverse)
 
-    # A hierarchy shows one level at a time at every width. Sessions and
-    # memories are folders: you pick the project, *then* you look at what is
-    # inside it. Showing both columns at once meant the project list was a
-    # 14-column rail nobody could read a name in, and the row list was showing
-    # 500 sessions from every project before you had chosen one.
-    ALWAYS_DRILL = False
+    # Which breakpoint decides that only one panel fits. Two panels of lists
+    # need more room than three panels where two of them are a rail and a
+    # footnote, so the panes do not share a number -- they share the rule.
+    STACK_CLASS = "narrow"
 
     @property
     def stacked(self) -> bool:
-        return self.ALWAYS_DRILL or self.app.has_class("narrow")
+        return self.app.has_class(self.STACK_CLASS)
 
     def set_level(self, n) -> None:
         """Which panel is on screen when only one fits.
@@ -460,37 +458,59 @@ class Split(Levels, Container):
     """
     GROUP_W = 30
 
-    @staticmethod
-    def _btn_w(*keys):
-        """How wide a button column has to be for the words it will hold.
+    # What each button says, per state. One table, because the column width,
+    # the label padding and the cell all have to agree about it: a width
+    # measured from one list and a label drawn from another is a button cut in
+    # half the first time somebody adds a word.
+    SYNC_LABELS = {"keep": "▲ {btn_keep}", "bring": "▼ {btn_bring}",
+                   "local": "● {btn_local}", "remote": "○ {btn_remote}"}
+    PATH_LABEL = "⌂ {btn_path}"
 
-        Measured, not guessed: `[ ▲ Guardar ]` is three characters longer than
-        `[ ▲ Keep ]`, and a column tuned to the English label cuts the Spanish
-        one in half the moment somebody switches language.
+    @classmethod
+    def _labels(cls, table):
+        """`{state: label}` in the language that is on right now."""
+        return {k: v.format(**{key: t(key) for key in
+                               ("btn_keep", "btn_bring", "btn_local",
+                                "btn_remote", "btn_path")})
+                for k, v in table.items()}
+
+    @classmethod
+    def _btn_w(cls, table):
+        """The width every button in this column is drawn at.
+
+        Measured, not guessed, and the same for every row: `[ ▲ Guardar ]` is
+        three characters longer than `[ ▲ Keep ]`, so a column tuned to the
+        English label cuts the Spanish one in half — and a chip sized to its
+        own word makes the row you are on change width as its state changes.
         """
-        return max(len(t(k)) for k in keys) + 6   # "[ " + glyph + " " + label + " ]"
+        return max(len(v) for v in cls._labels(table).values())
 
     # two panels: the third thing you look at is a whole document and it has
     # its own screen
     LEVELS = ("groups", "rows")
-    ALWAYS_DRILL = True
+    # two lists side by side need the width for two lists; under that, the
+    # project rail is too narrow to read a name in and the rows belong to
+    # projects nobody has chosen yet
+    STACK_CLASS = "stacked"
     # the two primary verbs, drawn on the row itself. Off by default: a button
     # that does nothing is worse than no button
     ROW_BUTTONS = False
 
     def compose(self) -> ComposeResult:
         yield Search(id="search")
-        cols = [(t("col_project"), 30, "text"), (t("col_total"), 6, "num"),
-                (t("col_machine"), None, "text")]
+        # the count first and the name last, because the name is the column
+        # that stretches -- and the machines ride inside it, dimmed. Three
+        # columns plus two buttons do not fit in a rail beside a second list,
+        # and "who has been working on this" is worth more than a column of
+        # its own.
+        cols = [(t("col_total"), 6, "num"), (t("col_project"), None, "text")]
         if self.ROW_BUTTONS:
             # wide enough for the word inside the chip: a button with no label
             # is a glyph, and a glyph is not something anybody tries to click
-            cols = [("", self._btn_w("btn_keep", "btn_local")),
-                    ("", self._btn_w("btn_path"))] + cols
-        # padded: a title sitting on a rule instead of inside a box touches the
-        # line at both ends, and `PROJECTS` welded to a dash is not a heading
-        yield Card(f" {t('sec_projects')} ", Table(*cols, id="t-groups"), id="groups")
-        yield Card(f" {self.TITLE} ", self.make_table(), id="rows")
+            cols = [("", self._btn_w(self.SYNC_LABELS) + 4),
+                    ("", self._btn_w({"p": self.PATH_LABEL}) + 4)] + cols
+        yield Card(t("sec_projects"), Table(*cols, id="t-groups"), id="groups")
+        yield Card(self.TITLE, self.make_table(), id="rows")
 
     def on_mount(self) -> None:
         self.q = ""          # the search text; `self.query` is the DOM query
@@ -518,24 +538,25 @@ class Split(Levels, Container):
         self.group_names = [p[0] for p in pairs]
         every = sorted({m for p in pairs for m in p[2]})
         pad = [Content("")] * 2 if self.ROW_BUTTONS else []
-        table.add_row(*pad, Content.from_markup(f"[$accent b]{t('show_all')}[/]"),
-                      str(total), Content(" ".join(every)))
+        table.add_row(*pad, str(total),
+                      Content.from_markup(f"[$accent b]{t('show_all')}[/]  "
+                                          f"[$foreground 40%]{esc(' '.join(every))}[/]"))
         known = srv.project_paths() if self.ROW_BUTTONS else {}
         for entry in pairs:
             name, n, machines = entry[:3]
             todo = entry[3] if len(entry) > 3 else 0
+            labels, w = self._labels(self.SYNC_LABELS), self._btn_w(self.SYNC_LABELS)
             buttons = [Content.from_markup(
-                           chip(f"\u25b2 {t('btn_keep')}") if todo
-                           else chip(t('btn_local'), "off")),
-                       Content.from_markup(
-                           chip(f"\u2302 {t('btn_path')}", "quiet"
-                                if known.get(name, {}).get(srv.LOCAL_MACHINE)
-                                else "on"))] if self.ROW_BUTTONS else []
-            table.add_row(*buttons, clip(name, 30), str(n),
-                          Content.from_markup(
-                              " ".join(f"[$accent]{m}[/]" if m == srv.LOCAL_MACHINE
-                                       else f"[$foreground 60%]{m}[/]"
-                                       for m in sorted(machines))))
+                           chip(labels["keep"], "on", w) if todo
+                           else chip(labels["local"], "off", w)),
+                       Content.from_markup(self.path_button(
+                           known.get(name, {}).get(srv.LOCAL_MACHINE)))
+                       ] if self.ROW_BUTTONS else []
+            where = " ".join(
+                f"[$accent 70%]{esc(m)}[/]" if m == srv.LOCAL_MACHINE
+                else f"[$foreground 40%]{esc(m)}[/]" for m in sorted(machines))
+            table.add_row(*buttons, str(n),
+                          Content.from_markup(f"{esc(clip(name, 40))}  {where}"))
         table.fit()
         if 0 < keep < table.row_count:
             table.move_cursor(row=keep)
@@ -551,7 +572,7 @@ class Split(Levels, Container):
         names = getattr(self, "group_names", [])
         name = names[self.index - 1] if 0 < self.index <= len(names) else None
         self.query_one("#rows", Card).border_title = (
-            f" {self.TITLE} · {name} " if name else f" {self.TITLE} ").upper()
+            f"{self.TITLE} · {name}" if name else self.TITLE).upper()
 
     def on_data_table_row_highlighted(self, event) -> None:
         if event.data_table.id == "t-groups":
@@ -594,6 +615,14 @@ class Split(Levels, Container):
 
     def preview(self, index) -> None:
         pass
+
+    @classmethod
+    def path_button(cls, known):
+        """The second button. Quiet once this machine has said where the
+        project is, because it opens the same prompt either way."""
+        return chip(cls._labels({"p": cls.PATH_LABEL})["p"],
+                    "quiet" if known else "on",
+                    cls._btn_w({"p": cls.PATH_LABEL}))
 
     def _wire_buttons(self) -> None:
         """Both lists carry the same two buttons in the same two columns.
@@ -643,9 +672,8 @@ class Sessions(Split):
         # the buttons are two-tuples: a column with a third element is one `s`
         # will stop on, and the same glyph for every row in a state sorts by
         # nothing
-        return Table(("", self._btn_w("btn_keep", "btn_bring",
-                                      "btn_local", "btn_remote")),
-                     ("", self._btn_w("btn_path")),
+        return Table(("", self._btn_w(self.SYNC_LABELS) + 4),
+                     ("", self._btn_w({"p": self.PATH_LABEL}) + 4),
                      (t("col_when"), 10, "data"), (t("col_project"), 18, "data"),
                      (t("col_prompts"), 7, "data"),
                      (t("col_errors"), 7, "data"), (t("col_machine"), 12, "data"),
@@ -685,32 +713,29 @@ class Sessions(Split):
     def _button(row):
         """The first column: what `e` would do to this row, spelled out.
 
-        Three states and three labels, because a row whose button does nothing
-        has to look different from one whose button writes to the repo. A word
-        and not a triangle: a glyph is not something anybody tries to click.
+        Four states and four labels, all drawn at the same width, because a
+        column of buttons that change shape with their word is not a column of
+        buttons. A word and not a triangle: a glyph is not something anybody
+        tries to click.
+
+        The two rows that have nothing to do got there by opposite routes, and
+        which one you are looking at is the thing worth knowing: one is here
+        and in the repo, the other is only somewhere else.
         """
+        labels = Sessions._labels(Sessions.SYNC_LABELS)
+        width = Sessions._btn_w(Sessions.SYNC_LABELS)
         todo = Sessions._todo(row)
-        if todo == "keep":
-            return chip(f"▲ {t('btn_keep')}")
-        if todo == "bring":
-            return chip(f"▼ {t('btn_bring')}")
-        # not "done": the two rows that have nothing to do got there by
-        # opposite routes, and which one you are looking at is the thing worth
-        # knowing. One is here and in the repo; the other is only elsewhere.
-        return chip(t("btn_local") if not row.get("machine") else t("btn_remote"),
-                    "off")
+        if todo in ("keep", "bring"):
+            return chip(labels[todo], "on", width)
+        state = "local" if not row.get("machine") else "remote"
+        return chip(labels[state], "off", width)
 
     def _home(self, project):
-        """The path button. Filled while this machine has not said where the
-        project is, quiet once it has -- the same chip either way, because it
-        opens the same prompt either way.
-
-        Off `self._paths`, refreshed once per `fill()`: reading the registry
-        per row is five hundred file reads to paint one screen.
-        """
-        known = (getattr(self, "_paths", None) or {}).get(
-            project, {}).get(srv.LOCAL_MACHINE)
-        return chip(f"⌂ {t('btn_path')}", "quiet" if known else "on")
+        """The path button, off `self._paths`, refreshed once per `fill()`:
+        reading the registry per row is five hundred file reads to paint one
+        screen."""
+        return self.path_button((getattr(self, "_paths", None) or {}).get(
+            project, {}).get(srv.LOCAL_MACHINE))
 
     def fill(self) -> None:
         pool = (self.all_rows if self.index == 0 or self.index > len(self.groups)
@@ -1647,8 +1672,8 @@ class StoApp(App):
                 for i, key in enumerate(TABS):
                     yield Static(t(key).upper(), classes="tab", id=f"tab-{i}")
         yield Home(id="home", classes="home")
-        yield Sessions(id="sessions", classes="split")
-        yield Memory(id="memory", classes="split")
+        yield Sessions(id="sessions", classes="split two-way")
+        yield Memory(id="memory", classes="split two-way")
         yield Tools(id="tools", classes="split three-way")
         yield Config(id="config", classes="three")
         yield Help(id="help", classes="two")
@@ -1686,6 +1711,7 @@ class StoApp(App):
         # spend on a banner at all"; the two `mark-` classes are which of the
         # wordmark's three sizes the window can hold.
         self.set_class(self.size.width < 100, "narrow")
+        self.set_class(self.size.width < 150, "stacked")
         self.set_class(self.size.height < 24, "short")
         # One typeface, three sizes: the name on one line while it fits, wrapped
         # to two blocks while *that* fits, and plain text when there is no room
