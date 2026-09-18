@@ -1769,6 +1769,16 @@ class StoApp(App):
                 pane.set_level(pane.level)
         self.call_after_refresh(self._more_check)
 
+    def get_theme_variable_defaults(self) -> dict:
+        """`$tab-ink` for as long as none of our themes is the current one.
+
+        The stylesheet is parsed while the theme is still Textual's own, and a
+        variable only our themes carry is unresolved there — the app does not
+        start at all. The fallback is the dark ground, which is the theme it
+        starts on anyway; `theme_for` overrides it the moment it is applied.
+        """
+        return {"tab-ink": GROUNDS["dark"][0]}
+
     def apply_theme(self) -> None:
         """One accent, one ground, both ours.
 

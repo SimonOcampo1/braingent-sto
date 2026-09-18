@@ -185,6 +185,19 @@ def test_pure_black_is_pure_black_everywhere():
     asyncio.run(go())
 
 
+def _on_the_accent(app, accent):
+    """(text, foreground) of everything painted on a slab of the accent."""
+    out = []
+    for strip in app.screen._compositor.render_strips():
+        for seg in strip:
+            style = getattr(seg.style, "rich_style", seg.style)
+            bg, fg = style.bgcolor, style.color
+            if (bg is not None and fg is not None and seg.text.strip()
+                    and bg.get_truecolor().hex.lower() == accent):
+                out.append((seg.text, fg))
+    return out
+
+
 def test_the_clear_ground_paints_nothing_the_terminal_did_not_ask_for():
     """The fourth ground exists so a semi-transparent kitty stays
     semi-transparent: whatever the terminal paints behind the window is the
@@ -218,6 +231,12 @@ def test_the_clear_ground_paints_nothing_the_terminal_did_not_ask_for():
                 stray = {c for c in painted - {accent}
                          if not _is_tint(c, "#000000", accent)}
                 assert not stray, (key, sorted(stray))
+                # and the label of the tab you are on is a hole in that slab,
+                # not the terminal's own ink: `ansi_default` over the accent
+                # came out white-on-cyan, which is the one thing a filled tab
+                # must not be.
+                for text, ink in _on_the_accent(app, accent):
+                    assert ink.type.name != "DEFAULT", (key, text)
 
     asyncio.run(go())
 

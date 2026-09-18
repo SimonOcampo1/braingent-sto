@@ -72,10 +72,10 @@ FooterKey, Static, Container, TabBar {
  * and no answer to which one you are on. */
 .tab.on {
     background: $accent;
-    color: $background;
+    color: $tab-ink;
 }
 .tab:hover { color: $accent; }
-.tab.on:hover { color: $background; }
+.tab.on:hover { color: $tab-ink; }
 
 /* the two rows above the keys: what is running now and what the last thing
  * that ran had to say, plus the arrow that says the pane goes on below.
