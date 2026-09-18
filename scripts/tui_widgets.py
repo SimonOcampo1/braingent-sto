@@ -83,12 +83,6 @@ def theme_for(ground, accent_code):
     variables = ({"ansi-background": "ansi_default",
                   "ansi-foreground": "ansi_default"} if ground == "clear"
                  else {})
-    # the ink of a label on a slab of accent — the tab you are on. A cell is a
-    # glyph over a painted ground, so nothing can really show through the
-    # letters: what reads as a hole is ink the same colour as the screen. On the
-    # three grounds we know the colour, so it is the ground itself; on `clear`
-    # we do not, and the terminal's own black is the nearest thing to it.
-    variables["tab-ink"] = "ansi_black" if ground == "clear" else background
     return Theme(name=f"sto-{ground}-{accent_code}", primary=accent,
                  secondary=accent, accent=accent, background=background,
                  surface=surface, panel=panel, foreground=foreground,

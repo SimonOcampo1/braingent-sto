@@ -34,6 +34,15 @@ FooterKey, Static, Container, TabBar {
     scrollbar-color-active: $accent;
     scrollbar-corner-color: $background;
 }
+/* Textual draws the bar of a scrollbar reversed — a blank cell with the bar's
+ * colour as its ink — so on the transparent ground, where that colour is the
+ * terminal's own default, the swap painted a strip of the terminal's text
+ * colour down the side of the pane. Named ansi colours instead: the bar is a
+ * colour the terminal chose, and the track keeps showing through. */
+*:ansi {
+    scrollbar-color: ansi_bright_black;
+    scrollbar-color-hover: ansi_white;
+}
 
 /* ── chrome: pinned top and bottom, never scrolls ── */
 /*
@@ -72,10 +81,20 @@ FooterKey, Static, Container, TabBar {
  * and no answer to which one you are on. */
 .tab.on {
     background: $accent;
-    color: $tab-ink;
+    color: $background;
 }
 .tab:hover { color: $accent; }
-.tab.on:hover { color: $tab-ink; }
+.tab.on:hover { color: $background; }
+/* on the transparent ground `$background` is the terminal's ink, not its
+ * ground: the label of the tab you were on came out white on cyan. `reverse`
+ * asks the terminal for the swap instead of guessing the colour it would swap
+ * to — the block is the accent and the letters are cut out of it in whatever
+ * colour that terminal calls its background. */
+.tab.on:ansi, .tab.on:ansi:hover {
+    background: transparent;
+    color: $accent;
+    text-style: bold reverse;
+}
 
 /* the two rows above the keys: what is running now and what the last thing
  * that ran had to say, plus the arrow that says the pane goes on below.
@@ -261,6 +280,19 @@ DataTable:focus > .datatable--cursor {
     text-style: bold;
 }
 DataTable > .datatable--hover { background: $accent 8%; }
+
+/* except on the transparent ground, where there is nothing to tint: a colour
+ * with alpha over `ansi_default` is blended against black, and the row you
+ * selected comes out a grey-green band on a terminal that was meant to show
+ * through. There the cursor is ink and no paint at all — which reads, because
+ * `DataTable` puts the cursor's foreground over the cell's own spans anyway. */
+DataTable:ansi > .datatable--cursor { background: transparent; color: $accent 60%; }
+DataTable:ansi:focus > .datatable--cursor {
+    background: transparent;
+    color: $accent;
+    text-style: bold;
+}
+DataTable:ansi > .datatable--hover { background: transparent; }
 
 /* ── a reader: one document, scrolled ── */
 
