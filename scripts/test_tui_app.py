@@ -185,30 +185,18 @@ def test_pure_black_is_pure_black_everywhere():
     asyncio.run(go())
 
 
-def _on_the_accent(app, accent):
-    """(text, foreground) of everything painted on a slab of the accent."""
-    out = []
-    for strip in app.screen._compositor.render_strips():
-        for seg in strip:
-            style = getattr(seg.style, "rich_style", seg.style)
-            bg, fg = style.bgcolor, style.color
-            if (bg is not None and fg is not None and seg.text.strip()
-                    and bg.get_truecolor().hex.lower() == accent):
-                out.append((seg.text, fg))
-    return out
-
-
-def test_the_clear_ground_paints_nothing_the_terminal_did_not_ask_for():
+def test_the_clear_ground_paints_nothing_at_all():
     """The fourth ground exists so a semi-transparent kitty stays
-    semi-transparent: whatever the terminal paints behind the window is the
-    background of the app.
+    semi-transparent: whatever is behind the window is the background of the
+    app, and a cell that paints a colour is a hole punched in that.
 
-    A colour is only transparent while nothing is written over it, so the check
-    is the absence of one — every cell comes out as the terminal's default
-    background, and the accent under a cursor is the single exception, because
-    a cursor that does not paint is not a cursor. Its tint is mixed over black:
-    a terminal cannot be asked what is behind it, and a window worth making
-    transparent is a dark one.
+    So the check is the absence of a colour: not one background in the whole
+    screen, on any tab. What used to fail it were the tints — `$accent 35%`
+    under a row cursor has nothing to mix with here, so Textual mixed it with
+    black and the row you selected came out a grey-green band on a window that
+    was meant to show through. The tab you are on is the other one: it keeps
+    its block of accent by asking the terminal to reverse it, which paints no
+    background either and cuts the letters out in the terminal's own ground.
     """
     async def go():
         app = tui_app.StoApp()
@@ -220,23 +208,26 @@ def test_the_clear_ground_paints_nothing_the_terminal_did_not_ask_for():
             for key in "12456":
                 await pilot.press(key)
                 await pilot.pause()
-                painted = set()
+                painted, reversed_ink = set(), set()
                 for strip in app.screen._compositor.render_strips():
                     for seg in strip:
                         style = getattr(seg.style, "rich_style", seg.style)
-                        col = getattr(style, "bgcolor", None)
-                        if col is not None and col.type.name != "DEFAULT":
-                            painted.add(col.get_truecolor().hex.lower())
-                accent = app.current_theme.accent.lower()
-                stray = {c for c in painted - {accent}
-                         if not _is_tint(c, "#000000", accent)}
-                assert not stray, (key, sorted(stray))
-                # and the label of the tab you are on is a hole in that slab,
-                # not the terminal's own ink: `ansi_default` over the accent
-                # came out white-on-cyan, which is the one thing a filled tab
-                # must not be.
-                for text, ink in _on_the_accent(app, accent):
-                    assert ink.type.name != "DEFAULT", (key, text)
+                        bg = getattr(style, "bgcolor", None)
+                        if bg is not None and bg.type.name != "DEFAULT":
+                            painted.add((seg.text, bg.get_truecolor().hex.lower()))
+                        if style.reverse:
+                            # `reverse` is the other way to paint: the tab you
+                            # are on cuts its letters out of a block of accent
+                            # with it, and Textual's scrollbar draws its bar.
+                            # Both have to name a colour — the terminal's own
+                            # default, reversed, is a strip of its ink.
+                            ink = style.color
+                            assert ink.type.name != "DEFAULT", (key, seg.text)
+                            if ink.type.name == "TRUECOLOR":
+                                reversed_ink.add(ink.get_truecolor().hex.lower())
+                assert not painted, (key, sorted(painted))
+                assert reversed_ink <= {app.current_theme.accent.lower()}, \
+                    (key, sorted(reversed_ink))
 
     asyncio.run(go())
 
@@ -1411,7 +1402,7 @@ if __name__ == "__main__":
     test_the_accent_and_the_ground_are_one_theme_each()
     test_a_screen_renders_with_its_chrome_pinned()
     test_pure_black_is_pure_black_everywhere()
-    test_the_clear_ground_paints_nothing_the_terminal_did_not_ask_for()
+    test_the_clear_ground_paints_nothing_at_all()
     test_the_row_cursor_keeps_the_polarity_of_the_screen()
     test_a_document_has_its_own_keys()
     test_focus_starts_on_the_left_and_a_project_hands_it_to_the_right()
