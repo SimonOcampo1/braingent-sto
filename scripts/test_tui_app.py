@@ -190,13 +190,11 @@ def test_the_clear_ground_paints_nothing_at_all():
     semi-transparent: whatever is behind the window is the background of the
     app, and a cell that paints a colour is a hole punched in that.
 
-    So the check is the absence of a colour: not one background in the whole
-    screen, on any tab. What used to fail it were the tints — `$accent 35%`
-    under a row cursor has nothing to mix with here, so Textual mixed it with
-    black and the row you selected came out a grey-green band on a window that
-    was meant to show through. The tab you are on is the other one: it keeps
-    its block of accent by asking the terminal to reverse it, which paints no
-    background either and cuts the letters out in the terminal's own ground.
+    So the check is the absence of a colour: no background anywhere but under
+    the tab you are on, which is a block of accent on purpose. What used to
+    fail it were the tints — `$accent 35%` under a row cursor has nothing to
+    mix with here, so Textual mixed it with black and the row you selected came
+    out a grey-green band on a window that was meant to show through.
     """
     async def go():
         app = tui_app.StoApp()
@@ -208,13 +206,15 @@ def test_the_clear_ground_paints_nothing_at_all():
             for key in "12456":
                 await pilot.press(key)
                 await pilot.pause()
-                painted, reversed_ink = set(), set()
+                painted, reversed_ink, on_the_accent = set(), set(), set()
                 for strip in app.screen._compositor.render_strips():
                     for seg in strip:
                         style = getattr(seg.style, "rich_style", seg.style)
                         bg = getattr(style, "bgcolor", None)
                         if bg is not None and bg.type.name != "DEFAULT":
-                            painted.add((seg.text, bg.get_truecolor().hex.lower()))
+                            painted.add(bg.get_truecolor().hex.lower())
+                            if seg.text.strip():
+                                on_the_accent.add(style.color.type.name)
                         if style.reverse:
                             # `reverse` is the other way to paint: the tab you
                             # are on cuts its letters out of a block of accent
@@ -225,7 +225,12 @@ def test_the_clear_ground_paints_nothing_at_all():
                             assert ink.type.name != "DEFAULT", (key, seg.text)
                             if ink.type.name == "TRUECOLOR":
                                 reversed_ink.add(ink.get_truecolor().hex.lower())
-                assert not painted, (key, sorted(painted))
+                assert painted <= {app.current_theme.accent.lower()}, \
+                    (key, sorted(painted))
+                # and the label on that block is a hole in it, never the
+                # terminal's own ink: `$background` is `ansi_default` here, and
+                # white-on-cyan is the one thing a filled tab must not be.
+                assert "DEFAULT" not in on_the_accent, (key, on_the_accent)
                 assert reversed_ink <= {app.current_theme.accent.lower()}, \
                     (key, sorted(reversed_ink))
 
