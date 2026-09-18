@@ -185,6 +185,43 @@ def test_pure_black_is_pure_black_everywhere():
     asyncio.run(go())
 
 
+def test_the_clear_ground_paints_nothing_the_terminal_did_not_ask_for():
+    """The fourth ground exists so a semi-transparent kitty stays
+    semi-transparent: whatever the terminal paints behind the window is the
+    background of the app.
+
+    A colour is only transparent while nothing is written over it, so the check
+    is the absence of one — every cell comes out as the terminal's default
+    background, and the accent under a cursor is the single exception, because
+    a cursor that does not paint is not a cursor. Its tint is mixed over black:
+    a terminal cannot be asked what is behind it, and a window worth making
+    transparent is a dark one.
+    """
+    async def go():
+        app = tui_app.StoApp()
+        app.ground = "clear"
+        async with app.run_test(size=(126, 30)) as pilot:
+            app.apply_theme()
+            await app.workers.wait_for_complete()
+            assert app.native_ansi_color, "the ground was resolved back to RGB"
+            for key in "12456":
+                await pilot.press(key)
+                await pilot.pause()
+                painted = set()
+                for strip in app.screen._compositor.render_strips():
+                    for seg in strip:
+                        style = getattr(seg.style, "rich_style", seg.style)
+                        col = getattr(style, "bgcolor", None)
+                        if col is not None and col.type.name != "DEFAULT":
+                            painted.add(col.get_truecolor().hex.lower())
+                accent = app.current_theme.accent.lower()
+                stray = {c for c in painted - {accent}
+                         if not _is_tint(c, "#000000", accent)}
+                assert not stray, (key, sorted(stray))
+
+    asyncio.run(go())
+
+
 def _polarity(app, table, y):
     """(text luminance, ground luminance) averaged over one painted row."""
     def lum(color):
@@ -1355,6 +1392,7 @@ if __name__ == "__main__":
     test_the_accent_and_the_ground_are_one_theme_each()
     test_a_screen_renders_with_its_chrome_pinned()
     test_pure_black_is_pure_black_everywhere()
+    test_the_clear_ground_paints_nothing_the_terminal_did_not_ask_for()
     test_the_row_cursor_keeps_the_polarity_of_the_screen()
     test_a_document_has_its_own_keys()
     test_focus_starts_on_the_left_and_a_project_hands_it_to_the_right()
