@@ -52,10 +52,16 @@ ACCENT_CSS = {"36": "#22d3ee", "32": "#4ade80", "35": "#c084fc",
 # be checked three times. One tone, and what separates a panel from the screen
 # is its outline. `panel` is what is left: the raised key-cap behind a button,
 # and nothing else.
+# `clear` is the fourth and the odd one: it names no colour at all. A terminal
+# that is semi-transparent stays transparent only while nothing paints a
+# background over it, so this ground asks Textual for `ansi_default` — the
+# terminal's own ink and its own ground, emitted as no colour at all — and the
+# kitty (or any other) theme underneath is what you see.
 GROUNDS = {
     "dark":  ("#12141a", "#12141a", "#242833", "#e6e8ee"),
     "light": ("#f6f7f9", "#f6f7f9", "#e2e5ea", "#1b1e26"),
     "black": ("#000000", "#000000", "#171717", "#e6e8ee"),
+    "clear": ("ansi_default",) * 4,
 }
 
 def theme_for(ground, accent_code):
@@ -67,10 +73,21 @@ def theme_for(ground, accent_code):
     """
     background, surface, panel, foreground = GROUNDS[ground]
     accent = ACCENT_CSS.get(accent_code, "#22d3ee")
+    # `ansi=True` is what stops Textual turning `ansi_default` back into an RGB
+    # colour before it reaches the terminal: with it, the ground is written as
+    # no colour, which is the only way a transparent terminal stays transparent.
+    # `$ansi-background` and `$ansi-foreground` are not ours: Textual's own
+    # stylesheet reads them under `:ansi` for buttons, toasts and tooltips, and
+    # an ansi theme that leaves them out does not parse. Default on both, so
+    # nothing paints a ground the terminal did not ask for.
+    variables = ({"ansi-background": "ansi_default",
+                  "ansi-foreground": "ansi_default"} if ground == "clear"
+                 else {})
     return Theme(name=f"sto-{ground}-{accent_code}", primary=accent,
                  secondary=accent, accent=accent, background=background,
                  surface=surface, panel=panel, foreground=foreground,
-                 dark=ground != "light", success="#4ade80",
+                 dark=ground != "light", ansi=ground == "clear",
+                 variables=variables, success="#4ade80",
                  warning="#fbbf24", error="#f87171")
 
 
