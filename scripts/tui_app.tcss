@@ -86,15 +86,13 @@ FooterKey, Static, Container, TabBar {
 .tab:hover { color: $accent; }
 .tab.on:hover { color: $background; }
 /* on the transparent ground `$background` is the terminal's ink, not its
- * ground: the label of the tab you were on came out white on cyan. `reverse`
- * asks the terminal for the swap instead of guessing the colour it would swap
- * to — the block is the accent and the letters are cut out of it in whatever
- * colour that terminal calls its background. */
-.tab.on:ansi, .tab.on:ansi:hover {
-    background: transparent;
-    color: $accent;
-    text-style: bold reverse;
-}
+ * ground, so the label of the tab you are on came out white on cyan. `reverse`
+ * was tried instead — ask the terminal for the swap rather than guess the
+ * colour it would swap to — and kitty swapped the other way round: a white
+ * block with accent letters. So the hole is painted, not asked for: `ansi_black`
+ * is the darkest thing the terminal's own palette has, and on a window worth
+ * making transparent it is the ground. */
+.tab.on:ansi, .tab.on:ansi:hover { color: ansi_black; }
 
 /* the two rows above the keys: what is running now and what the last thing
  * that ran had to say, plus the arrow that says the pane goes on below.
