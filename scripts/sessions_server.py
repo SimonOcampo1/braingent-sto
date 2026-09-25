@@ -1891,6 +1891,30 @@ def _conflict_msg(out: str) -> str:
     return f"merge conflict, aborted: {detail}"
 
 
+def _commit_own_project_map() -> bool:
+    """Commit this machine's project map if it is the only thing dirty.
+
+    sto itself writes `knowledge/projects/<machine>.json` on every session
+    listing, so it goes dirty on its own and blocked every pull and update
+    until a push. It is one file per machine, so it merges without conflict.
+    Returns whether the tree is clean afterwards.
+    """
+    own = f"knowledge/projects/{LOCAL_MACHINE}.json"
+    code, out = _git("status", "--porcelain")
+    if code != 0:
+        return False
+    # _git strips its output, which eats the leading space of the first
+    # " M path" line, so the path is what follows the two status columns.
+    dirty = [line[2:].strip().strip('"') for line in out.splitlines() if line.strip()]
+    if not dirty:
+        return True
+    if dirty != [own]:
+        return False
+    _git("add", "--", own)
+    code, _ = _git("commit", "-m", f"knowledge: sync from {LOCAL_MACHINE}", "--", own)
+    return code == 0
+
+
 def sync_pull(progress=None) -> dict:
     """Same `progress` contract as `sync_push`."""
     say = progress or (lambda _step: None)
@@ -1901,7 +1925,7 @@ def sync_pull(progress=None) -> dict:
     if st["fetchError"]:
         return {"error": f"fetch failed: {st['fetchError']}"}
     if st["behind"] > 0:
-        if st["dirty"]:
+        if st["dirty"] and not _commit_own_project_map():
             return {"error": "working tree has uncommitted changes: commit or stash them first"}
         say("s_merge")
         code, out = _git("merge", "--no-edit", f"origin/{st['branch']}")
@@ -2082,7 +2106,7 @@ def update_link() -> dict:
         return {"error": st["error"]}
     if st["linked"]:
         return {"ok": True, "message": "already linked to upstream"}
-    if sync_status(fetch=False)["dirty"]:
+    if sync_status(fetch=False)["dirty"] and not _commit_own_project_map():
         return {"error": "working tree has uncommitted changes: commit or stash them first"}
     ref = f"{UPSTREAM}/{_upstream_branch()}"
     code, out = _git("merge", "--allow-unrelated-histories", "-X", "ours",
@@ -2104,7 +2128,7 @@ def update_apply(progress=None) -> dict:
         return {"error": "this repo shares no history with upstream: run `sto update --link` once"}
     if st["available"] == 0:
         return {"ok": True, "message": "already on the latest version"}
-    if sync_status(fetch=False)["dirty"]:
+    if sync_status(fetch=False)["dirty"] and not _commit_own_project_map():
         return {"error": "working tree has uncommitted changes: commit or stash them first"}
     say("s_merge")
     ref = f"{UPSTREAM}/{_upstream_branch()}"

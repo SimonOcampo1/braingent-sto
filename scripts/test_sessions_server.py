@@ -1403,7 +1403,13 @@ def test_update_apply_never_merges_over_uncommitted_work():
         srv.sync_status = lambda fetch=True: {"remote": "x", "branch": "main", "ahead": 0,
                                               "behind": 0, "dirty": True, "machine": "PC",
                                               "fetchError": None}
-        srv._git = lambda *a, **k: (_ for _ in ()).throw(AssertionError("no git"))
+
+        # Reading the status is allowed; merging or committing a real edit is not.
+        def git(*a, **k):
+            if a[0] != "status":
+                raise AssertionError(f"git {a[0]} over uncommitted work")
+            return 0, " M notes.md"
+        srv._git = git
         assert "uncommitted" in srv.update_apply()["error"]
     finally:
         srv._git, srv.update_status, srv.sync_status = reales
@@ -1453,6 +1459,46 @@ def test_sync_pull_applies_config_even_with_the_branch_up_to_date():
          srv.import_memory, srv.get_sync_prefs) = reales
 
 
+
+
+def test_own_project_map_does_not_block_a_pull():
+    """sto writes this machine's project map by itself, so it went dirty on
+    its own and every pull refused until a push. That one file is committed
+    on the spot; anything else still blocks."""
+    import subprocess
+    with tempfile.TemporaryDirectory() as d:
+        repo = Path(d)
+
+        def git(*args):
+            return subprocess.run(["git", "-C", str(repo), *args],
+                                  capture_output=True, text=True, check=True).stdout
+
+        git("init", "-q", "-b", "main")
+        git("config", "user.email", "t@t")
+        git("config", "user.name", "t")
+        projects = repo / "knowledge" / "projects"
+        projects.mkdir(parents=True)
+        own = projects / f"{srv.LOCAL_MACHINE}.json"
+        own.write_text("{}\n", encoding="utf-8")
+        (repo / "notes.md").write_text("x", encoding="utf-8")
+        git("add", "-A")
+        git("commit", "-qm", "base")
+
+        real_root = srv.REPO_ROOT
+        try:
+            srv.REPO_ROOT = repo
+            assert srv._commit_own_project_map()          # clean: nothing to do
+            own.write_text('{"nuevo": "/x"}\n', encoding="utf-8")
+            assert srv._commit_own_project_map()
+            assert git("status", "--porcelain") == ""
+            assert "knowledge: sync from" in git("log", "-1", "--format=%s")
+
+            own.write_text('{"otro": "/y"}\n', encoding="utf-8")
+            (repo / "notes.md").write_text("editado", encoding="utf-8")
+            assert not srv._commit_own_project_map()      # a real edit still blocks
+            assert "notes.md" in git("status", "--porcelain")
+        finally:
+            srv.REPO_ROOT = real_root
 
 
 def test_set_badge_chains_the_previous_status_line_and_gives_it_back():
@@ -1842,6 +1888,7 @@ if __name__ == "__main__":
     test_update_apply_never_merges_over_uncommitted_work()
     test_update_apply_merges_upstream_and_says_how_much()
     test_sync_pull_applies_config_even_with_the_branch_up_to_date()
+    test_own_project_map_does_not_block_a_pull()
     test_set_badge_chains_the_previous_status_line_and_gives_it_back()
     test_set_badge_leaves_no_status_line_behind_when_there_was_none()
     test_decode_slug_walks_the_disk_back_to_the_real_path()
