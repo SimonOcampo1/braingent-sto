@@ -511,8 +511,9 @@ class Split(Levels, Container):
     # and two of those spent twenty-eight columns of a rail that exists to show
     # project names. A glyph in a colour is read down a column at a glance; a
     # word has to be read.
-    ICONS = {"keep": "[$accent b]▲[/]", "bring": "[$accent b]▼[/]",
-             "local": "[$success]●[/]", "remote": "[$foreground 40%]○[/]",
+    ICONS = {"keep": "[$warning b]▲[/]", "bring": "[$accent b]▼[/]",
+             "both": "[$warning b]⇅[/]",
+             "local": "[$success b]●[/]", "remote": "[$foreground 40%]○[/]",
              "path": "[$accent b]⌂[/]", "path_set": "[$foreground 35%]⌂[/]"}
     # two cells: one is too narrow to land a click on
     BTN_W = 2
@@ -521,7 +522,7 @@ class Split(Levels, Container):
     def legend(cls):
         """The foot of a card that has buttons: what each glyph means."""
         return "  ".join(f"{cls.ICONS[k]} [$foreground 55%]{esc(t('btn_' + k))}[/]"
-                         for k in ("local", "keep", "bring", "remote", "path"))
+                         for k in ("local", "keep", "bring", "path"))
 
     # two panels: the third thing you look at is a whole document and it has
     # its own screen
@@ -581,8 +582,10 @@ class Split(Levels, Container):
         known = srv.project_paths() if self.ROW_BUTTONS else {}
         for entry in pairs:
             name, n, machines = entry[:3]
-            todo = entry[3] if len(entry) > 3 else 0
-            buttons = [Content.from_markup(self.ICONS["keep" if todo else "local"]),
+            up, down = entry[3] if len(entry) > 3 else (0, 0)
+            state = ("both" if up and down else "keep" if up
+                     else "bring" if down else "local")
+            buttons = [Content.from_markup(self.ICONS[state]),
                        Content.from_markup(self.path_button(
                            known.get(name, {}).get(srv.LOCAL_MACHINE)))
                        ] if self.ROW_BUTTONS else []
@@ -723,6 +726,7 @@ class Sessions(Split):
         archived = {a["id"] for a in srv.archived_sessions()}
         for r in rows:
             r["kept"] = r["id"] in archived
+            r["synced"] = r["kept"] or self._exported(r)
         self.all_rows = rows
         groups = {}
         for r in rows:
@@ -732,9 +736,24 @@ class Sessions(Split):
             lambda kv: kv[0], lambda kv: len(kv[1]))
         self.set_groups([(name, len(items),
                           {i.get("machine") or srv.LOCAL_MACHINE for i in items},
-                          sum(1 for i in items if self._todo(i)))
+                          (sum(1 for i in items if self._todo(i) == "keep"),
+                           sum(1 for i in items if self._todo(i) == "bring")))
                          for name, items in self.groups], len(rows))
         self.fill()
+
+    @staticmethod
+    def _exported(row):
+        """Whether the last push already carried this local conversation: its
+        trimmed copy is in the repo and not older than the live file. That
+        copy is enough for another machine to resume it, so it counts as
+        synced without a `keep`."""
+        if row.get("machine"):
+            return False
+        out = srv.KNOWLEDGE_SESSIONS / srv.LOCAL_MACHINE / row["project"] / f"{row['id']}.jsonl"
+        try:
+            return out.stat().st_mtime >= Path(row["path"]).stat().st_mtime
+        except (OSError, KeyError, TypeError):
+            return False
 
     @staticmethod
     def _todo(row):
@@ -746,7 +765,7 @@ class Sessions(Split):
         it is here the local copy shadows the remote row.
         """
         if not row.get("machine"):
-            return None if row.get("kept") else "keep"
+            return None if row.get("synced", row.get("kept")) else "keep"
         return "bring"
 
     @staticmethod

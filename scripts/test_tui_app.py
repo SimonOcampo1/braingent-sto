@@ -1163,7 +1163,7 @@ def test_keeping_a_conversation_asks_first_and_never_writes_on_escape():
                 table = pane.query_one("#t-rows", tui_app.Table)
                 table.move_cursor(row=0)
                 # recorded here and never archived: `e` means keep
-                pane.rows[0]["machine"], pane.rows[0]["kept"] = None, False
+                pane.rows[0].update(machine=None, kept=False, synced=False)
                 await pilot.pause()
                 await pilot.press("e")
                 await pilot.pause()
@@ -1240,7 +1240,7 @@ def test_the_two_buttons_are_columns_and_they_never_sort():
                 # the glyph is the verb: kept locally is done, unkept is a push
                 local = next((r for r in pane.rows if not r.get("machine")), None)
                 if local is not None:
-                    assert pane._todo(local) == (None if local["kept"] else "keep")
+                    assert pane._todo(local) == (None if local["synced"] else "keep")
 
     asyncio.run(go())
 
