@@ -740,13 +740,14 @@ class Sessions(Split):
     def _todo(row):
         """Whether this conversation has somewhere to travel.
 
-        Recorded here and never archived → it can be kept, so the other
-        machines can resume it. Recorded elsewhere and archived → it can be
-        brought down. Anything else is already where it belongs.
+        Recorded here and never archived → it can be kept in full. Recorded
+        elsewhere → it can always be brought down: the full archive when there
+        is one, the trimmed export every push carries when there is not. Once
+        it is here the local copy shadows the remote row.
         """
         if not row.get("machine"):
             return None if row.get("kept") else "keep"
-        return "bring" if row.get("kept") else None
+        return "bring"
 
     @staticmethod
     def _button(row):
@@ -854,11 +855,13 @@ class Sessions(Split):
                       f"[$foreground 60%]{esc(t('keep_how'))}[/]"],
                      False, lambda: self._keep(sid, short))
         elif verb == "bring":
-            if not r.get("kept"):
-                return self.app.notify(t("resume_needs_keep", id=short),
-                                       severity="warning")
+            home = srv.local_project_path(r["project"])
+            if home is None:
+                self.app.notify(t("resume_needs_path", project=r["project"]),
+                                severity="warning")
+                return self.ask_path()
             out = (srv.CLAUDE_DIR / "projects" /
-                   srv.project_slug(Path.cwd()) / f"{sid}.jsonl")
+                   srv.project_slug(home) / f"{sid}.jsonl")
             self.ask(t("resume_title"),
                      [f"[$accent]{esc(clip(r['title'], 90))}[/]",
                       f"[$foreground 60%]{esc(t('resume_what', path=out))}[/]",
@@ -885,34 +888,46 @@ class Sessions(Split):
         res = srv.resume_session(sid)
         self.app.done(res.get("error") or t("resumed_ok", short=short, id=sid),
                       "error" in res)
+        self.refresh_data()
 
     # ── the two buttons ──
 
     def sync_project(self) -> None:
-        """`e` on a project keeps every conversation of it that is not kept yet.
+        """`e` on a project: keep what this machine recorded, bring down what
+        the others did, in one go.
 
-        Only the local ones: keeping reads a raw transcript out of
-        `~/.claude/projects`, and a session another machine recorded is not
-        there to read.
+        Bringing files a conversation against this machine's path for the
+        project, so a project without one asks for it first.
         """
         project = self.current_project()
         pool = (self.all_rows if project is None
                 else [r for r in self.all_rows if r["project"] == project])
-        todo = [r for r in pool if self._todo(r) == "keep"]
+        keep = [r for r in pool if self._todo(r) == "keep"]
+        bring = [r for r in pool if self._todo(r) == "bring"]
+        if project and bring and srv.local_project_path(project) is None:
+            self.app.notify(t("resume_needs_path", project=project),
+                            severity="warning")
+            return self.ask_path()
+        if project is None:     # "all": only the projects that have a home here
+            bring = [r for r in bring if srv.local_project_path(r["project"])]
+        todo = keep + bring
         name = project or t("show_all")
         if not todo:
             return self.app.notify(t("sync_project_none", project=name))
-        lines = [f"[$foreground 60%]{esc(t('sync_project_what', n=len(todo), project=name))}[/]", ""]
+        lines = [f"[$foreground 60%]{esc(t('sync_project_what', up=len(keep), down=len(bring), project=name))}[/]", ""]
         lines += [f"[$accent]{esc(clip(r['title'], 86))}[/]" for r in todo[:12]]
         if len(todo) > 12:
             lines.append(f"[$foreground 60%]\u2026+{len(todo) - 12}[/]")
         self.ask(t("sync_project_title"), lines, False,
-                 lambda: self._keep_many([r["id"] for r in todo]))
+                 lambda: self._sync_many([r["id"] for r in keep],
+                                         [r["id"] for r in bring]))
 
-    def _keep_many(self, ids) -> None:
-        ok = sum(1 for sid in ids if "error" not in srv.keep_session(sid))
-        self.app.done(t("sync_project_done", ok=ok, fail=len(ids) - ok),
-                      ok < len(ids))
+    def _sync_many(self, keep, bring) -> None:
+        ok = sum(1 for sid in keep if "error" not in srv.keep_session(sid))
+        ok += sum(1 for sid in bring if "error" not in srv.resume_session(sid))
+        n = len(keep) + len(bring)
+        self.app.done(t("sync_project_done", ok=ok, fail=n - ok), ok < n)
+        self.refresh_data()
 
     def ask_path(self) -> None:
         """`w` — where this project lives on this machine.

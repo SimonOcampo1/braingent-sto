@@ -698,12 +698,15 @@ def cmd_keep(sid=""):
 def cmd_resume(sid=""):
     """sto resume <id> — bring an archived transcript into this machine.
 
-    Runs against the current directory: the conversation is filed under the
-    checkout you are standing in, which is what `claude --resume` looks at.
+    Filed under the path this machine registered for the project, which is
+    the directory `claude --resume` looks at; the current directory only when
+    the project has no path here yet.
     """
     if not sid:
         return {"error": t("cli_use_resume")}
-    res = srv.resume_session(sid, project_dir=Path.cwd())
+    res = srv.resume_session(sid)
+    if "error" in res and res["error"].startswith("no path for"):
+        res = srv.resume_session(sid, project_dir=Path.cwd())
     if "error" in res:
         return res
     return {"message": t("cli_resumed", id=res["id"][:8], machine=res["machine"],

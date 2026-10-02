@@ -2,6 +2,7 @@ import json
 import os
 import shutil
 import tempfile
+import time
 from pathlib import Path
 
 import agents
@@ -1805,11 +1806,43 @@ def test_resume_refuses_to_clobber_a_session_already_on_this_machine():
         assert (here / (src.stem + ".jsonl")).read_text(encoding="utf-8") == "mine\n"
 
 
-def test_resume_without_an_archive_says_which_command_creates_one():
+def test_resume_of_an_unknown_id_says_so():
     with tempfile.TemporaryDirectory() as kn, tempfile.TemporaryDirectory() as home:
         res = srv.resume_session("deadbeef", project_dir=home,
                                  claude_dir=Path(home), knowledge_dir=Path(kn))
-        assert "sto keep deadbeef" in res["error"], res
+        assert "deadbeef" in res["error"], res
+
+
+def test_a_session_nobody_kept_still_resumes_from_its_trimmed_export():
+    """Every push exports a trimmed copy; that has to be enough to continue
+    the conversation on another machine without a `sto keep` first.
+
+    The export keeps `tool_use` blocks and drops their results, which the API
+    rejects, so the rebuilt transcript is text only, chained by uuid and filed
+    under the session id `claude --resume` asks for.
+    """
+    with tempfile.TemporaryDirectory() as proj, tempfile.TemporaryDirectory() as kn, \
+         tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as work:
+        pdir = Path(proj) / "D--repo"
+        pdir.mkdir()
+        src = _write_session(pdir)
+        os.utime(src, (time.time() - 3600,) * 2)  # past the settle window
+        assert srv.export_sessions(projects_dir=Path(proj), dest=Path(kn) / "OtherPC") == 1
+
+        res = srv.resume_session(src.stem[:8], project_dir=work,
+                                 claude_dir=Path(home), knowledge_dir=Path(kn))
+        assert res.get("ok"), res
+        assert res["machine"] == "OtherPC"
+        lines = [json.loads(l) for l in
+                 Path(res["path"]).read_text(encoding="utf-8").splitlines()]
+        assert lines, res
+        assert all(l["sessionId"] == src.stem for l in lines)
+        assert lines[0]["parentUuid"] is None
+        assert all(b["parentUuid"] == a["uuid"] for a, b in zip(lines, lines[1:]))
+        for l in lines:
+            c = l["message"]["content"]
+            assert isinstance(c, str) or all(b["type"] == "text" for b in c), l
+        assert "First real prompt" in json.dumps(lines)
 
 
 def test_sync_push_forces_a_fetch_before_the_behind_check():
@@ -1912,6 +1945,7 @@ if __name__ == "__main__":
     test_a_project_path_is_per_machine_and_merges_without_a_conflict()
     test_resume_files_against_the_path_this_machine_has_for_the_project()
     test_resume_refuses_to_clobber_a_session_already_on_this_machine()
-    test_resume_without_an_archive_says_which_command_creates_one()
+    test_resume_of_an_unknown_id_says_so()
+    test_a_session_nobody_kept_still_resumes_from_its_trimmed_export()
     test_sync_push_forces_a_fetch_before_the_behind_check()
     print("OK")
