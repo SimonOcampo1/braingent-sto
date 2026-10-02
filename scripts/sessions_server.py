@@ -1108,42 +1108,121 @@ def archived_sessions(knowledge_dir=None):
     return rows
 
 
+def _flat_text(content) -> str:
+    """One trimmed message as plain text: the tool calls and the errors stay
+    readable, they just stop being blocks that need a partner."""
+    if isinstance(content, str):
+        return content
+    parts = []
+    for b in content or ():
+        t = b.get("type") if isinstance(b, dict) else None
+        if t == "text":
+            parts.append(b.get("text", ""))
+        elif t == "tool_use":
+            parts.append(f"[{b.get('name')}] " + json.dumps(b.get("input") or {},
+                                                            ensure_ascii=False))
+        elif t == "tool_result":
+            parts.append("[tool error] " + _block_text(b.get("content")))
+    return "\n\n".join(p for p in parts if p.strip())
+
+
+def _resumable_lines(trimmed: Path, sid: str, cwd: str):
+    """A trimmed export rebuilt into a transcript `claude --resume` accepts.
+
+    The export keeps a `tool_use` and drops its `tool_result`, which the API
+    rejects, so every message is flattened to text. What Claude Code needs to
+    list and continue it is the chain: `uuid`/`parentUuid`, the `sessionId`
+    the file is named after, and a timestamp.
+    """
+    import uuid
+    from datetime import datetime, timedelta, timezone
+    t0 = datetime.fromtimestamp(trimmed.stat().st_mtime, timezone.utc)
+    parent, msgs = None, []
+    for line in trimmed.read_text(encoding="utf-8", errors="replace").splitlines():
+        try:
+            o = json.loads(line)
+            role = o["message"]["role"]
+        except (ValueError, KeyError, TypeError):
+            continue
+        text = _flat_text(o["message"].get("content"))
+        if role in ("user", "assistant") and text.strip():
+            msgs.append((role, text))
+    for i, (role, text) in enumerate(msgs):
+        me = str(uuid.uuid4())
+        if role == "user":
+            message = {"role": "user", "content": text}
+        else:
+            message = {"id": "msg_" + uuid.uuid4().hex, "type": "message",
+                       "role": "assistant", "model": "<synthetic>",
+                       "content": [{"type": "text", "text": text}],
+                       "stop_reason": "end_turn", "stop_sequence": None,
+                       "usage": {"input_tokens": 0, "output_tokens": 0}}
+        ts = (t0 - timedelta(seconds=len(msgs) - i)).isoformat().replace("+00:00", "Z")
+        yield json.dumps({"parentUuid": parent, "isSidechain": False,
+                          "userType": "external", "cwd": cwd, "sessionId": sid,
+                          "type": role, "message": message, "uuid": me,
+                          "timestamp": ts}, ensure_ascii=False)
+        parent = me
+
+
+def _repo_session(sid: str, knowledge_dir=None):
+    """(row, error) — the best copy of a session the repo holds: the full
+    archive when somebody kept it, else the trimmed export every push makes."""
+    hits = {r["id"]: r for r in archived_sessions(knowledge_dir)
+            if r["id"].startswith(sid)}
+    for machine, p in _knowledge_sessions(knowledge_dir):
+        if p.stem.startswith(sid) and p.stem not in hits:
+            hits[p.stem] = {"id": p.stem, "machine": machine,
+                            "project": p.parent.name, "path": p, "trimmed": True}
+    if not hits:
+        return None, f"no session in the repo starts with {sid}"
+    if len(hits) > 1:
+        return None, "ambiguous id: " + ", ".join(i[:12] for i in list(hits)[:5])
+    return next(iter(hits.values())), None
+
+
 def resume_session(sid: str, project_dir=None, claude_dir=None,
                    knowledge_dir=None) -> dict:
-    """Materialise an archived transcript into this machine's projects tree.
+    """Materialise a session from the repo into this machine's projects tree.
 
-    `project_dir` is the checkout the conversation should continue in (the
-    current directory by default). The slug comes from it rather than from the
-    machine that recorded the session: the same repo lives at a different path
-    on every machine, and a transcript only resumes under the project it is
-    filed against.
+    `project_dir` is the checkout the conversation should continue in; without
+    it, the path this machine registered for the project. The slug comes from
+    it rather than from the machine that recorded the session: the same repo
+    lives at a different path on every machine, and a transcript only resumes
+    under the project it is filed against.
+
+    A full archive (`sto keep`) is copied as is. Anything else comes from the
+    trimmed export, rebuilt into text-only turns: the tool outputs are gone,
+    the conversation is not, and nobody had to remember to keep it.
 
     Refuses to clobber an existing local session — a half-overwritten
     transcript is worse than no transcript.
     """
-    hits = [r for r in archived_sessions(knowledge_dir) if r["id"].startswith(sid)]
-    if not hits:
-        return {"error": f"no archived transcript starts with {sid} "
-                         f"(run `sto keep {sid}` on the machine that has it)"}
-    if len(hits) > 1:
-        return {"error": "ambiguous id: " + ", ".join(r["id"][:12] for r in hits[:5])}
-    row = hits[0]
+    row, err = _repo_session(sid, knowledge_dir)
+    if err:
+        return {"error": err}
+    where = project_dir or local_project_path(row["project"])
+    if not where:
+        return {"error": f"no path for {row['project']} on this machine "
+                         f"(set it in `sto ui`, or run `sto resume` from the checkout)"}
     cd = Path(claude_dir) if claude_dir else CLAUDE_DIR
-    target = cd / "projects" / project_slug(
-        project_dir or local_project_path(row.get("project") or "") or Path.cwd())
+    target = cd / "projects" / project_slug(where)
     out = target / (row["id"] + ".jsonl")
     if out.exists():
         return {"error": f"{out} already exists: this session is already here"}
     target.mkdir(parents=True, exist_ok=True)
+    if row.get("trimmed"):
+        lines = _resumable_lines(row["path"], row["id"], str(Path(where)))
+    else:
+        lines = (l for l in gzip.open(row["path"], "rt", encoding="utf-8"))
     n = 0
-    with gzip.open(row["path"], "rt", encoding="utf-8") as gz:
-        with out.open("w", encoding="utf-8", newline="\n") as fh:
-            for line in gz:
-                if line.strip():
-                    fh.write(line)
-                    n += 1
+    with out.open("w", encoding="utf-8", newline="\n") as fh:
+        for line in lines:
+            if line.strip():
+                fh.write(line.rstrip("\n") + "\n")
+                n += 1
     return {"ok": True, "id": row["id"], "machine": row["machine"],
-            "lines": n, "path": str(out),
+            "project": row["project"], "lines": n, "path": str(out),
             "command": f"claude --resume {row['id']}"}
 
 

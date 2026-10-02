@@ -44,7 +44,7 @@ STO is the union of the three, on one substrate. Every artifact is **plain text 
 - **One repo, everything in it.** `sto push` exports sessions, memories, `~/.claude` modules and your vault, commits and pushes. `sto pull` applies them on the other machine — including installing missing plugins and marketplaces.
 - **Modular sync.** Pick exactly which parts of `~/.claude` travel: `claude-md`, `settings`, `keybindings`, `skills`, `agents`, `hooks`, `plugins`. Memories, sessions and vault always travel.
 - **Redaction on export.** Session transcripts are trimmed to what a reader needs (prompts, tool names, errors) and scrubbed of API-key-shaped strings before they ever hit a commit.
-- **Resumable conversations.** `sto keep <id>` archives one transcript untrimmed and gzipped; on the other machine `sto resume <id>` files it under that machine's own project slug so `claude --resume` finds it. Opt-in per session: the trimmed copies are what makes the repo small, and archiving every session would undo that. In the TUI it is `k` and `a` on the Sessions tab, with a column saying which conversations travelled.
+- **Resumable conversations.** Every session another machine pushed can be brought here with `sto resume <id>` (or `e` on the Sessions tab, per row or per project): it is filed under the path this machine registered for the project (`w`), so `claude --resume` and `/resume` find it. Without a `sto keep` it is rebuilt from the trimmed export as text-only turns (tool outputs are gone, the conversation is not); `sto keep <id>` archives one transcript untrimmed and gzipped when the full tool history matters.
 - **Terminal UI (`sto ui`).** Five tabs — Home, Sessions, Memory, Config, Help — built on Textual over the same engine the CLI uses: no HTTP in between, no second copy of any rule. Runs the same on Windows and Linux, and `uv` borrows Textual in a throwaway environment when it is not installed. The footer lists the verbs that work on the tab you are standing on, and nothing else.
 - **Live push/pull progress.** Every step of a sync reports itself (`exporting sessions → staging → committing → pushing to origin`) with a spinner, instead of freezing the screen until git returns.
 - **Memory graph.** A real graph of *your memories*: one node per memory, one per project, edges from `[[wikilinks]]`. Opens as a chrome-less window with a project/type/machine sidebar, click-to-inspect detail panel and search. Built from the same files the repo syncs, so it shows every machine and every session, not just this one.
@@ -190,7 +190,7 @@ macOS both servers log to `.sto-cache/` and `Ctrl+C` takes them down together.
 | `sto sessions [project]` | sessions, most recent first |
 | `sto show <id>` | one transcript, through the pager |
 | `sto keep <id>` | archive a transcript in full so another machine can resume it |
-| `sto resume <id>` | bring an archived transcript here and print the `claude --resume` line |
+| `sto resume <id>` | bring a session from the repo into this machine's checkout and print the `claude --resume` line |
 | `sto search <text>` | full-text search across every session, every machine |
 | `sto memory [project\|show\|search\|sync]` | the memories in the repo |
 | `sto skills [id]` | installed skills, or one in full |

@@ -1177,17 +1177,17 @@ def test_keeping_a_conversation_asks_first_and_never_writes_on_escape():
     asyncio.run(go())
 
 
-def test_a_conversation_with_nowhere_to_go_is_not_a_write():
-    """`e` is one button with two meanings, and the row decides which.
-
-    Recorded on another machine and never archived there, it has nothing to
-    bring: the button says so and writes nothing, rather than handing the
-    engine an id it will fail on.
+def test_bringing_a_conversation_asks_for_the_project_path_first():
+    """A row recorded on another machine can always be brought down -- no
+    `sto keep` needed on the other side -- but it lands under this machine's
+    path for the project, so without one the button asks for it instead of
+    writing the transcript somewhere `claude --resume` never looks.
     """
     async def go():
         llamadas = []
-        real = tui_app.srv.resume_session
+        real = (tui_app.srv.resume_session, tui_app.srv.local_project_path)
         tui_app.srv.resume_session = lambda *a, **k: llamadas.append(a) or {"ok": True}
+        tui_app.srv.local_project_path = lambda project: None
         try:
             app = tui_app.StoApp()
             async with app.run_test(size=(130, 30)) as pilot:
@@ -1202,15 +1202,15 @@ def test_a_conversation_with_nowhere_to_go_is_not_a_write():
                 await pilot.pause()
                 for r in pane.rows:
                     r["machine"], r["kept"] = "otra-maquina", False
+                assert pane._todo(pane.rows[0]) == "bring"
                 pane.query_one("#t-rows", tui_app.Table).move_cursor(row=0)
                 await pilot.pause()
-                await pilot.press("e")          # nothing to bring
+                await pilot.press("e")
                 await pilot.pause()
-                # no confirmation, and above all no write
-                assert type(app.screen).__name__ == "Screen", app.screen
+                assert type(app.screen).__name__ == "PathPrompt", app.screen
                 assert llamadas == [], llamadas
         finally:
-            tui_app.srv.resume_session = real
+            tui_app.srv.resume_session, tui_app.srv.local_project_path = real
 
     asyncio.run(go())
 
@@ -1435,7 +1435,7 @@ if __name__ == "__main__":
     test_a_memory_shows_its_body_and_its_neighbours()
     test_a_coloured_cell_scrolls_too()
     test_keeping_a_conversation_asks_first_and_never_writes_on_escape()
-    test_a_conversation_with_nowhere_to_go_is_not_a_write()
+    test_bringing_a_conversation_asks_for_the_project_path_first()
     test_the_two_buttons_are_columns_and_they_never_sort()
     test_the_row_buttons_are_clickable_and_open_their_own_modal()
     test_w_asks_where_the_project_lives_and_writes_only_on_enter()
