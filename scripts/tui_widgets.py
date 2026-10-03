@@ -256,6 +256,15 @@ class Table(DataTable):
     buttons = 0
     button_handler = None      # (table, row, column) -> None
 
+    def _on_mouse_move(self, event) -> None:
+        """The cursor follows the pointer, so the row you are pointing at is
+        the bright one -- a separate hover shade next to a cursor left behind
+        by the keys was two rows asking to be read."""
+        super()._on_mouse_move(event)
+        row = (event.style.meta or {}).get("row", -1)
+        if 0 <= row < self.row_count and row != self.cursor_row:
+            self.move_cursor(row=row, scroll=False)
+
     async def _on_click(self, event) -> None:
         meta = event.style.meta
         row, column = meta.get("row", -1), meta.get("column", -1)

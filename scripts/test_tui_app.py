@@ -243,6 +243,26 @@ def test_the_clear_ground_paints_nothing_at_all():
     asyncio.run(go())
 
 
+def test_the_row_cursor_follows_the_mouse():
+    """Pointing at a row makes it the bright one, the same as the arrows do."""
+    async def go():
+        app = tui_app.StoApp()
+        async with app.run_test(size=(132, 30)) as pilot:
+            await app.workers.wait_for_complete()
+            await pilot.press("2")
+            await pilot.pause()
+            table = app.query_one("#t-groups", tui_app.Table)
+            if table.row_count < 3:
+                return
+            table.move_cursor(row=0)
+            await pilot.pause()
+            await pilot.hover("#t-groups", offset=(6, 3))   # header + rows 0, 1
+            await pilot.pause()
+            assert table.cursor_row == 2, table.cursor_row
+
+    asyncio.run(go())
+
+
 def _polarity(app, table, y):
     """(text luminance, ground luminance) averaged over one painted row."""
     def lum(color):
@@ -1418,6 +1438,7 @@ if __name__ == "__main__":
     test_pure_black_is_pure_black_everywhere()
     test_the_clear_ground_paints_nothing_at_all()
     test_the_row_cursor_keeps_the_polarity_of_the_screen()
+    test_the_row_cursor_follows_the_mouse()
     test_a_document_has_its_own_keys()
     test_focus_starts_on_the_left_and_a_project_hands_it_to_the_right()
     test_the_last_column_takes_the_width_the_others_leave()
