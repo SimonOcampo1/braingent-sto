@@ -277,7 +277,7 @@ DataTable:focus > .datatable--cursor {
     color: $foreground;
     text-style: bold;
 }
-DataTable > .datatable--hover { background: $accent 8%; }
+DataTable > .datatable--hover { background: transparent; }
 
 /* and on the transparent ground too, a shade lighter. A colour with alpha
  * over `ansi_default` is blended against black, so the cursor is a dark band of
@@ -290,7 +290,6 @@ DataTable:ansi:focus > .datatable--cursor {
     color: $foreground;
     text-style: bold;
 }
-DataTable:ansi > .datatable--hover { background: transparent; }
 
 /* ── a reader: one document, scrolled ── */
 
