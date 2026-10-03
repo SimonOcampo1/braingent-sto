@@ -279,15 +279,15 @@ DataTable:focus > .datatable--cursor {
 }
 DataTable > .datatable--hover { background: $accent 8%; }
 
-/* except on the transparent ground, where there is nothing to tint: a colour
- * with alpha over `ansi_default` is blended against black, and the row you
- * selected comes out a grey-green band on a terminal that was meant to show
- * through. There the cursor is ink and no paint at all — which reads, because
- * `DataTable` puts the cursor's foreground over the cell's own spans anyway. */
-DataTable:ansi > .datatable--cursor { background: transparent; color: $accent 60%; }
+/* and on the transparent ground too, a shade lighter. A colour with alpha
+ * over `ansi_default` is blended against black, so the cursor is a dark band of
+ * accent rather than a see-through one -- and that is the trade taken: a row
+ * marked only in ink (no paint) was much harder to find down a long list than a
+ * band is. The rest of the screen still paints nothing. */
+DataTable:ansi > .datatable--cursor { background: $accent 12%; color: $foreground; }
 DataTable:ansi:focus > .datatable--cursor {
-    background: transparent;
-    color: $accent;
+    background: $accent 28%;
+    color: $foreground;
     text-style: bold;
 }
 DataTable:ansi > .datatable--hover { background: transparent; }

@@ -191,10 +191,9 @@ def test_the_clear_ground_paints_nothing_at_all():
     app, and a cell that paints a colour is a hole punched in that.
 
     So the check is the absence of a colour: no background anywhere but under
-    the tab you are on, which is a block of accent on purpose. What used to
-    fail it were the tints — `$accent 35%` under a row cursor has nothing to
-    mix with here, so Textual mixed it with black and the row you selected came
-    out a grey-green band on a window that was meant to show through.
+    the tab you are on, which is a block of accent on purpose, and the row
+    cursor, which is the accent blended over black (a band, not ink: a row
+    marked only by its letters was too hard to find).
     """
     async def go():
         app = tui_app.StoApp()
@@ -203,6 +202,10 @@ def test_the_clear_ground_paints_nothing_at_all():
             app.apply_theme()
             await app.workers.wait_for_complete()
             assert app.native_ansi_color, "the ground was resolved back to RGB"
+            from textual.color import Color
+            accent = Color.parse(app.current_theme.accent)
+            cursor_tints = {Color(0, 0, 0).blend(accent, a).hex.lower()
+                            for a in (0.12, 0.28)}
             for key in "12456":
                 await pilot.press(key)
                 await pilot.pause()
@@ -212,7 +215,10 @@ def test_the_clear_ground_paints_nothing_at_all():
                         style = getattr(seg.style, "rich_style", seg.style)
                         bg = getattr(style, "bgcolor", None)
                         if bg is not None and bg.type.name != "DEFAULT":
-                            painted.add(bg.get_truecolor().hex.lower())
+                            hexed = bg.get_truecolor().hex.lower()
+                            if hexed in cursor_tints:
+                                continue
+                            painted.add(hexed)
                             if seg.text.strip():
                                 on_the_accent.add(style.color.type.name)
                         if style.reverse:
@@ -276,6 +282,9 @@ def test_the_row_cursor_keeps_the_polarity_of_the_screen():
     async def go():
         for _, code in tui_app.ui.ACCENTS:
             app = tui_app.StoApp()
+            # a painted ground: on `clear` the ink is the terminal's default,
+            # which has no luminance to measure
+            app.ground = "dark"
             async with app.run_test(size=(132, 30)) as pilot:
                 tui_app.ui.ACCENT = code
                 app.apply_theme()
