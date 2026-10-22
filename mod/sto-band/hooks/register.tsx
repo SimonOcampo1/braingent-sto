@@ -10,8 +10,11 @@ const status = atom({ plugin: 'sto-band', key: 'status' } as const, null)
 const error = atom({ plugin: 'sto-band', key: 'error' } as const, null)
 const usage = atom({ plugin: 'sto-band', key: 'usage' } as const, {})
 const isBusy = atom({ plugin: 'sto-band', key: 'isBusy' } as const, false)
+const isAuto = atom({ plugin: 'sto-band', key: 'isAuto' } as const, true)
 
 const REFRESH_MS = 60_000
+const AUTO_MS = 30 * 60_000
+const LONG = new Set(['sync', 'sync-memories', 'pull'])
 const ANSI: Record<string, string> = {
   '31': 'red', '32': 'green', '33': 'yellow',
   '34': 'blue', '35': 'magenta', '36': 'cyan',
@@ -27,7 +30,7 @@ async function sto($: EngineInterface, sub: string): Promise<{ data?: StoStatus 
   try {
     const cwd = await $.session.cwd()
     const r = await $.process.run(['sto', 'mod', sub, '--cwd', cwd],
-                                  { timeoutMs: sub === 'sync' ? 600_000 : 30_000 })
+                                  { timeoutMs: LONG.has(sub) ? 600_000 : 30_000 })
     const data = JSON.parse(r.stdout)
     return data.error ? { error: data.error } : { data }
   } catch (err) {
@@ -49,13 +52,44 @@ async function refresh($: EngineInterface, force = false) {
   if (r.data) await update($, status, () => r.data!)
 }
 
+/** One sync at a time, whoever asked: a button, a command or the timer.
+ *  `quiet` toasts only a failure, for the runs nobody pressed for. */
+async function runSync($: EngineInterface, sub: string, quiet = false): Promise<string> {
+  if (await read($, isBusy)) return 'STO: sync already running'
+  await update($, isBusy, () => true)
+  try {
+    const r = await sto($, sub)
+    const text = r.error ?? r.data?.message ?? 'STO: ok'
+    if (r.error || !quiet) $.ui.toast(text)
+    return text
+  } finally {
+    await update($, isBusy, () => false)
+    await refresh($, true)
+  }
+}
+
+/** Auto on or off, remembered across sessions in the store. */
+async function setAuto($: EngineInterface, isOn: boolean) {
+  await $.store.set('auto', isOn)
+  await update($, isAuto, () => isOn)
+}
+
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'sto',
-      description: '/sto sync: pull, keep and bring this project\'s chats, push. Bare: refresh the band',
+      description: '/sto sync: chats round trip. /sto mem: memories (pull, push). /sto auto: toggle. Bare: refresh',
     })
-    void refresh($, true)
+    const auto = (await $.store.get('auto')) !== false
+    await update($, isAuto, () => auto)
+    // pull before anything else: the memories another machine wrote land
+    // before the first prompt reads them
+    void (auto ? runSync($, 'pull', true) : refresh($, true))
+    $.clock.every(AUTO_MS, () => {
+      void (async () => {
+        if (await read($, isAuto)) await runSync($, 'sync-memories', true)
+      })()
+    })
     return next(e)
   })
 
@@ -70,20 +104,16 @@ export const register: Register = on => {
   })
 
   on('command.run', { command: 'sto' }, async ($, e) => {
-    if ((e.args ?? '').trim() !== 'sync') {
-      await refresh($, true)
-      return { text: (await read($, error)) ?? 'STO: ok' }
+    const arg = (e.args ?? '').trim()
+    if (arg === 'sync') return { text: await runSync($, 'sync') }
+    if (arg === 'mem') return { text: await runSync($, 'sync-memories') }
+    if (arg === 'auto') {
+      const turnOn = !(await read($, isAuto))
+      await setAuto($, turnOn)
+      return { text: 'STO auto: ' + (turnOn ? 'on' : 'off') }
     }
-    if (await read($, isBusy)) return { text: 'STO: ' + 'sync already running' }
-    await update($, isBusy, () => true)
-    try {
-      const r = await sto($, 'sync')
-      $.ui.toast(r.error ?? r.data?.message ?? 'STO: ok')
-      return { text: r.error ?? r.data?.message ?? '' }
-    } finally {
-      await update($, isBusy, () => false)
-      await refresh($, true)
-    }
+    await refresh($, true)
+    return { text: (await read($, error)) ?? 'STO: ok' }
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
@@ -92,7 +122,8 @@ export const register: Register = on => {
     const err = await read($, error)
     const u = await read($, usage)
     const busy = await read($, isBusy)
-    const { Box, Text } = $.ui.resolve(e)
+    const auto = await read($, isAuto)
+    const { Box, Button, Text } = $.ui.resolve(e)
     const L = (k: string, en: string) => s?.labels?.[k] ?? en
     const accent = ANSI[s?.accent ?? '36'] ?? 'cyan'
     const pct = (label: string, v?: number) =>
@@ -118,6 +149,13 @@ export const register: Register = on => {
         {pct(L('mod_5h', '5h'), u.fiveHour)}
         {pct(L('mod_week', 'wk'), u.week)}
         {pct(L('mod_ctx', 'ctx'), u.ctx)}
+        {!busy && <Button key="chats" label={L('mod_btn_chats', 'sync chats')}
+                          onPress={() => void runSync($, 'sync')} />}
+        {!busy && <Button key="memories" label={L('mod_btn_memories', 'sync memories')}
+                          onPress={() => void runSync($, 'sync-memories')} />}
+        <Button key="auto" dimColor={!auto}
+                label={auto ? L('mod_auto_on', 'auto: on') : L('mod_auto_off', 'auto: off')}
+                onPress={() => void setAuto($, !auto)} />
       </Box>
     )
   })

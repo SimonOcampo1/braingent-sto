@@ -187,7 +187,8 @@ def project_todo(project):
 
 # what the Claude Code band paints, in the language `sto ui` picked
 MOD_LABELS = ("mod_chats", "mod_uptodate", "mod_no_path", "mod_5h", "mod_week",
-              "mod_ctx", "mod_syncing", "mod_repo")
+              "mod_ctx", "mod_syncing", "mod_repo", "mod_btn_chats",
+              "mod_btn_memories", "mod_auto_on", "mod_auto_off")
 
 
 def mod_status(cwd):
@@ -235,8 +236,30 @@ def mod_sync(cwd):
     return {"ok": not fail, "message": msg}
 
 
+def mod_pull():
+    res = srv.sync_pull()
+    return {"error": res["error"]} if res.get("error") else {"ok": True, "message": t("mod_pulled")}
+
+
+def mod_sync_memories():
+    """Pull then push: the pull imports the memories, the push exports them.
+    Nothing is kept or brought; the chats are `mod sync`'s business."""
+    res = srv.sync_pull()
+    if res.get("error"):
+        return {"error": res["error"]}
+    res = srv.sync_push()
+    if res.get("error"):
+        return {"error": res["error"]}
+    return {"ok": True, "message": t("mod_memories_done")}
+
+
+MOD_SUBS = {"status": mod_status, "sync": mod_sync,
+            "sync-memories": lambda _cwd: mod_sync_memories(),
+            "pull": lambda _cwd: mod_pull()}
+
+
 def cmd_mod(*args):
-    """sto mod [status|sync] [--cwd <dir>] — JSON for the Claude Code mod."""
+    """sto mod [status|sync|sync-memories|pull] [--cwd <dir>] — JSON for the Claude Code mod."""
     args = list(args)
     cwd = os.getcwd()
     if "--cwd" in args:
@@ -244,10 +267,10 @@ def cmd_mod(*args):
         cwd = args[i + 1] if i + 1 < len(args) else cwd
         del args[i:i + 2]
     sub = args[0] if args else "status"
-    if sub not in ("status", "sync"):
+    if sub not in MOD_SUBS:
         _no_args("mod")
     try:
-        out = mod_status(cwd) if sub == "status" else mod_sync(cwd)
+        out = MOD_SUBS[sub](cwd)
     except Exception as e:  # the band reads stdout as JSON: never a traceback
         out = {"error": f"{type(e).__name__}: {e}"}
     return {"message": json.dumps(out, ensure_ascii=False)}

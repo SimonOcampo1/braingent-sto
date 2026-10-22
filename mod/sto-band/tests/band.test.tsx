@@ -45,3 +45,32 @@ test('the band shows the chats to move, the missing path and the windows', async
   expect(synced.text).toBe('3 synced')
   expect(calls.some(c => c[2] === 'sync')).toBe(true)
 })
+
+test('each button runs its own sync and auto is remembered', async ($, on) => {
+  mock.clock(on, { now: 1_000_000 })
+  const saved: unknown[] = []
+  on('store.set', async (_$, e) => (saved.push(e), { value: undefined }))
+  const subs: string[] = []
+  on('session.cwd', async () => ({ value: '/work/p' }))
+  on('session.usage', async () => ({ value: { startedAt: 0, context: { window: 1 }, rateLimits: [] } }))
+  on('process.run', async (_$, e) => {
+    subs.push(e.argv[2] ?? '')
+    const out = e.argv[2] === 'status' ? STATUS : { ok: true, message: e.argv[2] + ' done' }
+    return { value: { exitCode: 0, stdout: JSON.stringify(out), stderr: '',
+                      isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+
+  const ui = await $.ui.mount({ plugin: 'sto-band', surface: 'terminal', ...BAND })
+  await ui.press({ key: 'chats' })
+  await ui.press({ key: 'memories' })
+  expect(subs.filter(s => s !== 'status')).toEqual(['sync', 'sync-memories'])
+
+  expect((await ui.find({ key: 'auto' }))?.text).toContain('on')
+  await ui.press({ key: 'auto' })
+  expect(JSON.stringify(saved)).toContain('false')
+  expect((await ui.find({ key: 'auto' }))?.text).toContain('off')
+  await ui.unmount()
+
+  const mem = await $.command.run({ command: 'sto', args: 'mem' } as never)
+  expect(mem.text).toBe('sync-memories done')
+})
