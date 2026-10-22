@@ -864,6 +864,27 @@ def test_a_column_sorts_the_datum_and_not_the_cell():
     asyncio.run(go())
 
 
+def test_a_header_click_sorts_one_way_then_the_other():
+    """Textual runs the click handler of every class in the MRO by itself, and
+    the table called `super()` on top of that: every click sorted ascending and
+    straight back to descending, so a column only ever sorted one way."""
+    async def go():
+        app = tui_app.StoApp()
+        async with app.run_test(size=(150, 30)) as pilot:
+            await app.workers.wait_for_complete()
+            await pilot.press("2")
+            await pilot.pause()
+            rows = app.query_one("#sessions").query_one("#t-rows", tui_app.Table)
+            seen = []
+            for _ in range(3):
+                await pilot.click(rows, offset=Offset(3, 0))   # the title header
+                await pilot.pause()
+                seen.append(rows.sort_by)
+            assert seen == [(0, False), (0, True), (0, False)], seen
+
+    asyncio.run(go())
+
+
 def test_s_on_the_project_rail_sorts_the_projects_and_not_the_rows():
     """The rail handed its sort to the pane, and the pane sorted the rows
     beside it: `s` on the projects moved everything except the projects."""
@@ -879,11 +900,15 @@ def test_s_on_the_project_rail_sorts_the_projects_and_not_the_rows():
             groups = pane.query_one("#t-groups", tui_app.Table)
             groups.focus()
             await pilot.pause()
-            await pilot.press("s")                  # the name, ascending
-            await pilot.pause()
+            # the rail opens A→Z by name, before any key
             names = [name.lower() for name, _ in pane.groups]
             assert names == sorted(names), names
-            await pilot.press("s", "s")             # the count, ascending
+            assert groups.sort_by == (0, False), groups.sort_by
+            await pilot.press("s")                  # the name, descending
+            await pilot.pause()
+            names = [name.lower() for name, _ in pane.groups]
+            assert names == sorted(names, reverse=True), names
+            await pilot.press("s")                  # the count, ascending
             await pilot.pause()
             counts = [len(items) for _, items in pane.groups]
             assert counts == sorted(counts), counts
@@ -1448,6 +1473,7 @@ if __name__ == "__main__":
     test_tab_walks_tabs_and_the_arrows_walk_everything_inside_one()
     test_s_cycles_the_sort_and_comes_back_to_the_natural_order()
     test_a_column_sorts_the_datum_and_not_the_cell()
+    test_a_header_click_sorts_one_way_then_the_other()
     test_s_on_the_project_rail_sorts_the_projects_and_not_the_rows()
     test_typing_in_a_stacked_search_shows_the_rows_it_filters()
     test_the_marquee_runs_only_where_text_is_cut_and_only_with_focus()

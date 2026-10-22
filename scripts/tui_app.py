@@ -552,14 +552,21 @@ class Split(Levels, Container):
         yield Search(id="search")
         # the name first and elastic, because it is what you read; the count,
         # the machines as glyphs, and the sync state after it, narrow
-        cols = [(t("col_project"), None, "text"), (t(self.COUNT_LABEL), 4, "num"),
-                (t("col_mach"), 8)]
+        cols = [(t("col_project"), None, "text"), (t(self.COUNT_LABEL), 4, "num")]
         if self.ROW_BUTTONS:
-            cols.append((t("col_sync"), 6))
+            # whether this machine knows where the project lives -- the one
+            # machine fact on the rail you can act on: without it nothing can
+            # be brought here. Which machine recorded what is on the rows.
+            cols += [(t("col_path"), 4), (t("col_sync"), 10)]
         groups = Card(t("sec_projects"), Table(*cols, id="t-groups"), id="groups")
         rows = Card(self.TITLE, self.make_table(), id="rows")
         if self.ROW_BUTTONS:
-            groups.border_subtitle = f"[$foreground 55%]{esc(t('lg_path'))}[/]"
+            # the sync glyphs too: in one column the rail is all there is
+            groups.border_subtitle = (
+                "  ".join(f"{self.ICONS[k]} [$foreground 55%]{esc(t(label))}[/]"
+                          for k, label in (("local", "btn_local"), ("keep", "btn_keep"),
+                                           ("bring", "btn_bring")))
+                + f"  [$foreground 55%]· {esc(t('lg_path'))}[/]")
             rows.border_subtitle = self.legend()
         yield groups
         yield rows
@@ -572,61 +579,49 @@ class Split(Levels, Container):
         self._filled = 0.0
         self._fill_timer = None
         self._wire_buttons()
-        self.refresh_data()
+        # projects open A→Z by name, with the arrow on the header saying so;
+        # `apply_sort` is what fills the rail
+        groups = self.query_one("#t-groups", Table)
+        groups.sort_by = (0, False)
+        groups.apply_sort()
         # focus starts on the left: you pick the project first, and the
         # right-hand list is what you move to once you have
         self.set_level(0)
         self.query_one("#t-groups", Table).focus()
 
     def set_groups(self, pairs, total) -> None:
-        """The projects, how much each holds, and which machines wrote it.
-
-        The third column is the answer to "who has been working on this" --
-        one machine today, and more than one the moment a second machine syncs
-        into the same repo. Reading it off the rows rather than off a config
-        means it is true by construction.
-        """
+        """The projects, how much each holds, and -- on Sessions -- whether
+        this machine has a path for each and what is waiting to sync."""
         table = self.query_one("#t-groups", Table)
         keep = table.cursor_row
         table.clear()
         self.group_names = [p[0] for p in pairs]
         self._looks = srv.machine_looks()
         known = self._paths = srv.project_paths() if self.ROW_BUTTONS else {}
-        every = sorted({m for p in pairs for m in p[2]})
 
-        def cells(label, n, machines, paths, updown):
-            out = [label, str(n), self.machines(machines, paths)]
+        def cells(label, n, here, updown):
+            out = [label, str(n)]
             if self.ROW_BUTTONS:
-                out.append(Content.from_markup(self.sync_cell(*updown)))
+                out += [Content.from_markup(here),
+                        Content.from_markup(self.sync_cell(*updown))]
             return out
 
         updowns = [entry[3] if len(entry) > 3 else (0, 0) for entry in pairs]
         table.add_row(*cells(Content.from_markup(f"[$accent b]{t('show_all')}[/]"),
-                             total, every, None,
+                             total, "",
                              (sum(u for u, _ in updowns), sum(d for _, d in updowns))))
         for entry, updown in zip(pairs, updowns):
-            name, n, machines = entry[:3]
-            paths = known.get(name, {}) if self.ROW_BUTTONS else None
-            # a machine that has the project checked out counts even before it
-            # recorded a session there
-            shown = set(machines) | set(paths or ())
+            name, n = entry[:2]
+            # only the problem is drawn: a column of ticks is noise around the
+            # one row that needs `w`
+            here = ("" if known.get(name, {}).get(srv.LOCAL_MACHINE)
+                    else "[$warning b]×[/]")
             # not clipped to the column: the marquee scrolls what it cuts
-            table.add_row(*cells(clip(name, 60), n, shown, paths, updown))
+            table.add_row(*cells(clip(name, 60), n, here, updown))
         table.fit()
         if 0 < keep < table.row_count:
             table.move_cursor(row=keep)
         self.retitle()
-
-    def machines(self, names, paths=None):
-        """One glyph per machine. With `paths`, a machine that has no path for
-        the project is drawn faint: that is the thing `w` fixes."""
-        looks = getattr(self, "_looks", None)
-        if looks is None:
-            looks = self._looks = srv.machine_looks()
-        return Content.from_markup(" ".join(
-            machine_icon(srv.machine_look(m, looks),
-                         dim=paths is not None and not paths.get(m))
-            for m in sorted(names)))
 
     def machine_cell(self, machine):
         looks = getattr(self, "_looks", None) or {}
@@ -638,7 +633,9 @@ class Split(Levels, Container):
         """`●` when there is nothing to move, otherwise how much each way."""
         if not (up or down):
             return cls.ICONS["local"]
-        return ((f"[$warning b]▲{up}[/]" if up else "")
+        # two fixed slots, so every ▼ sits under the one above it and `▲2▼51`
+        # never runs together
+        return ((f"[$warning b]{'▲' + str(up):<5}[/]" if up else " " * 5)
                 + (f"[$accent b]▼{down}[/]" if down else ""))
 
     def lead(self, row, text):

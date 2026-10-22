@@ -192,7 +192,10 @@ def machine_icon(look, dim=False):
     """One machine as one glyph in its colour, or faint when `dim` -- which on
     the project rail means "this machine has no path for the project"."""
     glyph = MACHINE_GLYPHS.get(look.get("icon"), MACHINE_GLYPHS["desktop"])
-    colour = "$foreground 25%" if dim else MACHINE_HEX.get(look.get("color"), "$accent")
+    # a fixed grey and not `$foreground 25%`: on the clear ground the
+    # foreground is the terminal's own and cannot be blended, so "faint" came
+    # out as full white -- brighter than the machines that do have a path
+    colour = "#5a5f6b" if dim else MACHINE_HEX.get(look.get("color"), "$accent")
     return f"[{colour}]{glyph}[/]"
 
 
@@ -284,7 +287,8 @@ class Table(DataTable):
         """The cursor follows the pointer, so the row you are pointing at is
         the bright one -- a separate hover shade next to a cursor left behind
         by the keys was two rows asking to be read."""
-        super()._on_mouse_move(event)
+        # no `super()`: Textual already runs `DataTable._on_mouse_move` after
+        # this one, walking the MRO itself
         row = (event.style.meta or {}).get("row", -1)
         if 0 <= row < self.row_count and row != self.cursor_row:
             self.move_cursor(row=row, scroll=False)
@@ -296,8 +300,12 @@ class Table(DataTable):
             self.move_cursor(row=row)
             self.focus()
             event.stop()
+            # and keep `DataTable._on_click` from running after it
+            event.prevent_default()
             return self.button_handler(self, row, column)
-        await super()._on_click(event)
+        # No `super()._on_click`: Textual calls the handler of every class in
+        # the MRO on its own, so calling it here ran it twice -- every header
+        # click sorted ascending and then straight back to descending.
 
     def add_row(self, *cells, **kw):
         row = super().add_row(*cells, **kw)
@@ -443,7 +451,9 @@ class Table(DataTable):
                 # or the arrow being cut: a header that fills its width exactly
                 # ("prompts" in seven) swallowed the one mark that says this is
                 # the column doing the sorting
-                room = (self.spec[i][1] or col.width) - len(arrow)
+                # the elastic column has room to spare; before the first fit
+                # its width is a placeholder 1, which cut "project" to "p"
+                room = (self.spec[i][1] or 999) - len(arrow)
                 label = label[:max(1, room)].rstrip() + arrow
             col.label = Content(label)
         # `Column.label` is a plain dataclass field: assigning it changes
