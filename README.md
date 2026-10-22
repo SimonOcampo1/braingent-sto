@@ -200,6 +200,22 @@ macOS both servers log to `.sto-cache/` and `Ctrl+C` takes them down together.
 | `sto graph [--memory\|--open\|<note>]` | memory graph window (read any memory in full), repo graph, or a node's neighbours |
 | `sto update [--apply]` | bring OS updates down from upstream — never touches your knowledge |
 | `sto badge [--install\|--off]` | the `◆ STO` badge in Claude Code's status line |
+| `sto mod [status\|sync]` | JSON for the `sto-band` mod below |
+
+### Inside Claude Code: the `sto-band` mod
+
+A band above the prompt with this project's chats to push and pull, whether
+this machine has a path for it, and the 5 h, weekly and context windows.
+`/sto sync` pulls, keeps and brings the project's chats, and pushes; `/sto`
+alone refreshes the band.
+
+```
+/plugin install sto-band --marketplace SimonOcampo1/braingent-sto
+```
+
+Or, to have `sto update` update the mod too, add your clone as the marketplace:
+`claude plugin marketplace add <your clone>`, then the same `/plugin install`
+naming it, and `/reload-plugins` after each update.
 
 ---
 
