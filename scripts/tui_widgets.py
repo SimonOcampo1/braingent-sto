@@ -178,6 +178,24 @@ def ago(ts):
     return ui.ago(ts)
 
 
+# Nerd Font (Material Design) glyphs, one per kind of machine. A name in a
+# column of names reads as part of the row; a coloured shape reads as "where".
+MACHINE_GLYPHS = {"desktop": "\U000F01C5", "laptop": "\U000F0322",
+                  "server": "\U000F048B", "raspberry": "\U000F043F",
+                  "monitor": "\U000F0379", "terminal": "\U000F018D"}
+MACHINE_HEX = dict(zip(("cyan", "green", "purple", "blue", "amber", "red"),
+                       ("#22d3ee", "#4ade80", "#c084fc", "#60a5fa", "#fbbf24",
+                        "#f87171")))
+
+
+def machine_icon(look, dim=False):
+    """One machine as one glyph in its colour, or faint when `dim` -- which on
+    the project rail means "this machine has no path for the project"."""
+    glyph = MACHINE_GLYPHS.get(look.get("icon"), MACHINE_GLYPHS["desktop"])
+    colour = "$foreground 25%" if dim else MACHINE_HEX.get(look.get("color"), "$accent")
+    return f"[{colour}]{glyph}[/]"
+
+
 def _plain(cell):
     """The characters of a cell, whether it is a string or a `Content`."""
     return cell if isinstance(cell, str) else cell.plain
@@ -240,20 +258,26 @@ class Table(DataTable):
         for col in self.spec:
             self.add_column(col[0], width=col[1] or 1)
 
+    @property
+    def elastic(self):
+        """The one column with no width of its own, which takes what is left.
+        The last one by default; the title of a session is the first."""
+        return next((i for i, col in enumerate(self.spec) if col[1] is None), None)
+
     def on_resize(self) -> None:
         self.fit()
         # a wider column can un-cut the row that was scrolling, and a narrower
         # one can cut the row that was not
         self.marquee_later()
 
-    # How many leading columns are buttons rather than data, and who to tell
+    # Which columns are buttons rather than data, and who to tell
     # when one is clicked. The hook lives here and not on the pane because
     # `DataTable._on_click` calls `event.stop()`: a click on a table never
     # bubbles, so a pane listening for one hears nothing. It also posts
     # `RowSelected` when you click the row the cursor is already on — which,
     # on a table whose first column is a button, meant one click both opened
     # the modal and opened the document behind it.
-    buttons = 0
+    buttons = ()
     button_handler = None      # (table, row, column) -> None
 
     def _on_mouse_move(self, event) -> None:
@@ -268,7 +292,7 @@ class Table(DataTable):
     async def _on_click(self, event) -> None:
         meta = event.style.meta
         row, column = meta.get("row", -1), meta.get("column", -1)
-        if self.button_handler and row >= 0 and 0 <= column < self.buttons:
+        if self.button_handler and row >= 0 and column in self.buttons:
             self.move_cursor(row=row)
             self.focus()
             event.stop()
@@ -464,13 +488,14 @@ class Table(DataTable):
 
     def fit(self) -> None:
         cols = list(self.columns.values())
-        if not cols or not self.size.width or self.spec[-1][1] is not None:
+        grow = self.elastic
+        if not cols or not self.size.width or grow is None:
             return
         pad = self.cell_padding * 2
-        fixed = sum(col[1] for col in self.spec[:-1])
+        fixed = sum(col[1] for i, col in enumerate(self.spec) if i != grow)
         want = max(8, self.size.width - fixed - pad * len(cols) - 1)
-        if cols[-1].width != want:
-            cols[-1].width = want
+        if cols[grow].width != want:
+            cols[grow].width = want
             self.refresh(layout=True)
 
 

@@ -205,13 +205,13 @@ def test_t_falls_back_to_english_and_then_to_the_key_itself():
         ui.i18n.LANG = real
 
 
-def test_last_sync_falls_back_to_question_mark_without_separator():
+def test_last_sync_drops_the_machine_without_separator():
     real = ui.srv._git
     try:
         # a commit that did not come from sync_push (no "sync from <machine>")
         hace_3_dias = time.time() - 3 * 86400
         ui.srv._git = lambda *a, **k: (0, f"{hace_3_dias}|fix: ajuste manual en knowledge")
-        assert ui.last_sync() == "hace 3 d · ?"
+        assert ui.last_sync() == "hace 3 d"
         # git's %cr printed in English no matter the language: now we format it
         ui.srv._git = lambda *a, **k: (0, "no-es-un-timestamp|sync from NB")
         assert ui.last_sync() == ui.t("never_synced")
@@ -547,7 +547,7 @@ if __name__ == "__main__":
     test_reset_at_converts_utc_to_local_and_survives_junk()
     test_both_languages_define_the_same_keys()
     test_t_falls_back_to_english_and_then_to_the_key_itself()
-    test_last_sync_falls_back_to_question_mark_without_separator()
+    test_last_sync_drops_the_machine_without_separator()
     test_the_relative_time_is_translated_and_rounds_down()
     test_fetch_moves_the_checked_age_and_the_sync_line_does_not()
     test_classify_groups_paths_by_meaning()
