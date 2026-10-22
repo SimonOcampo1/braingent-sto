@@ -20,6 +20,7 @@ declare module 'claude-code' {
       error: string | null
       usage: Usage
       isBusy: boolean
+      isAuto: boolean
     }
   }
 }

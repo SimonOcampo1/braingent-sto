@@ -1,1 +1,1 @@
-{ "name": "sto-band", "version": "0.1.0", "description": "braingent-sto above the prompt: this project's chat sync, the 5h and weekly limits, the context window; /sto sync does the round trip", "types": "./types/index.d.ts" }
+{ "name": "sto-band", "version": "0.2.0", "description": "braingent-sto above the prompt: this project's chat sync, the 5h and weekly limits, the context window; /sto sync does the round trip", "types": "./types/index.d.ts" }

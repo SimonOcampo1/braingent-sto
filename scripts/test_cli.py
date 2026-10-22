@@ -810,6 +810,7 @@ def test_session_todo_and_the_mod_json():
             cli.srv.KNOWLEDGE_SESSIONS = old
     # the band parses stdout: a bad subcommand is an error, a good one is JSON
     assert "error" in cli.main(["mod", "bogus"])
+    assert {"status", "sync", "sync-memories", "pull"} <= set(cli.MOD_SUBS)
     res = json.loads(cli.main(["mod", "status", "--cwd", tempfile.gettempdir()])["message"])
     assert "error" in res or {"up", "down", "pathSaved", "labels"} <= set(res)
 
