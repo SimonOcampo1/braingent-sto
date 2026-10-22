@@ -1,0 +1,5 @@
+{
+  "name": "braingent-sto",
+  "owner": { "name": "Simon Ocampo" },
+  "plugins": [{ "name": "sto-band", "source": "./mod/sto-band" }]
+}
