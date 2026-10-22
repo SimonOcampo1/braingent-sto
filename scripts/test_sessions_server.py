@@ -1788,6 +1788,28 @@ def test_resume_files_against_the_path_this_machine_has_for_the_project():
             srv.KNOWLEDGE_PROJECTS, srv.LOCAL_MACHINE = real_dir, real_machine
 
 
+def test_a_machine_look_is_guessed_then_set_per_machine():
+    """Each machine writes only its own look; one nobody set gets a stable
+    guess that never borrows the warning colours."""
+    real_dir, real_machine = srv.KNOWLEDGE_MACHINES, srv.LOCAL_MACHINE
+    with tempfile.TemporaryDirectory() as d:
+        srv.KNOWLEDGE_MACHINES, srv.LOCAL_MACHINE = Path(d), "sto-pc"
+        try:
+            assert srv.machine_look("sto-notebook")["icon"] == "laptop"
+            assert srv.machine_look("sto-pc")["icon"] == "desktop"
+            for name in ("a", "b", "c", "sto-pc", "MonumentalHP"):
+                assert srv.machine_look(name)["color"] not in ("amber", "red")
+            assert srv.machine_look("x") == srv.machine_look("x")
+            srv.set_machine_look(icon="server", color="red")
+            assert srv.machine_look("sto-pc") == {"icon": "server", "color": "red"}
+            assert [f.name for f in Path(d).iterdir()] == ["sto-pc.json"]
+            # a value outside the palette is not trusted
+            (Path(d) / "sto-pc.json").write_text('{"icon": "toaster"}')
+            assert srv.machine_look("sto-pc")["icon"] == "desktop"
+        finally:
+            srv.KNOWLEDGE_MACHINES, srv.LOCAL_MACHINE = real_dir, real_machine
+
+
 def test_resume_refuses_to_clobber_a_session_already_on_this_machine():
     """Half-overwriting a live transcript is worse than refusing."""
     with tempfile.TemporaryDirectory() as proj, tempfile.TemporaryDirectory() as kn, \
@@ -1944,6 +1966,7 @@ if __name__ == "__main__":
     test_keep_then_resume_lands_where_claude_resume_actually_looks()
     test_a_project_path_is_per_machine_and_merges_without_a_conflict()
     test_resume_files_against_the_path_this_machine_has_for_the_project()
+    test_a_machine_look_is_guessed_then_set_per_machine()
     test_resume_refuses_to_clobber_a_session_already_on_this_machine()
     test_resume_of_an_unknown_id_says_so()
     test_a_session_nobody_kept_still_resumes_from_its_trimmed_export()

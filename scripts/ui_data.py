@@ -525,12 +525,12 @@ def last_sync():
         return t("never_synced")
     when, _, subject = out.partition("|")
     sep = "sync from "
-    machine = subject.split(sep)[-1] if sep in subject else "?"
+    machine = subject.split(sep)[-1] if sep in subject else ""
     try:
         when = ago(float(when))
     except ValueError:
         return t("never_synced")
-    return f"{when} · {machine}"
+    return f"{when} · {machine}" if machine else when
 
 
 def classify(paths):

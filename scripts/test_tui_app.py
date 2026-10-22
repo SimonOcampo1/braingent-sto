@@ -101,12 +101,12 @@ def test_a_screen_renders_with_its_chrome_pinned():
             assert "PUSH" in screen_text(app)[-1]
             # the library's own way out of the product is not in our footer
             assert "palette" not in screen_text(app)[-1]
-            # the facts the title bar carried are at the foot of the home, which
-            # is a scroll away rather than pinned over every screen
+            # which machine this is sits at the foot of the home; the repo and
+            # the agent moved to Config
             app.query_one("#home").scroll_end(animate=False)
             await pilot.pause()
             home = "\n".join(screen_text(app))
-            assert "agent" in home and srv.LOCAL_MACHINE in home, home
+            assert srv.LOCAL_MACHINE in home, home
             app.query_one("#home").scroll_home(animate=False)
             await pilot.pause()
 
@@ -475,10 +475,10 @@ def test_only_the_bracket_is_escaped():
     assert tui_app.esc("a [b] c") == r"a \[b] c"
 
 
-def test_the_home_does_not_pay_for_ccusage_before_it_paints():
+def test_the_tui_never_pays_for_ccusage():
     """`usage_snapshot(detail=True)` shells out to `npx ccusage` twice — twenty
-    seconds cold — and the only thing on the home that reads the detail is the
-    spend sparkline. The percentages are one https call.
+    seconds cold — and the only thing that read the detail was the spend
+    sparkline, which the home dropped. The percentages are one https call.
 
     Asking for both in the phase that paints the screen is what made opening
     the app feel broken, and it is a regression the stdlib flavour already fell
@@ -498,7 +498,7 @@ def test_the_home_does_not_pay_for_ccusage_before_it_paints():
         app.load_fast()
         assert calls == [False], calls
         app.load_slow()
-        assert calls == [False, True], calls
+        assert True not in calls, calls
     finally:
         tui_app.srv.usage_snapshot = real_usage
         tui_app.ui.update_state = real_update
@@ -599,8 +599,8 @@ def test_the_whole_home_is_reachable_in_a_short_window():
             seen = "\n".join(screen_text(app))
             usage = app.usage.get("limits") or []
             if usage:
-                name = (usage[0].get("label") or usage[0].get("kind") or "")
-                assert name.replace("_", " ")[:7] in seen, seen
+                # the last gauge, by its percentage: the names are ours now
+                assert f"{int(usage[-1].get('percent') or 0):>3} %" in seen, seen
             assert not app.query_one("#more").display, "the arrow stayed at the bottom"
 
     asyncio.run(go())
@@ -796,13 +796,15 @@ def test_s_cycles_the_sort_and_comes_back_to_the_natural_order():
             # the rows, not the cells: a cell is a rendering and `5 d` sorted
             # as text puts weeks among hours
             field = pane.SORT_FIELDS[col]
-            up = [r[field] for r in pane.rows]
+            # text sorts the way a person reads it, without regard to case
+            fold = lambda v: v.lower() if isinstance(v, str) else v  # noqa: E731
+            up = [fold(r[field]) for r in pane.rows]
             assert up == sorted(up), up
 
             await pilot.press("s")
             await pilot.pause()
             assert table.sort_by == (col, True), table.sort_by
-            down = [r[field] for r in pane.rows]
+            down = [fold(r[field]) for r in pane.rows]
             assert down == sorted(up, reverse=True), (up, down)
 
             for _ in range(20):
@@ -818,9 +820,8 @@ def test_s_cycles_the_sort_and_comes_back_to_the_natural_order():
 
 
 def test_a_column_sorts_the_datum_and_not_the_cell():
-    """`when` renders `2 h`, `5 d`, `3 w` and `errors` renders markup. Sorted
-    as text the first interleaves hours with weeks and the second is not
-    comparable at all -- so both sort the row behind the cell.
+    """`when` renders `2 h`, `5 d`, `3 w`. Sorted as text it interleaves hours
+    with weeks -- so it sorts the row behind the cell, and so do the rest.
 
     Leaving them out of the cycle was the first answer and it was wrong: they
     are exactly the columns somebody wants sorted.
@@ -843,20 +844,21 @@ def test_a_column_sorts_the_datum_and_not_the_cell():
             rows.focus()
             await pilot.pause()
 
-            # `when` is column 0 and the first step of the cycle
-            await pilot.press("s")
-            await pilot.pause()
-            # column 2: the first two are the buttons, and a button does not sort
-            assert rows.sort_by == (2, False), rows.sort_by
+            # the title is column 0 and the first step of the cycle; `when` is
+            # the next column, two presses further
+            for _ in range(3):
+                await pilot.press("s")
+                await pilot.pause()
+            assert rows.sort_by == (1, False), rows.sort_by
             stamps = [r["mtime"] for r in pane.rows]
             assert stamps == sorted(stamps), "when did not sort by time"
 
-            # walk to `errors` and check it sorts by the count, not the markup
-            while rows.sort_by is not None and rows.sort_by[0] != 5:
+            # walk to `prompts` and check it sorts by the count, not the text
+            while rows.sort_by is not None and rows.sort_by[0] != 2:
                 await pilot.press("s")
                 await pilot.pause()
-            assert rows.sort_by is not None, "errors never came up in the cycle"
-            counts = [r["errors"] for r in pane.rows]
+            assert rows.sort_by is not None, "prompts never came up in the cycle"
+            counts = [r["n_prompts"] for r in pane.rows]
             assert counts == sorted(counts), counts
 
     asyncio.run(go())
@@ -877,14 +879,14 @@ def test_s_on_the_project_rail_sorts_the_projects_and_not_the_rows():
             groups = pane.query_one("#t-groups", tui_app.Table)
             groups.focus()
             await pilot.pause()
-            await pilot.press("s")                  # the count, ascending
-            await pilot.pause()
-            counts = [len(items) for _, items in pane.groups]
-            assert counts == sorted(counts), counts
-            await pilot.press("s", "s")             # the name, ascending
+            await pilot.press("s")                  # the name, ascending
             await pilot.pause()
             names = [name.lower() for name, _ in pane.groups]
             assert names == sorted(names), names
+            await pilot.press("s", "s")             # the count, ascending
+            await pilot.pause()
+            counts = [len(items) for _, items in pane.groups]
+            assert counts == sorted(counts), counts
             # and the rail still points at the group it shows
             groups.move_cursor(row=1)
             await pilot.pause()
@@ -1107,62 +1109,41 @@ def test_a_memory_shows_its_body_and_its_neighbours():
 def test_a_coloured_cell_scrolls_too():
     """The marquee skipped every cell that carried colour.
 
-    The machines columns are exactly that -- the local one in the accent, the
-    rest dim -- so the one place you most need to read a list that does not fit
-    was the one place nothing moved. `Content` slices and carries its spans
-    across, so it scrolls with its colours rather than being left out or
-    flattened to plain text.
-
-    The other half was `clip(machine, 12)` into a column twelve wide: a cell
-    pre-cut to its own column can never be found to overflow.
+    On `all` the title carries its project in front of it, faint, so the one
+    column you read on that screen is a coloured one. `Content` slices and
+    carries its spans across, so it scrolls with its colours rather than being
+    left out or flattened to plain text.
     """
     async def go():
-        real = tui_app.cli.cached_sessions
-        names = ["MaquinaDeEscritorioLarga", "LaptopDelTrabajo-2024"]
-
-        def fake():
-            rows, prompts = real()
-            for i, r in enumerate(rows):
-                r["machine"] = names[i % len(names)]
-            return rows, prompts
-
-        tui_app.cli.cached_sessions = fake
-        try:
-            app = tui_app.StoApp()
-            # narrow on purpose: a marquee is what a cell does when its column
-            # cut it, so the column has to be able to cut it
-            async with app.run_test(size=(70, 20)) as pilot:
-                await app.workers.wait_for_complete()
-                await pilot.press("2")
+        app = tui_app.StoApp()
+        # narrow on purpose: a marquee is what a cell does when its column cut
+        # it, so the column has to be able to cut it
+        async with app.run_test(size=(70, 20)) as pilot:
+            await app.workers.wait_for_complete()
+            await pilot.press("2")
+            await pilot.pause()
+            # one level in, from `all`: the sessions are not on screen until a
+            # project has been chosen
+            app.query_one("#t-groups", tui_app.Table).focus()
+            await pilot.press("enter")
+            await pilot.pause()
+            table = app.query_one("#t-rows", tui_app.Table)
+            if table.row_count < 2:
+                return
+            table.focus()
+            table.move_cursor(row=1)
+            await pilot.pause()
+            await pilot.pause()
+            assert table._marquee is not None, "nothing scrolls"
+            assert type(table.raw[(1, 0)]).__name__ == "Content", table.raw[(1, 0)]
+            before = tui_widgets._plain(table.get_row_at(1)[0])
+            for _ in range(9):
+                table._marquee_tick()
                 await pilot.pause()
-                for table_id in ("#t-groups", "#t-rows"):
-                    if table_id == "#t-rows":
-                        # one level in: the sessions are not on screen until a
-                        # project has been chosen
-                        app.query_one("#t-groups", tui_app.Table).focus()
-                        await pilot.press("enter")
-                        await pilot.pause()
-                    table = app.query_one(table_id, tui_app.Table)
-                    if table.row_count < 2:
-                        continue
-                    table.focus()
-                    table.move_cursor(row=1)
-                    await pilot.pause()
-                    await pilot.pause()
-                    assert table._marquee is not None, (table_id, "nothing scrolls")
-                    kinds = {type(v).__name__ for (r, _), v in table.raw.items() if r == 1}
-                    assert "Content" in kinds or table_id == "#t-rows", kinds
-                    before = tui_widgets._plain(table.get_row_at(1)[-1])
-                    for _ in range(9):
-                        table._marquee_tick()
-                        await pilot.pause()
-                    after = tui_widgets._plain(table.get_row_at(1)[-1])
-                    assert after != before, (table_id, before, after)
-        finally:
-            tui_app.cli.cached_sessions = real
+            after = tui_widgets._plain(table.get_row_at(1)[0])
+            assert after != before, (before, after)
 
     asyncio.run(go())
-
 
 
 def test_keeping_a_conversation_asks_first_and_never_writes_on_escape():
@@ -1260,7 +1241,9 @@ def test_the_two_buttons_are_columns_and_they_never_sort():
             await pilot.press("2")
             await pilot.pause()
             pane = app.query_one("#sessions")
-            assert pane.SORT_FIELDS[:2] == (None, None), pane.SORT_FIELDS
+            # every button column is a `None`, and only those
+            for col in pane.ROW_VERBS:
+                assert pane.SORT_FIELDS[col] is None, pane.SORT_FIELDS
             table = pane.query_one("#t-rows", tui_app.Table)
             # one column per sort field, in the same order
             assert len(table.columns) == len(pane.SORT_FIELDS)
@@ -1295,24 +1278,36 @@ def test_the_row_buttons_are_clickable_and_open_their_own_modal():
             groups = pane.query_one("#t-groups", tui_app.Table)
             widths = [c.get_render_width(groups) for c in groups.columns.values()]
 
-            # the second column, on the second row of the table: row 0 is the
+            def at(column):
+                return sum(widths[:column]) + 1
+
+            # the machines, on the second row of the table: row 0 is the
             # header, row 1 is "all", row 2 is the first real project
-            x = widths[0] + groups.cell_padding * 3
-            await pilot.click(groups, offset=Offset(x, 3))
+            await pilot.click(groups, offset=Offset(at(2), 3))
             await pilot.pause()
             assert type(app.screen).__name__ == "PathPrompt", app.screen
             assert app.screen._project == pane.groups[1][0], app.screen._project
             await pilot.press("escape")
             await pilot.pause()
 
-            # and the first column is the other verb, with its own modal
-            await pilot.click(groups, offset=Offset(2, 3))
+            # and the sync column is the other verb, with its own modal
+            await pilot.click(groups, offset=Offset(at(3), 3))
             await pilot.pause()
             assert type(app.screen).__name__ in ("Confirm", "Screen"), app.screen
             if type(app.screen).__name__ == "Confirm":
                 await pilot.press("escape")
 
     asyncio.run(go())
+
+
+def test_a_machine_without_a_path_is_drawn_faint():
+    """The rail has no path column: a machine that has the project but no path
+    for it is its glyph, faint. That is the thing `w` fixes."""
+    looks = {"pc": {"icon": "desktop", "color": "cyan"}}
+    bright = tui_widgets.machine_icon(looks["pc"])
+    faint = tui_widgets.machine_icon(looks["pc"], dim=True)
+    assert "#22d3ee" in bright and "#22d3ee" not in faint, (bright, faint)
+    assert tui_widgets.MACHINE_GLYPHS["desktop"] in faint
 
 
 def test_w_asks_where_the_project_lives_and_writes_only_on_enter():
@@ -1368,13 +1363,11 @@ def test_w_asks_where_the_project_lives_and_writes_only_on_enter():
     asyncio.run(go())
 
 
-def test_the_home_leads_with_the_counts_and_the_two_arrows():
-    """The dashboard was four cards of four different densities, and the one
-    number anybody opens the screen for — is there anything to sync? — was a
-    cell in a parity table.
-
-    Now it is the wordmark, the box that searches everything, the counts, and
-    the two arrows, in that order.
+def test_the_home_is_the_two_arrows_and_the_two_limits():
+    """The home answered six questions in six shapes -- five counters, two
+    chips, a git line with a dirty flag, a sparkline, the repo and the agent.
+    It answers two now: is there anything to sync, and how much of the plan is
+    left. Everything else moved to the screen that can change it.
     """
     async def go():
         app = tui_app.StoApp()
@@ -1382,10 +1375,9 @@ def test_the_home_leads_with_the_counts_and_the_two_arrows():
             await app.workers.wait_for_complete()
             await pilot.pause()
             body = "\n".join(screen_text(app))
-            for key in ("n_sessions", "n_projects", "n_memories", "n_skills",
-                        "n_machines"):
-                assert tui_app.i18n.t(key).upper()[:11] in body, (key, body)
             assert "\u25b2" in body and "\u25bc" in body, body
+            for gone in ("n_projects", "n_machines", "dirty", "usage_daily"):
+                assert tui_app.i18n.t(gone).upper()[:11] not in body.upper(), gone
             # and the parity detail it dropped is on the screen that can change it
             await pilot.press("5")
             await pilot.pause()
@@ -1446,7 +1438,7 @@ if __name__ == "__main__":
     test_nothing_that_writes_runs_before_the_manifest_is_on_screen()
     test_a_transcript_is_a_conversation_of_blocks()
     test_only_the_bracket_is_escaped()
-    test_the_home_does_not_pay_for_ccusage_before_it_paints()
+    test_the_tui_never_pays_for_ccusage()
     test_a_count_nobody_has_run_yet_is_not_a_zero()
     test_a_pane_off_screen_is_rebuilt_when_you_reach_it_and_not_before()
     test_the_wordmark_shrinks_before_it_disappears()
@@ -1468,7 +1460,8 @@ if __name__ == "__main__":
     test_bringing_a_conversation_asks_for_the_project_path_first()
     test_the_two_buttons_are_columns_and_they_never_sort()
     test_the_row_buttons_are_clickable_and_open_their_own_modal()
+    test_a_machine_without_a_path_is_drawn_faint()
     test_w_asks_where_the_project_lives_and_writes_only_on_enter()
-    test_the_home_leads_with_the_counts_and_the_two_arrows()
+    test_the_home_is_the_two_arrows_and_the_two_limits()
     test_the_footer_offers_a_verb_only_where_it_does_something()
     print("OK")

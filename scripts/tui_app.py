@@ -33,7 +33,7 @@ from textual.widgets import Footer, Input, Markdown, Static  # noqa: E402
 
 from tui_widgets import (  # noqa: E402
     GROUNDS, WORDMARK_STACK_W, WORDMARK_W, Card, Search, Table, Wordmark,
-    ago, chip, clip, esc, gauge, pill, spark, theme_for)
+    ago, chip, clip, esc, gauge, machine_icon, pill, theme_for)
 
 t = i18n.t
 
@@ -160,17 +160,25 @@ class PathPrompt(ModalScreen[str]):
     def __init__(self, project, current, others):
         super().__init__()
         self._project, self._current = project, current or ""
-        self._others = {m: p for m, p in (others or {}).items()
-                        if m != srv.LOCAL_MACHINE}
+        self._paths = dict(others or {})
         self._answered = False
 
     def compose(self) -> ComposeResult:
+        # every machine, this one first, each with the glyph the rail draws it
+        # with: the rail says "faint = no path", and this is where you see which
         lines = [f"[$foreground 60%]"
-                 f"{esc(t('path_what', project=self._project))}[/]"]
-        if self._others:
-            lines += ["", f"[$foreground 50%]{t('path_others')}[/]"]
-            lines += [f"[$accent]{esc(m):<18}[/][$foreground 70%]{esc(path)}[/]"
-                      for m, path in sorted(self._others.items())]
+                 f"{esc(t('path_what', project=self._project))}[/]", ""]
+        looks = srv.machine_looks()
+        names = [srv.LOCAL_MACHINE] + sorted(m for m in self._paths
+                                             if m != srv.LOCAL_MACHINE)
+        for m in names:
+            path = self._paths.get(m)
+            who = f"{m} ({t('path_this')})" if m == srv.LOCAL_MACHINE else m
+            lines.append(
+                f"{machine_icon(srv.machine_look(m, looks), dim=not path)} "
+                f"[$accent]{esc(who):<28}[/]"
+                + (f"[$foreground 70%]{esc(path)}[/]" if path
+                   else f"[$foreground 40%]{t('path_unset')}[/]"))
         with Container(id="confirm-wrap"):
             with Card(f"{t('path_title')} \u00b7 {self._project}", upper=False):
                 yield Static(Content.from_markup("\n".join(lines)), id="confirm-body")
@@ -513,16 +521,16 @@ class Split(Levels, Container):
     # word has to be read.
     ICONS = {"keep": "[$warning b]▲[/]", "bring": "[$accent b]▼[/]",
              "both": "[$warning b]⇅[/]",
-             "local": "[$success b]●[/]", "remote": "[$foreground 40%]○[/]",
-             "path": "[$accent b]⌂[/]", "path_set": "[$foreground 35%]⌂[/]"}
+             "local": "[$success b]●[/]", "remote": "[$foreground 40%]○[/]"}
     # two cells: one is too narrow to land a click on
     BTN_W = 2
 
     @classmethod
     def legend(cls):
-        """The foot of a card that has buttons: what each glyph means."""
-        return "  ".join(f"{cls.ICONS[k]} [$foreground 55%]{esc(t('btn_' + k))}[/]"
-                         for k in ("local", "keep", "bring", "path"))
+        """The foot of the row card: what each sync glyph means."""
+        return "  ".join(f"{cls.ICONS[k]} [$foreground 55%]{esc(t(label))}[/]"
+                         for k, label in (("local", "btn_local"), ("keep", "btn_keep"),
+                                          ("bring", "btn_bring"), ("remote", "lg_remote")))
 
     # two panels: the third thing you look at is a whole document and it has
     # its own screen
@@ -531,22 +539,28 @@ class Split(Levels, Container):
     # project rail is too narrow to read a name in and the rows belong to
     # projects nobody has chosen yet
     STACK_CLASS = "stacked"
-    # the two primary verbs, drawn on the row itself. Off by default: a button
-    # that does nothing is worse than no button
+    # whether the rail carries a sync column and the machines say where the
+    # project has a path. Off by default: a button that does nothing is worse
+    # than no button
     ROW_BUTTONS = False
+    # which column of each table is a button, and the verb it runs
+    GROUP_VERBS = {}
+    ROW_VERBS = {}
+    COUNT_LABEL = "col_n"
 
     def compose(self) -> ComposeResult:
         yield Search(id="search")
-        # the machines are a column of their own: riding inside the name
-        # column they read as part of the name
-        cols = [(t("col_total"), 5, "num"), (t("col_project"), self.NAME_W, "text"),
-                (t("col_machine"), None)]
+        # the name first and elastic, because it is what you read; the count,
+        # the machines as glyphs, and the sync state after it, narrow
+        cols = [(t("col_project"), None, "text"), (t(self.COUNT_LABEL), 4, "num"),
+                (t("col_mach"), 8)]
         if self.ROW_BUTTONS:
-            cols = [("", self.BTN_W), ("", self.BTN_W)] + cols
+            cols.append((t("col_sync"), 6))
         groups = Card(t("sec_projects"), Table(*cols, id="t-groups"), id="groups")
         rows = Card(self.TITLE, self.make_table(), id="rows")
         if self.ROW_BUTTONS:
-            groups.border_subtitle = rows.border_subtitle = self.legend()
+            groups.border_subtitle = f"[$foreground 55%]{esc(t('lg_path'))}[/]"
+            rows.border_subtitle = self.legend()
         yield groups
         yield rows
 
@@ -555,6 +569,8 @@ class Split(Levels, Container):
         self.index = 0
         self.rows = []
         self.level = 0
+        self._filled = 0.0
+        self._fill_timer = None
         self._wire_buttons()
         self.refresh_data()
         # focus starts on the left: you pick the project first, and the
@@ -574,34 +590,81 @@ class Split(Levels, Container):
         keep = table.cursor_row
         table.clear()
         self.group_names = [p[0] for p in pairs]
+        self._looks = srv.machine_looks()
+        known = self._paths = srv.project_paths() if self.ROW_BUTTONS else {}
         every = sorted({m for p in pairs for m in p[2]})
-        pad = [Content("")] * 2 if self.ROW_BUTTONS else []
-        table.add_row(*pad, str(total),
-                      Content.from_markup(f"[$accent b]{t('show_all')}[/]"),
-                      self.machines(every))
-        known = srv.project_paths() if self.ROW_BUTTONS else {}
-        for entry in pairs:
+
+        def cells(label, n, machines, paths, updown):
+            out = [label, str(n), self.machines(machines, paths)]
+            if self.ROW_BUTTONS:
+                out.append(Content.from_markup(self.sync_cell(*updown)))
+            return out
+
+        updowns = [entry[3] if len(entry) > 3 else (0, 0) for entry in pairs]
+        table.add_row(*cells(Content.from_markup(f"[$accent b]{t('show_all')}[/]"),
+                             total, every, None,
+                             (sum(u for u, _ in updowns), sum(d for _, d in updowns))))
+        for entry, updown in zip(pairs, updowns):
             name, n, machines = entry[:3]
-            up, down = entry[3] if len(entry) > 3 else (0, 0)
-            state = ("both" if up and down else "keep" if up
-                     else "bring" if down else "local")
-            buttons = [Content.from_markup(self.ICONS[state]),
-                       Content.from_markup(self.path_button(
-                           known.get(name, {}).get(srv.LOCAL_MACHINE)))
-                       ] if self.ROW_BUTTONS else []
+            paths = known.get(name, {}) if self.ROW_BUTTONS else None
+            # a machine that has the project checked out counts even before it
+            # recorded a session there
+            shown = set(machines) | set(paths or ())
             # not clipped to the column: the marquee scrolls what it cuts
-            table.add_row(*buttons, str(n), clip(name, 60), self.machines(machines))
+            table.add_row(*cells(clip(name, 60), n, shown, paths, updown))
         table.fit()
         if 0 < keep < table.row_count:
             table.move_cursor(row=keep)
         self.retitle()
 
-    @staticmethod
-    def machines(names):
-        """This machine in the accent and the rest dimmed, spaced apart."""
-        return Content.from_markup("   ".join(
-            f"[$accent]{esc(m)}[/]" if m == srv.LOCAL_MACHINE
-            else f"[$foreground 50%]{esc(m)}[/]" for m in sorted(names)))
+    def machines(self, names, paths=None):
+        """One glyph per machine. With `paths`, a machine that has no path for
+        the project is drawn faint: that is the thing `w` fixes."""
+        looks = getattr(self, "_looks", None)
+        if looks is None:
+            looks = self._looks = srv.machine_looks()
+        return Content.from_markup(" ".join(
+            machine_icon(srv.machine_look(m, looks),
+                         dim=paths is not None and not paths.get(m))
+            for m in sorted(names)))
+
+    def machine_cell(self, machine):
+        looks = getattr(self, "_looks", None) or {}
+        return Content.from_markup(machine_icon(srv.machine_look(
+            machine or srv.LOCAL_MACHINE, looks)))
+
+    @classmethod
+    def sync_cell(cls, up, down):
+        """`●` when there is nothing to move, otherwise how much each way."""
+        if not (up or down):
+            return cls.ICONS["local"]
+        return ((f"[$warning b]▲{up}[/]" if up else "")
+                + (f"[$accent b]▼{down}[/]" if down else ""))
+
+    def lead(self, row, text):
+        """The elastic cell of a row. On `all`, or while searching, the rows of
+        every project are mixed together, so the project goes in front of it
+        -- faint -- instead of in a column of its own on every screen."""
+        if self.index == 0 or self.q:
+            return Content.from_markup(
+                f"[$foreground 45%]{esc(clip(row['project'], 16))} › [/]"
+                f"{esc(clip(text, 200))}")
+        return clip(text, 200)
+
+    def _fill_soon(self) -> None:
+        """Fill now, unless the last fill was a moment ago: then once, when the
+        cursor stops. Holding `↓` down the project rail rebuilt the right-hand
+        table for every project it passed."""
+        import time
+        if self._fill_timer is not None:
+            self._fill_timer.stop()
+            self._fill_timer = None
+        now = time.monotonic()
+        if now - self._filled > 0.08:
+            self._filled = now
+            return self.fill()
+        self._filled = now
+        self._fill_timer = self.set_timer(0.08, self.fill)
 
     def retitle(self) -> None:
         """The second panel is named after the project you walked into.
@@ -618,7 +681,7 @@ class Split(Levels, Container):
     def on_data_table_row_highlighted(self, event) -> None:
         if event.data_table.id == "t-groups":
             self.index = event.cursor_row
-            self.fill()
+            self._fill_soon()
             self.retitle()
         else:
             self.preview(event.cursor_row)
@@ -659,14 +722,8 @@ class Split(Levels, Container):
     def preview(self, index) -> None:
         pass
 
-    @classmethod
-    def path_button(cls, known):
-        """The second button. Quiet once this machine has said where the
-        project is, because it opens the same prompt either way."""
-        return cls.ICONS["path_set" if known else "path"]
-
     def _wire_buttons(self) -> None:
-        """Both lists carry the same two buttons in the same two columns.
+        """The columns of each list that act when clicked.
 
         The cursor moves to the row under the pointer before the verb runs: a
         button read through `cursor_row` would act on the row you clicked last
@@ -674,9 +731,9 @@ class Split(Levels, Container):
         """
         if not self.ROW_BUTTONS:
             return
-        for name in ("t-groups", "t-rows"):
+        for name, verbs in (("t-groups", self.GROUP_VERBS), ("t-rows", self.ROW_VERBS)):
             table = self.query_one(f"#{name}", Table)
-            table.buttons = 2
+            table.buttons = tuple(verbs)
             table.button_handler = self._button_click
 
     def _button_click(self, table, row, column) -> None:
@@ -684,10 +741,11 @@ class Split(Levels, Container):
         # later, so `cursor_row` is already right and `self.index` -- which the
         # highlight handler writes -- still points at the project you were on.
         # The click says which row it was; nothing has to wait for a message.
+        verbs = self.GROUP_VERBS if table.id == "t-groups" else self.ROW_VERBS
         if table.id == "t-groups":
             self.index = row
             self.fill()
-        self.act("row_sync" if column == 0 else "row_path")
+        self.act(verbs[column])
 
 
 class Sessions(Split):
@@ -697,27 +755,21 @@ class Sessions(Split):
     # for two things
     VERBS = ("row_sync", "row_path")
     ROW_BUTTONS = True
-    # the two button columns never sort: they are the same glyph for every row
-    # in the same state, so ordering by them orders by nothing
-    SORT_FIELDS = (None, None, "mtime", "project", "n_prompts", "errors",
-                   "machine", "title")
+    # the machines of a project are where its path is set; its sync state is
+    # what `e` would move
+    GROUP_VERBS = {2: "row_path", 3: "row_sync"}
+    ROW_VERBS = {4: "row_sync"}
+    # the button column never sorts: it is the same glyph for every row in the
+    # same state, so ordering by it orders by nothing
+    SORT_FIELDS = ("title", "mtime", "n_prompts", "machine", None)
 
     def make_table(self):
-        # every column sorts, including the two whose cell is not the datum:
-        # `when` renders `5 d` and sorts by `mtime`, `errors` renders markup
-        # and sorts by the count behind it.
-        #
-        # `tools` and `kept` are gone. The tool count never decided anything --
-        # it is a number you read and forget -- and `kept` is what the first
-        # button column already says, in the place where you can act on it.
-        # the buttons are two-tuples: a column with a third element is one `s`
-        # will stop on, and the same glyph for every row in a state sorts by
-        # nothing
-        return Table(("", self.BTN_W), ("", self.BTN_W),
-                     (t("col_when"), 10, "data"), (t("col_project"), 18, "data"),
-                     (t("col_prompts"), 7, "data"),
-                     (t("col_errors"), 7, "data"), (t("col_machine"), 12, "data"),
-                     (t("col_title"), None, "data"), id="t-rows")
+        # the title first and elastic: it is the only column you read. `when`
+        # renders `5 d` and sorts by `mtime`. `project` only shows on `all`, in
+        # front of the title; `errors` never decided anything.
+        return Table((t("col_title"), None, "data"), (t("col_when"), 10, "data"),
+                     (t("col_prompts"), 7, "data"), (t("col_mach"), 4, "data"),
+                     (t("col_sync"), 4), id="t-rows")
 
     def refresh_data(self) -> None:
         rows, _ = cli.cached_sessions()
@@ -783,13 +835,6 @@ class Sessions(Split):
             return Sessions.ICONS[todo]
         return Sessions.ICONS["local" if not row.get("machine") else "remote"]
 
-    def _home(self, project):
-        """The path button, off `self._paths`, refreshed once per `fill()`:
-        reading the registry per row is five hundred file reads to paint one
-        screen."""
-        return self.path_button((getattr(self, "_paths", None) or {}).get(
-            project, {}).get(srv.LOCAL_MACHINE))
-
     def fill(self) -> None:
         pool = (self.all_rows if self.index == 0 or self.index > len(self.groups)
                 else self.groups[self.index - 1][1])
@@ -801,19 +846,14 @@ class Sessions(Split):
                     if q in f"{r['project']} {r['title']} {r.get('machine') or ''}".lower()]
         pool = self.ordered(pool)
         self.rows = pool
-        self._paths = srv.project_paths()
         table = self.query_one("#t-rows", Table)
         table.clear()
         for r in pool:
-            table.add_row(Content.from_markup(self._button(r)),
-                          Content.from_markup(self._home(r["project"])),
-                          ago(r["mtime"]), clip(r["project"], 18), str(r["n_prompts"]),
-                          Content.from_markup(f"[$error]{r['errors']}[/]"
-                                              if r["errors"] else "0"),
-                          # not clipped to the column width: the marquee needs
-                          # something longer than the column to scroll
-                          clip(r.get("machine") or srv.LOCAL_MACHINE, 60),
-                          clip(r["title"], 200), key=r["id"])
+            # not clipped to the column width: the marquee needs something
+            # longer than the column to scroll
+            table.add_row(self.lead(r, r["title"]), ago(r["mtime"]),
+                          str(r["n_prompts"]), self.machine_cell(r.get("machine")),
+                          Content.from_markup(self._button(r)), key=r["id"])
         table.fit()
         if not pool:
             self.app.empty(table, t("cli_no_sessions") if not self.all_rows
@@ -887,12 +927,20 @@ class Sessions(Split):
                       f"[$foreground 60%]{esc(t('resume_how', id=sid))}[/]"],
                      False, lambda: self._resume(sid, short))
 
-    def _keep(self, sid, short) -> None:
-        res = srv.keep_session(sid)
-        self.app.done(res.get("error") or
-                      t("kept_ok", id=short, kb=max(1, res["bytes"] // 1024)),
-                      "error" in res)
+    # The three writers below copy and gzip whole transcripts: on the UI
+    # thread they froze the screen for as long as that took.
 
+    @work(thread=True, group="sessions-sync")
+    def _keep(self, sid, short) -> None:
+        self.app.call_from_thread(self.app.busy, t("k_keep"))
+        res = srv.keep_session(sid)
+        self.app.call_from_thread(
+            self.app.done, res.get("error") or
+            t("kept_ok", id=short, kb=max(1, res.get("bytes", 0) // 1024)),
+            "error" in res)
+        self.app.call_from_thread(self.refresh_data)
+
+    @work(thread=True, group="sessions-sync")
     def _resume(self, sid, short) -> None:
         """Filed against the path this machine has for the project, and only
         against the current directory when nobody has said what that path is.
@@ -905,9 +953,10 @@ class Sessions(Split):
         `claude --resume` will never look at.
         """
         res = srv.resume_session(sid)
-        self.app.done(res.get("error") or t("resumed_ok", short=short, id=sid),
-                      "error" in res)
-        self.refresh_data()
+        self.app.call_from_thread(
+            self.app.done, res.get("error") or t("resumed_ok", short=short, id=sid),
+            "error" in res)
+        self.app.call_from_thread(self.refresh_data)
 
     # ── the two buttons ──
 
@@ -941,12 +990,16 @@ class Sessions(Split):
                  lambda: self._sync_many([r["id"] for r in keep],
                                          [r["id"] for r in bring]))
 
+    @work(thread=True, group="sessions-sync")
     def _sync_many(self, keep, bring) -> None:
-        ok = sum(1 for sid in keep if "error" not in srv.keep_session(sid))
-        ok += sum(1 for sid in bring if "error" not in srv.resume_session(sid))
-        n = len(keep) + len(bring)
-        self.app.done(t("sync_project_done", ok=ok, fail=n - ok), ok < n)
-        self.refresh_data()
+        n, ok = len(keep) + len(bring), 0
+        for i, (fn, sid) in enumerate([(srv.keep_session, s) for s in keep]
+                                      + [(srv.resume_session, s) for s in bring]):
+            self.app.call_from_thread(self.app.busy, f"{t('k_row_sync')} {i + 1}/{n}")
+            ok += "error" not in fn(sid)
+        self.app.call_from_thread(
+            self.app.done, t("sync_project_done", ok=ok, fail=n - ok), ok < n)
+        self.app.call_from_thread(self.refresh_data)
 
     def ask_path(self) -> None:
         """`w` — where this project lives on this machine.
@@ -975,12 +1028,13 @@ class Sessions(Split):
 
 class Memory(Split):
     TITLE = t("tab_memory")
-    SORT_FIELDS = ("slug", "mtime", "machine", "description")
+    COUNT_LABEL = "col_mem"
+    SORT_FIELDS = ("slug", "description", "type", "mtime", "machine")
 
     def make_table(self):
-        return Table((t("col_slug"), 28, "data"), (t("col_when"), 9, "data"),
-                     (t("col_machine"), 14, "data"), (t("col_desc"), None, "data"),
-                     id="t-rows")
+        return Table((t("col_slug"), 26, "data"), (t("col_desc"), None, "data"),
+                     (t("col_type"), 9, "data"), (t("col_when"), 10, "data"),
+                     (t("col_mach"), 4, "data"), id="t-rows")
 
     def refresh_data(self) -> None:
         self.projects = self.sort_groups(srv.list_memory(),
@@ -1006,8 +1060,9 @@ class Memory(Split):
         table = self.query_one("#t-rows", Table)
         table.clear()
         for m in pool:
-            table.add_row(clip(m["slug"], 28), ago(m["mtime"]),
-                          clip(m["machine"], 14), clip(m["description"], 200))
+            table.add_row(clip(m["slug"], 60), self.lead(m, m["description"]),
+                          m.get("type") or "", ago(m["mtime"]),
+                          self.machine_cell(m["machine"]))
         table.fit()
         if not pool:
             self.app.empty(table, t("cli_no_memories") if not self.all_rows
@@ -1349,82 +1404,41 @@ class Home(Container):
         self.run_search()
         return True
 
-    # the tiles of the headline row, in the order the questions come
-    TILE_W = 14
-
-    def _tiles(self, pairs):
-        """Numbers on one line, their names under them, one column each.
-
-        A count is read by looking at it, not by parsing `43 sessions · 12
-        projects · …` -- the old strip put five numbers and five words on one
-        line and made you find the boundaries yourself.
-        """
-        w = self.TILE_W
-        nums = "".join(f"[$accent b]{str(n):^{w}}[/]" for _, n in pairs)
-        names = "".join(f"[$foreground 45%]{clip(t(k), w - 2).upper():^{w}}[/]"
-                        for k, _ in pairs)
-        return f"{nums}\n{names}"
-
     def refresh_data(self) -> None:
         app = self.app
         sy = app.sync
-        up, down = app.preview
-
-        counts = dict(ui.counters())
-        tiles = self._tiles([(k, counts.get(k, 0)) for k in
-                             ("n_sessions", "n_projects", "n_memories",
-                              "n_skills", "n_machines")])
-
-        # the two arrows are the headline, not a row in a table: "is there
-        # anything to do" is the question the screen exists to answer, and a
-        # bare `▲ 12` next to a bare `▼ 0` made you work out which was which
+        # one line: what is waiting each way, and when the repo last moved.
+        # The git counts, the dirty flag and when the remote was last asked are
+        # how the engine finds that out, not something to read
         if not sy.get("remote"):
-            arrows = (f"[$warning]{t('no_remote')}[/]"
-                      f"   [$foreground 55%]{t('guide_hint')}[/]")
-        elif not app.counted:
+            line = (f"[$warning]{t('no_remote')}[/]"
+                    f"   [$foreground 55%]{t('guide_hint')}[/]")
+        else:
             # the counts land a phase after the git status, and `0` there reads
             # as "nothing to sync" -- the opposite of "not known yet"
-            arrows = "   ".join(chip(f"{a} \u00b7\u00b7\u00b7 {t(k)}", "off")
-                                for a, k in (("\u25b2", "to_push"),
-                                             ("\u25bc", "to_pull")))
-        else:
-            arrows = "   ".join(
-                chip(f"{a} {n}  {t(k)}", "accent" if n else "off")
-                for a, n, k in (("\u25b2", app.to_push, "to_push"),
-                                ("\u25bc", app.to_pull, "to_pull")))
-            parts = " \u00b7 ".join(ui.preview_parts(up) + ui.preview_parts(down))
-            if parts:
-                arrows += f"\n\n[$foreground 55%]{clip(parts, 72)}[/]"
-            elif not (sy["ahead"] or sy["behind"]):
-                arrows += f"\n\n[$success]{t('all_synced')}[/]"
-
-        lines = [tiles, "", arrows, "",
-                 f"[$foreground 45%]{t('last_sync')} [/][$foreground 70%]{ui.last_sync()}[/]"
-                 f"[$foreground 25%]   \u00b7   [/]"
-                 f"[$foreground 45%]git [/][$accent]\u2191{sy['ahead']} \u2193{sy['behind']}[/]"
-                 f"[$foreground 25%]   \u00b7   [/]"
-                 + (f"[$warning]{t('dirty')}[/]" if sy["dirty"]
-                    else f"[$success]{t('clean')}[/]")
-                 + f"[$foreground 25%]   \u00b7   [/]"
-                   f"[$foreground 45%]{t('checked', ago=ui.checked_ago())}[/]"]
+            n_up, n_down = ((app.to_push, app.to_pull) if app.counted
+                            else ("\u00b7\u00b7\u00b7", "\u00b7\u00b7\u00b7"))
+            line = "   ".join(
+                chip(f"{a} {n}  {t(k)}", "accent" if app.counted and n else "off")
+                for a, n, k in (("\u25b2", n_up, "to_push"),
+                                ("\u25bc", n_down, "to_pull")))
+            line += (f"   [$foreground 45%]{t('last_sync')} [/]"
+                     f"[$foreground 70%]{esc(ui.last_sync())}[/]")
+        lines = [line]
         if app.update.get("available"):
-            lines.append("")
-            lines.append(chip(f"\u25b2 {t('update_available')}: "
-                              f"{app.update['available']}   u", "quiet"))
+            lines += ["", chip(f"\u25b2 {t('update_available')}: "
+                              f"{app.update['available']}   u", "quiet")]
         self.query_one("#stats-body", Static).update(
             Content.from_markup("\n".join(lines)))
 
-        usage = []
-        for lim in (app.usage.get("limits") or []):
-            usage.append(gauge((lim.get("label") or lim.get("kind") or "?").replace("_", " "),
-                               lim.get("percent") or 0,
-                               ui._reset_at(lim.get("resetsAt"))))
-        costs = [d.get("totalCost") or 0 for d in (app.usage.get("daily") or [])]
-        if costs:
-            usage.append("")
-            usage.append(f"[$foreground 65%]{t('usage_daily'):<15}[/]"
-                         f"[$accent]{spark(costs, 36)}[/]"
-                         f"[$foreground 45%]   {costs[-1]:.0f}[/]")
+        # the 5 h window and the weekly cap, by name; a per-model cap only when
+        # the plan has one
+        names = {"session": t("lim_session"), "five_hour": t("lim_session"),
+                 "weekly_all": t("lim_weekly"), "seven_day": t("lim_weekly")}
+        usage = [gauge(names.get(lim.get("kind"))
+                       or (lim.get("label") or lim.get("kind") or "?").replace("_", " "),
+                       lim.get("percent") or 0, ui._reset_at(lim.get("resetsAt")))
+                 for lim in (app.usage.get("limits") or [])]
         self.query_one("#usage-body", Static).update(Content.from_markup(
             "\n".join(usage) or f"[$foreground 60%]{t('no_usage')}[/]"))
         self.query_one("#where-body", Static).update(app.where_content())
@@ -1463,6 +1477,13 @@ class Config(Container):
         prefs.add_row(t("language"), Content.from_markup(f"[$accent b]{i18n.LANG}[/]"))
         on = srv.badge_status()["on"]
         prefs.add_row(t("badge_row"), Content.from_markup(pill(on)))
+        # each machine picks its own look, on itself: one file per machine, so
+        # two of them never write the same line
+        look = srv.machine_look(srv.LOCAL_MACHINE)
+        prefs.add_row(t("machine_icon"), Content.from_markup(
+            f"{machine_icon(look)} [$accent b]{look['icon']}[/]"))
+        prefs.add_row(t("machine_color"), Content.from_markup(
+            f"{machine_icon(look)} [$accent b]{look['color']}[/]"))
         prefs.fit()
         if 0 <= keep < prefs.row_count:
             prefs.move_cursor(row=keep)
@@ -1492,7 +1513,7 @@ class Config(Container):
         if 0 <= keep < mods.row_count:
             mods.move_cursor(row=keep)
 
-        lines = []
+        lines = [f"[$accent b]agent[/]  [$foreground 80%]{esc(srv.agents.label())}[/]", ""]
         for name, url, note in (("origin", ui._origin(), t("r_origin")),
                                 ("upstream", ui._upstream(), t("r_upstream"))):
             lines.append(f"[$accent b]{name}[/]  [$foreground 60%]{note}[/]")
@@ -1523,6 +1544,14 @@ class Config(Container):
                 return
             if row == 2:
                 ui.set_lang(i18n.LANGS[(i18n.LANGS.index(i18n.LANG) + 1) % len(i18n.LANGS)])
+            elif row in (4, 5):
+                field, options = (("icon", srv.MACHINE_ICONS) if row == 4
+                                  else ("color", srv.MACHINE_COLORS))
+                now = srv.machine_look(srv.LOCAL_MACHINE)[field]
+                srv.set_machine_look(**{field: options[(options.index(now) + 1)
+                                                       % len(options)]})
+                # every list draws machines; repaint them all, not just this tab
+                self.app._repaint()
             else:
                 srv.set_badge(not srv.badge_status()["on"])
         elif mods.has_focus:
@@ -1684,9 +1713,10 @@ class StoApp(App):
         self.counted = True
 
     def load_slow(self) -> None:
-        """The two that leave the machine: the upstream ref and ccusage."""
+        """What leaves the machine: the upstream ref. ccusage is not asked any
+        more -- its spend breakdown only fed a sparkline the home dropped, and
+        it cost fifteen seconds of `npx` per load."""
         self.update = ui.update_state()
-        self.usage = srv.usage_snapshot(detail=True)
 
     PHASES = (("ld_git", "load_fast"), ("ld_counts", "load_counts"),
               ("ld_usage", "load_slow"))
@@ -1725,12 +1755,11 @@ class StoApp(App):
         information. It lives at the foot of the home now: still one glance
         away, and not in the way of the six screens that do change.
         """
-        remote = (self.sync.get("remote") or "").replace("https://", "").removesuffix(".git")
-        sep = "[$foreground 20%]   ·   [/]"
+        # the repo and the agent live on Config; here only which machine this
+        # is, drawn the way every list draws it
         return Content.from_markup(
-            f"[$foreground 40%]repo [/][$foreground 65%]{esc(remote) or t('no_remote')}[/]{sep}"
-            f"[$foreground 40%]agent [/][$foreground 65%]{srv.agents.label()}[/]{sep}"
-            f"[$foreground 40%]{t('col_machine')} [/][$foreground 65%]{srv.LOCAL_MACHINE}[/]")
+            f"{machine_icon(srv.machine_look(srv.LOCAL_MACHINE))} "
+            f"[$foreground 65%]{esc(srv.LOCAL_MACHINE)}[/]")
 
     def compose(self) -> ComposeResult:
         # one container docked to the top and not two widgets each docked to it:
@@ -1871,10 +1900,12 @@ class StoApp(App):
             self.call_from_thread(self.busy, "FETCH")
             # the phases read `.git/FETCH_HEAD` afterwards and find it fresh
             self.sync = srv.sync_status(fetch=True, force=True)
-        for step, name in self.PHASES:
+        for i, (step, name) in enumerate(self.PHASES):
             self.call_from_thread(self.busy, t(step))
             getattr(self, name)()
-            self.call_from_thread(self._painted)
+            # the phases only change what the home shows; the tab on screen is
+            # rebuilt once, at the end, and not three times
+            self.call_from_thread(self._painted, i == len(self.PHASES) - 1)
         self.call_from_thread(self.done)
 
     def _repaint(self) -> None:
@@ -1894,8 +1925,10 @@ class StoApp(App):
             if hasattr(pane, "refresh_data"):
                 pane.refresh_data()
 
-    def _painted(self) -> None:
-        self._repaint()
+    def _painted(self, full: bool = True) -> None:
+        if full:
+            return self._repaint()
+        self.panes[HOME].refresh_data()
 
     # ── the status strip ──
 

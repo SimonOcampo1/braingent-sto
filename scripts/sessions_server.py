@@ -1025,6 +1025,52 @@ def set_project_path(project: str, path) -> dict:
     return data
 
 
+KNOWLEDGE_MACHINES = REPO_ROOT / "knowledge" / "machines"
+MACHINE_ICONS = ("desktop", "laptop", "server", "raspberry", "monitor", "terminal")
+MACHINE_COLORS = ("cyan", "green", "purple", "blue", "amber", "red")
+
+
+def machine_looks() -> dict:
+    """{machine: {"icon", "color"}} — how each machine is drawn in the UI.
+
+    A file per machine, like the path registry and for the same reason: each
+    machine only ever writes its own, so two of them never touch the same line.
+    A machine nobody configured gets a stable guess: a laptop if its name says
+    so, a colour from its name, the same on every machine that draws it.
+    """
+    out = {}
+    if KNOWLEDGE_MACHINES.is_dir():
+        for f in KNOWLEDGE_MACHINES.glob("*.json"):
+            try:
+                out[f.stem] = json.loads(f.read_text(encoding="utf-8")) or {}
+            except (OSError, ValueError):
+                continue
+    return out
+
+
+def machine_look(machine: str, looks: dict | None = None) -> dict:
+    import zlib
+    look = dict((machine_looks() if looks is None else looks).get(machine) or {})
+    if look.get("icon") not in MACHINE_ICONS:
+        lower = machine.lower()
+        look["icon"] = ("laptop" if any(w in lower for w in ("note", "laptop", "book"))
+                        else "desktop")
+    if look.get("color") not in MACHINE_COLORS:
+        # amber and red read as warnings, so a guess never lands on them
+        look["color"] = MACHINE_COLORS[zlib.crc32(machine.encode()) % 4]
+    return look
+
+
+def set_machine_look(**changes) -> dict:
+    """Change this machine's icon or colour (`icon=`, `color=`)."""
+    look = machine_look(LOCAL_MACHINE)
+    look.update({k: v for k, v in changes.items() if v})
+    f = KNOWLEDGE_MACHINES / f"{LOCAL_MACHINE}.json"
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(json.dumps(look, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return look
+
+
 def remember_project_paths(rows) -> None:
     """The cwd a local transcript was recorded in *is* the path of the project
     on this machine, so nobody has to type it. Only what is new gets written:
@@ -1978,7 +2024,9 @@ def _commit_own_project_map() -> bool:
     until a push. It is one file per machine, so it merges without conflict.
     Returns whether the tree is clean afterwards.
     """
-    own = f"knowledge/projects/{LOCAL_MACHINE}.json"
+    # and the machine's own look, which only this machine ever writes either
+    own = {f"knowledge/projects/{LOCAL_MACHINE}.json",
+           f"knowledge/machines/{LOCAL_MACHINE}.json"}
     code, out = _git("status", "--porcelain")
     if code != 0:
         return False
@@ -1987,10 +2035,10 @@ def _commit_own_project_map() -> bool:
     dirty = [line[2:].strip().strip('"') for line in out.splitlines() if line.strip()]
     if not dirty:
         return True
-    if dirty != [own]:
+    if not set(dirty) <= own:
         return False
-    _git("add", "--", own)
-    code, _ = _git("commit", "-m", f"knowledge: sync from {LOCAL_MACHINE}", "--", own)
+    _git("add", "--", *dirty)
+    code, _ = _git("commit", "-m", f"knowledge: sync from {LOCAL_MACHINE}", "--", *dirty)
     return code == 0
 
 
