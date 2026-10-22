@@ -770,12 +770,7 @@ class Sessions(Split):
 
     def refresh_data(self) -> None:
         rows, _ = cli.cached_sessions()
-        # one directory walk for the whole table: asking per row would stat the
-        # knowledge tree 500 times to paint one screen
-        archived = {a["id"] for a in srv.archived_sessions()}
-        for r in rows:
-            r["kept"] = r["id"] in archived
-            r["synced"] = r["kept"] or self._exported(r)
+        cli.mark_synced(rows)
         self.all_rows = rows
         groups = {}
         for r in rows:
@@ -790,32 +785,8 @@ class Sessions(Split):
                          for name, items in self.groups], len(rows))
         self.fill()
 
-    @staticmethod
-    def _exported(row):
-        """Whether the last push already carried this local conversation: its
-        trimmed copy is in the repo and not older than the live file. That
-        copy is enough for another machine to resume it, so it counts as
-        synced without a `keep`."""
-        if row.get("machine"):
-            return False
-        out = srv.KNOWLEDGE_SESSIONS / srv.LOCAL_MACHINE / row["project"] / f"{row['id']}.jsonl"
-        try:
-            return out.stat().st_mtime >= Path(row["path"]).stat().st_mtime
-        except (OSError, KeyError, TypeError):
-            return False
-
-    @staticmethod
-    def _todo(row):
-        """Whether this conversation has somewhere to travel.
-
-        Recorded here and never archived → it can be kept in full. Recorded
-        elsewhere → it can always be brought down: the full archive when there
-        is one, the trimmed export every push carries when there is not. Once
-        it is here the local copy shadows the remote row.
-        """
-        if not row.get("machine"):
-            return None if row.get("synced", row.get("kept")) else "keep"
-        return "bring"
+    # the rule lives in `cli` now: the Claude Code mod asks the same question
+    _todo = staticmethod(cli.session_todo)
 
     @staticmethod
     def _button(row):

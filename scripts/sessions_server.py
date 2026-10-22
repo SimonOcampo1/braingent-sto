@@ -38,18 +38,25 @@ def project_name(path: Path, cwd: str | None = None) -> str:
     # basenames merge into one group. Add a parent segment if that ever hurts.
     key = path.parent.name
     if cwd and key not in _PROJECT_NAMES:
-        import subprocess as sp
-        name = PurePath(cwd.replace("\\", "/")).name or key
-        try:
-            r = sp.run(["git", "-C", cwd, "remote", "get-url", "origin"],
-                       capture_output=True, text=True, timeout=5)
-            url = r.stdout.strip()
-            if r.returncode == 0 and url:
-                name = url.rstrip("/").split("/")[-1].removesuffix(".git") or name
-        except OSError:
-            pass
-        _PROJECT_NAMES[key] = name
+        _PROJECT_NAMES[key] = project_of_cwd(cwd, key)
     return _PROJECT_NAMES.get(key, key)
+
+
+def project_of_cwd(cwd: str, fallback: str = "") -> str:
+    """The project identity of a working directory: the origin's repo name, or
+    the directory's basename. What `project_name` files a session under, asked
+    from the directory side (the mod knows the cwd, not a transcript)."""
+    import subprocess as sp
+    name = PurePath(cwd.replace("\\", "/")).name or fallback
+    try:
+        r = sp.run(["git", "-C", cwd, "remote", "get-url", "origin"],
+                   capture_output=True, text=True, timeout=5)
+        url = r.stdout.strip()
+        if r.returncode == 0 and url:
+            name = url.rstrip("/").split("/")[-1].removesuffix(".git") or name
+    except OSError:
+        pass
+    return name
 
 
 def session_meta(path: Path) -> dict:
