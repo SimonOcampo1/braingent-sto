@@ -788,6 +788,32 @@ def test_the_graph_html_survives_a_memory_that_quotes_markup():
 
 
 
+def test_session_todo_and_the_mod_json():
+    # local and never exported → keep; from elsewhere → bring; exported → nothing
+    with tempfile.TemporaryDirectory() as d:
+        live = Path(d) / "live.jsonl"
+        live.write_text("{}", encoding="utf-8")
+        old = cli.srv.KNOWLEDGE_SESSIONS
+        cli.srv.KNOWLEDGE_SESSIONS = Path(d) / "k"
+        try:
+            rows = [{"id": "a", "project": "p", "path": str(live), "machine": None},
+                    {"id": "b", "project": "p", "path": str(live), "machine": "other"}]
+            cli.mark_synced(rows)
+            assert [cli.session_todo(r) for r in rows] == ["keep", "bring"]
+            out = cli.srv.KNOWLEDGE_SESSIONS / cli.srv.LOCAL_MACHINE / "p" / "a.jsonl"
+            out.parent.mkdir(parents=True)
+            out.write_text("{}", encoding="utf-8")
+            os.utime(out, (live.stat().st_mtime + 5,) * 2)
+            cli.mark_synced(rows)
+            assert cli.session_todo(rows[0]) is None
+        finally:
+            cli.srv.KNOWLEDGE_SESSIONS = old
+    # the band parses stdout: a bad subcommand is an error, a good one is JSON
+    assert "error" in cli.main(["mod", "bogus"])
+    res = json.loads(cli.main(["mod", "status", "--cwd", tempfile.gettempdir()])["message"])
+    assert "error" in res or {"up", "down", "pathSaved", "labels"} <= set(res)
+
+
 if __name__ == "__main__":
     test_cached_sessions_reuses_entry_and_reparses_on_change()
     test_cached_sessions_drops_deleted_and_survives_corrupt_cache()
@@ -825,4 +851,5 @@ if __name__ == "__main__":
     test_memory_graph_carries_the_body_so_the_window_can_read_it()
     test_the_graph_template_renders_markdown_and_escapes_it()
     test_the_graph_html_survives_a_memory_that_quotes_markup()
+    test_session_todo_and_the_mod_json()
     print("OK")

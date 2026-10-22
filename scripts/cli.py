@@ -138,6 +138,121 @@ def n_memories(n):
     return t("cli_1_memory") if n == 1 else t("cli_n_memories", n=n)
 
 
+def exported(row):
+    """Whether the last push already carried this local conversation: its
+    trimmed copy is in the repo and not older than the live file. That
+    copy is enough for another machine to resume it, so it counts as
+    synced without a `keep`."""
+    if row.get("machine"):
+        return False
+    out = srv.KNOWLEDGE_SESSIONS / srv.LOCAL_MACHINE / row["project"] / f"{row['id']}.jsonl"
+    try:
+        return out.stat().st_mtime >= Path(row["path"]).stat().st_mtime
+    except (OSError, KeyError, TypeError):
+        return False
+
+
+def mark_synced(rows):
+    """Set `kept` and `synced` on each row, in place."""
+    # one directory walk for the whole table: asking per row would stat the
+    # knowledge tree 500 times to paint one screen
+    archived = {a["id"] for a in srv.archived_sessions()}
+    for r in rows:
+        r["kept"] = r["id"] in archived
+        r["synced"] = r["kept"] or exported(r)
+    return rows
+
+
+def session_todo(row):
+    """Whether this conversation has somewhere to travel.
+
+    Recorded here and never archived → it can be kept in full. Recorded
+    elsewhere → it can always be brought down: the full archive when there
+    is one, the trimmed export every push carries when there is not. Once
+    it is here the local copy shadows the remote row.
+    """
+    if not row.get("machine"):
+        return None if row.get("synced", row.get("kept")) else "keep"
+    return "bring"
+
+
+def project_todo(project):
+    """(keep ids, bring ids) for one project's conversations."""
+    rows, _ = cached_sessions()
+    mark_synced(rows)
+    mine = [r for r in rows if r["project"] == project]
+    return ([r["id"] for r in mine if session_todo(r) == "keep"],
+            [r["id"] for r in mine if session_todo(r) == "bring"])
+
+
+# what the Claude Code band paints, in the language `sto ui` picked
+MOD_LABELS = ("mod_chats", "mod_uptodate", "mod_no_path", "mod_5h", "mod_week",
+              "mod_ctx", "mod_syncing", "mod_repo")
+
+
+def mod_status(cwd):
+    project = srv.project_of_cwd(cwd)
+    keep, bring = project_todo(project)
+    sy = srv.sync_status()
+    return {"project": project, "up": len(keep), "down": len(bring),
+            "pathSaved": srv.local_project_path(project) is not None,
+            "ahead": sy["ahead"], "behind": sy["behind"],
+            "fetchError": sy["fetchError"], "accent": _accent(),
+            "labels": {k: t(k) for k in MOD_LABELS}}
+
+
+def _accent():
+    """The ANSI code `sto ui` picked, so the band matches the badge."""
+    try:
+        return json.loads(i18n.PREFS.read_text(encoding="utf-8")).get("accent", "36")
+    except (OSError, ValueError, AttributeError):
+        return "36"
+
+
+def mod_sync(cwd):
+    """Pull, keep and bring this project's conversations, push: one round trip.
+
+    Memories ride along: the pull imports them and the push exports them.
+    """
+    project = srv.project_of_cwd(cwd)
+    res = srv.sync_pull()
+    if res.get("error"):
+        return {"error": res["error"]}
+    keep, bring = project_todo(project)
+    skipped = 0
+    if bring and srv.local_project_path(project) is None:
+        skipped, bring = len(bring), []
+    fail = sum("error" in srv.keep_session(s) for s in keep)
+    fail += sum("error" in srv.resume_session(s) for s in bring)
+    res = srv.sync_push()
+    if res.get("error"):
+        return {"error": res["error"]}
+    n = len(keep) + len(bring)
+    msg = (t("sync_project_done", ok=n - fail, fail=fail) if n
+           else t("sync_project_none", project=project))
+    if skipped:
+        msg += " · " + t("resume_needs_path", project=project)
+    return {"ok": not fail, "message": msg}
+
+
+def cmd_mod(*args):
+    """sto mod [status|sync] [--cwd <dir>] — JSON for the Claude Code mod."""
+    args = list(args)
+    cwd = os.getcwd()
+    if "--cwd" in args:
+        i = args.index("--cwd")
+        cwd = args[i + 1] if i + 1 < len(args) else cwd
+        del args[i:i + 2]
+    sub = args[0] if args else "status"
+    if sub not in ("status", "sync"):
+        _no_args("mod")
+    try:
+        out = mod_status(cwd) if sub == "status" else mod_sync(cwd)
+    except Exception as e:  # the band reads stdout as JSON: never a traceback
+        out = {"error": f"{type(e).__name__}: {e}"}
+    return {"message": json.dumps(out, ensure_ascii=False)}
+
+
 def cmd_sessions(*args):
     """sto sessions [<project>]"""
     rows, _ = cached_sessions()
@@ -763,6 +878,7 @@ CLI = {
     "keep": cmd_keep,
     "resume": cmd_resume,
     "ui": cmd_ui,
+    "mod": cmd_mod,
 }
 
 
