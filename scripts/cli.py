@@ -891,8 +891,13 @@ def cmd_ui(*args):
         # --no-project: this is a script in a repo that is not a uv project, and
         # without it uv goes looking for a pyproject.toml and gives up
         here = Path(__file__).parent
-        subprocess.run(["uv", "run", "--no-project", "--with", "textual",
-                        "python", str(here / "tui_app.py")], cwd=here.parent)
+        uv = ["uv", "run", "--no-project", "--with", "textual"]
+        # a cached textual is enough: without --offline uv asks PyPI on every
+        # launch, and a bad network left `sto ui` blank for half a minute
+        cached = subprocess.run(uv + ["--offline", "python", "-c", "import textual"],
+                                capture_output=True).returncode == 0
+        subprocess.run(uv + (["--offline"] if cached else []) +
+                       ["python", str(here / "tui_app.py")], cwd=here.parent)
         return {"message": ""}
     return {"error": t("textual_missing")}
 
