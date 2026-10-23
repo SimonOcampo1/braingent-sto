@@ -1364,7 +1364,7 @@ def test_an_explicit_update_check_fetches_even_with_a_fresh_ref():
     llamadas = []
     try:
         srv._stale_fetch_ref = lambda *a, **k: False      # ref recien fetcheado
-        def fake(*args):
+        def fake(*args, **kw):
             llamadas.append(args)
             if args[0] == "remote":
                 return 0, "https://x/y.git"
@@ -1379,6 +1379,30 @@ def test_an_explicit_update_check_fetches_even_with_a_fresh_ref():
         assert any(a[0] == "fetch" for a in llamadas), llamadas
     finally:
         srv._git, srv._stale_fetch_ref = real_git, real_stale
+
+
+def test_a_slow_network_cannot_outlast_the_claude_code_band():
+    """The bug: the band runs `sto mod status` with a 30 s budget, and the
+    status fetch used `_git`'s 120 s default. With GitHub slow, the fetch alone
+    took ~55 s and the band printed "aborted: still running after...". The
+    fetch must give up early and come back as a `fetchError` instead."""
+    real_git, real_stale = srv._git, srv._stale_fetch
+    plazos = {}
+    try:
+        srv._stale_fetch = lambda *a, **k: True
+        def fake(*args, timeout=120):
+            plazos[args[0]] = timeout
+            if args[0] == "remote":
+                return 0, "git@x"
+            if args[0] == "fetch":
+                return 1, "timed out"
+            return 0, ""
+        srv._git = fake
+        st = srv.sync_status()
+        assert plazos["fetch"] <= 20, plazos
+        assert st["fetchError"] == "timed out", st
+    finally:
+        srv._git, srv._stale_fetch = real_git, real_stale
 
 
 def test_update_apply_refuses_an_unrelated_repo_instead_of_forcing_a_merge():
@@ -1971,4 +1995,5 @@ if __name__ == "__main__":
     test_resume_of_an_unknown_id_says_so()
     test_a_session_nobody_kept_still_resumes_from_its_trimmed_export()
     test_sync_push_forces_a_fetch_before_the_behind_check()
+    test_a_slow_network_cannot_outlast_the_claude_code_band()
     print("OK")

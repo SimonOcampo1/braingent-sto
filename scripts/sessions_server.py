@@ -1915,6 +1915,10 @@ def memory_graph(src=None, bodies=False) -> dict:
 
 
 FETCH_TTL = 60  # seconds: a network round trip per `sto status` is the whole cost
+# An unasked-for fetch gives up early: the Claude Code band runs `sto mod status`
+# with a 30 s budget, and a slow network must show up as a fetchError, not as
+# the band aborting. A forced fetch (an explicit sync) keeps `_git`'s default.
+FETCH_TIMEOUT = 15
 
 
 _NEIGH = {"ts": 0.0, "links": None}
@@ -1998,7 +2002,7 @@ def sync_status(fetch=True, force=False) -> dict:
                 "dirty": False, "machine": LOCAL_MACHINE, "fetchError": None}
     fetch_error = None
     if fetch and (force or _stale_fetch()):
-        fcode, fout = _git("fetch", "--quiet", "origin")
+        fcode, fout = _git("fetch", "--quiet", "origin", timeout=120 if force else FETCH_TIMEOUT)
         if fcode != 0:
             fetch_error = fout or "fetch failed"
     _, branch = _git("rev-parse", "--abbrev-ref", "HEAD")
@@ -2210,7 +2214,7 @@ def update_status(fetch=True, force=False) -> dict:
     # 30 min and not the usual 60 s: an OS release is not something you race
     # to, and this runs on every home repaint.
     if fetch and (force or _stale_fetch_ref(f"refs/remotes/{UPSTREAM}", ttl=1800)):
-        fcode, fout = _git("fetch", "--quiet", UPSTREAM)
+        fcode, fout = _git("fetch", "--quiet", UPSTREAM, timeout=120 if force else FETCH_TIMEOUT)
         if fcode != 0:
             return {"available": 0, "url": url, "linked": False, "log": [],
                     "error": fout[:200] or "fetch failed"}
