@@ -159,12 +159,15 @@ def mark_synced(rows):
     # one directory walk for the whole table: asking per row would stat the
     # knowledge tree 500 times to paint one screen
     archived = {a["id"] for a in srv.archived_sessions()}
-    brought, stamps = srv.brought_sessions(), srv.repo_stamps()
+    brought, best = srv.brought_sessions(), srv.repo_best()
+    stamps = {i: c["stamp"] for i, c in best.items()}
     for r in rows:
         r["kept"] = r["id"] in archived
         r["synced"] = r["kept"] or exported(r)
-        r["stale"] = (not r.get("machine") and bool(r.get("path"))
-                      and srv.needs_refresh(Path(r["path"]), brought, stamps))
+        here = (not r.get("machine") and bool(r.get("path"))
+                and not _repo_only(r))
+        r["stale"] = here and srv.needs_refresh(Path(r["path"]), brought, stamps)
+        r["fork"] = here and srv.has_fork(Path(r["path"]), brought, best.get(r["id"]))
     return rows
 
 
@@ -184,8 +187,8 @@ def session_todo(row):
     it is here the local copy shadows the remote row, unless it was only
     brought and the origin has moved on since.
     """
-    if row.get("stale"):
-        return "bring"  # brought before and the origin has moved on
+    if row.get("stale") or row.get("fork"):
+        return "bring"  # the origin moved on; a fork lands beside ours
     if not row.get("machine") and _repo_only(row):
         return "bring"  # ours, but Claude Code pruned it: only the repo has it
     if not row.get("machine"):

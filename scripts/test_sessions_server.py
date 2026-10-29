@@ -2039,6 +2039,48 @@ def test_an_echo_is_only_dropped_while_another_machine_carries_it():
             srv.brought_sessions = real
 
 
+def test_a_chat_continued_on_two_machines_brings_theirs_beside_ours():
+    """Both machines went on with the same chat. `resume` refused (ours is
+    here) and the other version was out of reach. It lands beside ours under
+    a new id; ours is not touched, and it is offered once per move."""
+    with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as kn, \
+         tempfile.TemporaryDirectory() as there, tempfile.TemporaryDirectory() as work:
+        cd = Path(home)
+        ours_dir = cd / "projects" / srv.project_slug(work)
+        ours_dir.mkdir(parents=True)
+        ours = _settled(_write_session(ours_dir), age=9000)
+        before = ours.read_text(encoding="utf-8")
+
+        theirs_dir = Path(there) / "D--repo"
+        theirs_dir.mkdir()
+        theirs = _write_session(theirs_dir)
+        with theirs.open("a", encoding="utf-8") as fh:
+            fh.write("\n" + json.dumps({"type": "user", "message": {
+                "role": "user", "content": "Went on over there"}}) + "\n")
+        _settled(theirs, age=2000)
+        srv.export_sessions(projects_dir=Path(there), dest=Path(kn) / "OtherPC")
+
+        best = srv.repo_best(Path(kn))
+        assert not srv.is_echo(ours, {})
+        assert srv.has_fork(ours, {}, best[ours.stem])
+
+        kw = dict(project_dir=work, claude_dir=cd, knowledge_dir=Path(kn))
+        res = srv.resume_session(ours.stem[:8], **kw)
+        assert res.get("ok"), res
+        assert res["forkOf"] == ours.stem and res["id"] != ours.stem
+        fork = Path(res["path"])
+        assert fork.parent == ours.parent
+        assert "Went on over there" in fork.read_text(encoding="utf-8")
+        assert all(json.loads(l)["sessionId"] == res["id"]
+                   for l in fork.read_text(encoding="utf-8").splitlines())
+        assert ours.read_text(encoding="utf-8") == before
+
+        reg = srv.brought_sessions(cd)
+        assert srv.is_echo(fork, reg)  # theirs: never exported back as ours
+        assert not srv.has_fork(ours, reg, best[ours.stem])
+        assert "error" in srv.resume_session(ours.stem[:8], **kw)
+
+
 def test_a_synthetic_copy_from_before_the_record_is_still_an_echo():
     with tempfile.TemporaryDirectory() as d:
         p = Path(d) / "s.jsonl"
@@ -2161,6 +2203,7 @@ if __name__ == "__main__":
     test_resume_keeps_claude_code_from_pruning_what_it_brings()
     test_export_drops_its_copy_under_a_project_name_the_session_lost()
     test_an_echo_is_only_dropped_while_another_machine_carries_it()
+    test_a_chat_continued_on_two_machines_brings_theirs_beside_ours()
     test_sync_push_forces_a_fetch_before_the_behind_check()
     test_a_slow_network_cannot_outlast_the_claude_code_band()
     print("OK")

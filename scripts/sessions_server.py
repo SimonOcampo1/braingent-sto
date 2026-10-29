@@ -1305,12 +1305,45 @@ def _best_copy(copies):
     return max(others, key=lambda c: (c["stamp"], not c["trimmed"]))
 
 
-def repo_stamps(knowledge_dir=None) -> dict:
-    """{session id: stamp of the copy `resume` would bring}."""
+def repo_best(knowledge_dir=None) -> dict:
+    """{session id: the copy `resume` would bring}."""
     by_id = {}
     for c in _repo_copies(knowledge_dir):
         by_id.setdefault(c["id"], []).append(c)
-    return {i: _best_copy(cs)["stamp"] for i, cs in by_id.items()}
+    return {i: _best_copy(cs) for i, cs in by_id.items()}
+
+
+def repo_stamps(knowledge_dir=None) -> dict:
+    """{session id: stamp of the copy `resume` would bring}."""
+    return {i: c["stamp"] for i, c in repo_best(knowledge_dir).items()}
+
+
+def _record(brought: dict, sid: str) -> dict:
+    rec = brought.get(sid)
+    return rec if isinstance(rec, dict) else {"mtime": rec} if rec else {}
+
+
+def _messages(path: Path) -> int:
+    """What the chat viewer would show of a transcript, raw or trimmed."""
+    opener = gzip.open if path.name.endswith(".gz") else open
+    with opener(path, "rt", encoding="utf-8", errors="replace") as fh:
+        return sum(1 for line in fh if line.strip() and _trim_session_line(line))
+
+
+def has_fork(path: Path, brought: dict, copy) -> bool:
+    """The same chat went on here and on another machine.
+
+    Ours is no echo (recorded or continued here), and the other machine's
+    copy is newer than what we last took from it and says more than ours.
+    An echo of our own chat says the same, so the count tells them apart.
+    """
+    # ponytail: a fork where we went on further than they did is not seen;
+    # telling it apart needs the content, not a count
+    if not copy or copy["machine"] == LOCAL_MACHINE or is_echo(path, brought):
+        return False
+    rec = _record(brought, path.stem)
+    base = max(rec.get("src", path.stat().st_mtime), rec.get("forked", 0))
+    return copy["stamp"] > base + 1 and _messages(copy["path"]) > _messages(path)
 
 
 def needs_refresh(path: Path, brought: dict, stamps: dict) -> bool:
@@ -1373,7 +1406,9 @@ def resume_session(sid: str, project_dir=None, claude_dir=None,
     trimmed export, rebuilt into text-only turns: the tool outputs are gone,
     the conversation is not, and nobody had to remember to keep it.
 
-    Refuses to clobber a local session that was recorded or continued here.
+    Refuses to clobber a local session that was recorded or continued here;
+    when the other machine went on with it too, theirs lands beside it under
+    a new id (`has_fork`).
     A brought copy nobody touched is replaced when the origin moved on, and
     through a temp file: a half-overwritten transcript is worse than none.
     """
@@ -1388,15 +1423,24 @@ def resume_session(sid: str, project_dir=None, claude_dir=None,
     target = cd / "projects" / project_slug(where)
     out = target / (row["id"] + ".jsonl")
     reg = brought_sessions(cd)
+    fork = None
     if out.exists() and not is_echo(out, reg):
-        return {"error": f"{out} already exists: this session is already here"}
+        if not has_fork(out, reg, row):
+            return {"error": f"{out} already exists: this session is already here"}
+        # theirs beside ours, under its own id: nothing is clobbered
+        import uuid
+        fork = str(uuid.uuid4())
+        out = target / (fork + ".jsonl")
+    sid_out = fork or row["id"]
     target.mkdir(parents=True, exist_ok=True)
     keep_transcripts(cd)
     final, out = out, out.with_suffix(".part")
     if row.get("trimmed"):
-        lines = _resumable_lines(row["path"], row["id"], str(Path(where)))
+        lines = _resumable_lines(row["path"], sid_out, str(Path(where)))
     else:
         lines = (l for l in gzip.open(row["path"], "rt", encoding="utf-8"))
+        if fork:
+            lines = (_with_session_id(l, fork) for l in lines)
     n, last = 0, None
     with out.open("w", encoding="utf-8", newline="\n") as fh:
         for line in lines:
@@ -1408,11 +1452,24 @@ def resume_session(sid: str, project_dir=None, claude_dir=None,
         os.utime(out, (last, last))
     os.replace(out, final)
     out = final
-    reg[row["id"]] = {"mtime": out.stat().st_mtime, "src": row["stamp"]}
+    reg[sid_out] = {"mtime": out.stat().st_mtime, "src": row["stamp"]}
+    if fork:  # offered again only when the other machine moves on again
+        reg[row["id"]] = dict(_record(reg, row["id"]), forked=row["stamp"])
     (cd / BROUGHT).write_text(json.dumps(reg, indent=1), encoding="utf-8")
-    return {"ok": True, "id": row["id"], "machine": row["machine"],
-            "project": row["project"], "lines": n, "path": str(out),
-            "command": f"claude --resume {row['id']}"}
+    return {"ok": True, "id": sid_out, "forkOf": row["id"] if fork else None,
+            "machine": row["machine"], "project": row["project"], "lines": n,
+            "path": str(out), "command": f"claude --resume {sid_out}"}
+
+
+def _with_session_id(line: str, sid: str) -> str:
+    try:
+        o = json.loads(line)
+    except ValueError:
+        return line
+    if isinstance(o, dict) and "sessionId" in o:
+        o["sessionId"] = sid
+        return json.dumps(o, ensure_ascii=False)
+    return line
 
 
 
