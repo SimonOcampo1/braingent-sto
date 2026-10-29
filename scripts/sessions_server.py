@@ -995,7 +995,9 @@ def export_sessions(projects_dir=None, dest=None) -> int:
             continue
         out = dest / meta["project"] / p.name
         if is_echo(p, brought):
-            out.unlink(missing_ok=True)  # an earlier push already echoed it
+            # an earlier push echoed it; drop that copy, but never the last one
+            if any(q.parts[-3] != dest.name for q in dest.parent.glob(f"*/*/{p.name}")):
+                out.unlink(missing_ok=True)
             continue
         if out.exists() and out.stat().st_mtime >= st.st_mtime:
             continue
@@ -1010,6 +1012,9 @@ def export_sessions(projects_dir=None, dest=None) -> int:
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text("\n".join(lines) + "\n", encoding="utf-8")
         os.utime(out, (st.st_atime, st.st_mtime))  # keep mtime for change detection
+        for old in dest.glob(f"*/{p.name}"):  # filed under a project name it no longer has
+            if old != out:
+                old.unlink()
         written += 1
     return written
 
@@ -1330,6 +1335,30 @@ def _repo_session(sid: str, knowledge_dir=None):
     return _best_copy(copies), None
 
 
+KEEP_DAYS = 3650
+
+
+def keep_transcripts(claude_dir=None) -> None:
+    """Stop Claude Code from deleting what `resume` brings.
+
+    Claude Code prunes transcripts older than `cleanupPeriodDays` (30 by
+    default) on startup, by mtime. A brought chat carries its real date, so
+    anything older than a month was deleted on the next launch and offered
+    for bringing again on the next sync. A value the user set is theirs.
+    """
+    f = Path(claude_dir or CLAUDE_DIR) / "settings.json"
+    try:
+        conf = json.loads(f.read_text(encoding="utf-8"))
+    except OSError:
+        conf = {}
+    except ValueError:
+        return  # not ours to repair
+    if "cleanupPeriodDays" not in conf:
+        conf["cleanupPeriodDays"] = KEEP_DAYS
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(json.dumps(conf, indent=2), encoding="utf-8")
+
+
 def resume_session(sid: str, project_dir=None, claude_dir=None,
                    knowledge_dir=None) -> dict:
     """Materialise a session from the repo into this machine's projects tree.
@@ -1362,6 +1391,7 @@ def resume_session(sid: str, project_dir=None, claude_dir=None,
     if out.exists() and not is_echo(out, reg):
         return {"error": f"{out} already exists: this session is already here"}
     target.mkdir(parents=True, exist_ok=True)
+    keep_transcripts(cd)
     final, out = out, out.with_suffix(".part")
     if row.get("trimmed"):
         lines = _resumable_lines(row["path"], row["id"], str(Path(where)))

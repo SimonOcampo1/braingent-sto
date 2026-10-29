@@ -788,6 +788,15 @@ def test_the_graph_html_survives_a_memory_that_quotes_markup():
 
 
 
+def test_a_chat_of_ours_that_only_the_repo_has_can_be_brought():
+    """Claude Code prunes its transcripts; the export stays. The row is ours
+    (no machine) but there is nothing on disk to resume."""
+    row = {"machine": None, "synced": True,
+           "path": str(cli.srv.KNOWLEDGE_SESSIONS / "me" / "p" / "x.jsonl")}
+    assert cli.session_todo(row) == "bring"
+    assert cli.session_todo(dict(row, path="/home/me/.claude/projects/p/x.jsonl")) is None
+
+
 def test_session_todo_and_the_mod_json():
     # local and never exported → keep; from elsewhere → bring; exported → nothing
     with tempfile.TemporaryDirectory() as d:
@@ -853,4 +862,5 @@ if __name__ == "__main__":
     test_the_graph_template_renders_markdown_and_escapes_it()
     test_the_graph_html_survives_a_memory_that_quotes_markup()
     test_session_todo_and_the_mod_json()
+    test_a_chat_of_ours_that_only_the_repo_has_can_be_brought()
     print("OK")

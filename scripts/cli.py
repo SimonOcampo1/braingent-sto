@@ -168,6 +168,13 @@ def mark_synced(rows):
     return rows
 
 
+def _repo_only(row):
+    try:
+        return Path(row["path"]).is_relative_to(srv.KNOWLEDGE_SESSIONS)
+    except (KeyError, TypeError):
+        return False
+
+
 def session_todo(row):
     """Whether this conversation has somewhere to travel.
 
@@ -179,6 +186,8 @@ def session_todo(row):
     """
     if row.get("stale"):
         return "bring"  # brought before and the origin has moved on
+    if not row.get("machine") and _repo_only(row):
+        return "bring"  # ours, but Claude Code pruned it: only the repo has it
     if not row.get("machine"):
         return None if row.get("synced", row.get("kept")) else "keep"
     return "bring"
