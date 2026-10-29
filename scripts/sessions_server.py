@@ -929,6 +929,45 @@ def _trim_session_line(line: str):
     return json.dumps(out, ensure_ascii=False)
 
 
+BROUGHT = "sto-brought.json"  # per-machine: {session id: mtime when it was brought}
+
+
+def brought_sessions(claude_dir=None) -> dict:
+    try:
+        return json.loads((Path(claude_dir or CLAUDE_DIR) / BROUGHT).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def is_echo(path: Path, brought: dict) -> bool:
+    """Whether a local session is only a copy brought from another machine.
+
+    Exporting it would file the same conversation under this machine too:
+    another row, another "origin", and on the next pull the origin's machine
+    would see it as somebody else's chat to bring. Once it is continued here
+    its mtime moves past the bring and it is ours to export.
+
+    Copies rebuilt from a trimmed export before the record existed give
+    themselves away: every assistant line is `<synthetic>`, none is a model.
+    """
+    try:
+        if path.stem in brought:
+            return path.stat().st_mtime <= brought[path.stem] + 1
+        synthetic = False
+        with path.open(encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                if '"assistant"' not in line:
+                    continue
+                o = json.loads(line)
+                if o.get("type") == "assistant":
+                    if (o.get("message") or {}).get("model") != "<synthetic>":
+                        return False
+                    synthetic = True
+        return synthetic
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
 def export_sessions(projects_dir=None, dest=None) -> int:
     """Write trimmed, redacted copies of prompt-bearing local sessions into
     knowledge/sessions/<machine>/. Skips unchanged files. Returns files written."""
@@ -939,6 +978,7 @@ def export_sessions(projects_dir=None, dest=None) -> int:
     (dest / "machine.json").write_text(  # device identity for other machines' UIs
         json.dumps({"name": dest.name, "type": machine_type()}), encoding="utf-8")
     written = 0
+    brought = brought_sessions(pd.parent)
     for _, p in dx.find_sessions(None, projects_dir=pd, max_sessions=MAX_SESSIONS):
         try:
             st = p.stat()
@@ -952,6 +992,9 @@ def export_sessions(projects_dir=None, dest=None) -> int:
         if meta["n_prompts"] == 0:
             continue
         out = dest / meta["project"] / p.name
+        if is_echo(p, brought):
+            out.unlink(missing_ok=True)  # an earlier push already echoed it
+            continue
         if out.exists() and out.stat().st_mtime >= st.st_mtime:
             continue
         lines = []
@@ -1292,6 +1335,9 @@ def resume_session(sid: str, project_dir=None, claude_dir=None,
                 last = _line_time(line) or last
     if last:  # /resume sorts by mtime: a fresh write would float to the top
         os.utime(out, (last, last))
+    reg = brought_sessions(cd)
+    reg[row["id"]] = out.stat().st_mtime
+    (cd / BROUGHT).write_text(json.dumps(reg, indent=1), encoding="utf-8")
     return {"ok": True, "id": row["id"], "machine": row["machine"],
             "project": row["project"], "lines": n, "path": str(out),
             "command": f"claude --resume {row['id']}"}

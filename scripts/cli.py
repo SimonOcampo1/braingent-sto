@@ -145,6 +145,8 @@ def exported(row):
     synced without a `keep`."""
     if row.get("machine"):
         return False
+    if row.get("path") and srv.is_echo(Path(row["path"]), srv.brought_sessions()):
+        return True  # brought from elsewhere, untouched: the origin carries it
     out = srv.KNOWLEDGE_SESSIONS / srv.LOCAL_MACHINE / row["project"] / f"{row['id']}.jsonl"
     try:
         return out.stat().st_mtime >= Path(row["path"]).stat().st_mtime
