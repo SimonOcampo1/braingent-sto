@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 import json
 import os
 import shutil
@@ -1891,6 +1892,37 @@ def test_a_session_nobody_kept_still_resumes_from_its_trimmed_export():
         assert "First real prompt" in json.dumps(lines)
 
 
+def test_a_resumed_session_keeps_its_place_in_the_resume_list():
+    """`claude --resume` lists sessions newest first by mtime. A synced chat
+    written now floated to the top with every other one, and after a few
+    syncs hundreds of chats read as "just now". The copy is stamped with the
+    time of its last message, which the export carries along."""
+    with tempfile.TemporaryDirectory() as proj, tempfile.TemporaryDirectory() as kn, \
+         tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as work:
+        pdir = Path(proj) / "D--repo"
+        pdir.mkdir()
+        src = pdir / "abcdabcd-2222-3333-4444-555555555555.jsonl"
+        src.write_text("\n".join(json.dumps(x) for x in [
+            {"type": "user", "timestamp": "2026-01-02T10:00:00.000Z",
+             "message": {"role": "user", "content": "old chat"}},
+            {"type": "assistant", "timestamp": "2026-01-02T10:05:00.000Z",
+             "message": {"role": "assistant", "content": [{"type": "text", "text": "ok"}]}},
+        ]) + "\n", encoding="utf-8")
+        _settled(src)
+        assert srv.export_sessions(projects_dir=Path(proj), dest=Path(kn) / "OtherPC") == 1
+        for f in Path(kn).rglob("*.jsonl"):
+            os.utime(f, None)  # a git checkout stamps it with "now"
+
+        res = srv.resume_session("abcdabcd", project_dir=work,
+                                 claude_dir=Path(home), knowledge_dir=Path(kn))
+        assert res.get("ok"), res
+        out = Path(res["path"])
+        last = datetime(2026, 1, 2, 10, 5, tzinfo=timezone.utc).timestamp()
+        assert out.stat().st_mtime == last, out.stat().st_mtime
+        stamps = [json.loads(l)["timestamp"] for l in out.read_text().splitlines()]
+        assert stamps == ["2026-01-02T10:00:00.000Z", "2026-01-02T10:05:00.000Z"], stamps
+
+
 def test_sync_push_forces_a_fetch_before_the_behind_check():
     """The guard used to read the last fetch (`fetch=False`): if another machine
     pushed inside the FETCH_TTL window, `behind` came back 0, the guard stayed
@@ -1994,6 +2026,7 @@ if __name__ == "__main__":
     test_resume_refuses_to_clobber_a_session_already_on_this_machine()
     test_resume_of_an_unknown_id_says_so()
     test_a_session_nobody_kept_still_resumes_from_its_trimmed_export()
+    test_a_resumed_session_keeps_its_place_in_the_resume_list()
     test_sync_push_forces_a_fetch_before_the_behind_check()
     test_a_slow_network_cannot_outlast_the_claude_code_band()
     print("OK")
