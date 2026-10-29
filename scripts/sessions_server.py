@@ -923,8 +923,10 @@ def _trim_session_line(line: str):
             return None
     else:
         return None
-    return json.dumps({"type": o["type"], "message": {"role": msg.get("role"), "content": new_content}},
-                      ensure_ascii=False)
+    out = {"type": o["type"], "message": {"role": msg.get("role"), "content": new_content}}
+    if isinstance(o.get("timestamp"), str):
+        out["timestamp"] = o["timestamp"]  # a resumed copy keeps its place in /resume
+    return json.dumps(out, ensure_ascii=False)
 
 
 def export_sessions(projects_dir=None, dest=None) -> int:
@@ -1189,7 +1191,9 @@ def _resumable_lines(trimmed: Path, sid: str, cwd: str):
     """
     import uuid
     from datetime import datetime, timedelta, timezone
-    t0 = datetime.fromtimestamp(trimmed.stat().st_mtime, timezone.utc)
+    # git does not keep mtimes: a pulled export says "now" unless the commit says otherwise
+    t0 = datetime.fromtimestamp(real_mtime(trimmed, trimmed.stat().st_mtime,
+                                           committed_at()), timezone.utc)
     parent, msgs = None, []
     for line in trimmed.read_text(encoding="utf-8", errors="replace").splitlines():
         try:
@@ -1199,8 +1203,8 @@ def _resumable_lines(trimmed: Path, sid: str, cwd: str):
             continue
         text = _flat_text(o["message"].get("content"))
         if role in ("user", "assistant") and text.strip():
-            msgs.append((role, text))
-    for i, (role, text) in enumerate(msgs):
+            msgs.append((role, text, o.get("timestamp")))
+    for i, (role, text, ts) in enumerate(msgs):
         me = str(uuid.uuid4())
         if role == "user":
             message = {"role": "user", "content": text}
@@ -1210,12 +1214,23 @@ def _resumable_lines(trimmed: Path, sid: str, cwd: str):
                        "content": [{"type": "text", "text": text}],
                        "stop_reason": "end_turn", "stop_sequence": None,
                        "usage": {"input_tokens": 0, "output_tokens": 0}}
-        ts = (t0 - timedelta(seconds=len(msgs) - i)).isoformat().replace("+00:00", "Z")
+        if not isinstance(ts, str):  # exports older than the timestamp field
+            ts = (t0 - timedelta(seconds=len(msgs) - i)).isoformat().replace("+00:00", "Z")
         yield json.dumps({"parentUuid": parent, "isSidechain": False,
                           "userType": "external", "cwd": cwd, "sessionId": sid,
                           "type": role, "message": message, "uuid": me,
                           "timestamp": ts}, ensure_ascii=False)
         parent = me
+
+
+def _line_time(line: str):
+    """Unix time of a transcript line's `timestamp`, or None."""
+    from datetime import datetime
+    try:
+        ts = json.loads(line).get("timestamp")
+        return datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp()
+    except (ValueError, AttributeError, TypeError):
+        return None
 
 
 def _repo_session(sid: str, knowledge_dir=None):
@@ -1268,12 +1283,15 @@ def resume_session(sid: str, project_dir=None, claude_dir=None,
         lines = _resumable_lines(row["path"], row["id"], str(Path(where)))
     else:
         lines = (l for l in gzip.open(row["path"], "rt", encoding="utf-8"))
-    n = 0
+    n, last = 0, None
     with out.open("w", encoding="utf-8", newline="\n") as fh:
         for line in lines:
             if line.strip():
                 fh.write(line.rstrip("\n") + "\n")
                 n += 1
+                last = _line_time(line) or last
+    if last:  # /resume sorts by mtime: a fresh write would float to the top
+        os.utime(out, (last, last))
     return {"ok": True, "id": row["id"], "machine": row["machine"],
             "project": row["project"], "lines": n, "path": str(out),
             "command": f"claude --resume {row['id']}"}
