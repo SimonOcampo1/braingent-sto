@@ -1990,6 +1990,55 @@ def test_a_brought_copy_follows_its_origin_until_it_is_continued_here():
         assert "error" in srv.resume_session("11111111", **kw)
 
 
+def test_resume_keeps_claude_code_from_pruning_what_it_brings():
+    with tempfile.TemporaryDirectory() as home:
+        srv.keep_transcripts(home)
+        f = Path(home) / "settings.json"
+        assert json.loads(f.read_text())["cleanupPeriodDays"] == srv.KEEP_DAYS
+        f.write_text(json.dumps({"cleanupPeriodDays": 7, "theme": "dark"}))
+        srv.keep_transcripts(home)
+        assert json.loads(f.read_text()) == {"cleanupPeriodDays": 7, "theme": "dark"}
+
+
+def test_export_drops_its_copy_under_a_project_name_the_session_lost():
+    """A repo renamed (sto-agentic-os → braingent-sto) files the next export
+    under the new name; the old copy stayed, and the chat showed twice."""
+    with tempfile.TemporaryDirectory() as proj, tempfile.TemporaryDirectory() as kn:
+        pdir = Path(proj) / "D--repo"
+        pdir.mkdir()
+        src = _settled(_write_session(pdir))
+        dest = Path(kn) / "HerePC"
+        old = dest / "old-name" / src.name
+        old.parent.mkdir(parents=True)
+        old.write_text("{}\n")
+        assert srv.export_sessions(projects_dir=Path(proj), dest=dest) == 1
+        assert not old.exists()
+        assert len(list(dest.glob(f"*/{src.name}"))) == 1
+
+
+def test_an_echo_is_only_dropped_while_another_machine_carries_it():
+    with tempfile.TemporaryDirectory() as proj, tempfile.TemporaryDirectory() as kn:
+        pdir = Path(proj) / "D--repo"
+        pdir.mkdir()
+        src = _settled(_write_session(pdir))
+        dest = Path(kn) / "HerePC"
+        srv.export_sessions(projects_dir=Path(proj), dest=dest)
+        mine = next(dest.glob(f"*/{src.name}"))
+        brought = {src.stem: {"mtime": src.stat().st_mtime + 10, "src": 0}}
+        real = srv.brought_sessions
+        try:
+            srv.brought_sessions = lambda *a, **k: brought
+            srv.export_sessions(projects_dir=Path(proj), dest=dest)
+            assert mine.exists()  # the only copy the repo has
+            twin = Path(kn) / "OtherPC" / "repo" / src.name
+            twin.parent.mkdir(parents=True)
+            twin.write_text("{}\n")
+            srv.export_sessions(projects_dir=Path(proj), dest=dest)
+            assert not mine.exists()
+        finally:
+            srv.brought_sessions = real
+
+
 def test_a_synthetic_copy_from_before_the_record_is_still_an_echo():
     with tempfile.TemporaryDirectory() as d:
         p = Path(d) / "s.jsonl"
@@ -2109,6 +2158,9 @@ if __name__ == "__main__":
     test_a_brought_session_is_not_echoed_back_until_it_is_continued()
     test_a_synthetic_copy_from_before_the_record_is_still_an_echo()
     test_a_brought_copy_follows_its_origin_until_it_is_continued_here()
+    test_resume_keeps_claude_code_from_pruning_what_it_brings()
+    test_export_drops_its_copy_under_a_project_name_the_session_lost()
+    test_an_echo_is_only_dropped_while_another_machine_carries_it()
     test_sync_push_forces_a_fetch_before_the_behind_check()
     test_a_slow_network_cannot_outlast_the_claude_code_band()
     print("OK")
