@@ -159,9 +159,12 @@ def mark_synced(rows):
     # one directory walk for the whole table: asking per row would stat the
     # knowledge tree 500 times to paint one screen
     archived = {a["id"] for a in srv.archived_sessions()}
+    brought, stamps = srv.brought_sessions(), srv.repo_stamps()
     for r in rows:
         r["kept"] = r["id"] in archived
         r["synced"] = r["kept"] or exported(r)
+        r["stale"] = (not r.get("machine") and bool(r.get("path"))
+                      and srv.needs_refresh(Path(r["path"]), brought, stamps))
     return rows
 
 
@@ -171,8 +174,11 @@ def session_todo(row):
     Recorded here and never archived → it can be kept in full. Recorded
     elsewhere → it can always be brought down: the full archive when there
     is one, the trimmed export every push carries when there is not. Once
-    it is here the local copy shadows the remote row.
+    it is here the local copy shadows the remote row, unless it was only
+    brought and the origin has moved on since.
     """
+    if row.get("stale"):
+        return "bring"  # brought before and the origin has moved on
     if not row.get("machine"):
         return None if row.get("synced", row.get("kept")) else "keep"
     return "bring"

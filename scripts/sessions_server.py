@@ -929,7 +929,7 @@ def _trim_session_line(line: str):
     return json.dumps(out, ensure_ascii=False)
 
 
-BROUGHT = "sto-brought.json"  # per-machine: {session id: mtime when it was brought}
+BROUGHT = "sto-brought.json"  # per-machine: {id: {mtime after the bring, src stamp}}
 
 
 def brought_sessions(claude_dir=None) -> dict:
@@ -952,7 +952,9 @@ def is_echo(path: Path, brought: dict) -> bool:
     """
     try:
         if path.stem in brought:
-            return path.stat().st_mtime <= brought[path.stem] + 1
+            rec = brought[path.stem]
+            t = rec.get("mtime", 0) if isinstance(rec, dict) else rec
+            return path.stat().st_mtime <= t + 1
         synthetic = False
         with path.open(encoding="utf-8", errors="replace") as fh:
             for line in fh:
@@ -1276,20 +1278,56 @@ def _line_time(line: str):
         return None
 
 
+def _repo_copies(knowledge_dir=None, sid=""):
+    """Every copy of every session in the repo (ids starting with `sid`):
+    rows of {id, machine, project, path, trimmed, stamp}."""
+    committed = committed_at()
+    rows = [dict(r, trimmed=False) for r in archived_sessions(knowledge_dir)
+            if r["id"].startswith(sid)]
+    rows += [{"id": p.stem, "machine": m, "project": p.parent.name, "path": p,
+              "trimmed": True} for m, p in _knowledge_sessions(knowledge_dir)
+             if p.stem.startswith(sid)]
+    for r in rows:
+        r["stamp"] = real_mtime(r["path"], r["path"].stat().st_mtime, committed)
+    return rows
+
+
+def _best_copy(copies):
+    """The copy to bring: another machine's over our own export (that one is
+    only for when Claude Code pruned the original), the newest of those, and
+    the full archive when it is as new as the trimmed export."""
+    others = [c for c in copies if c["machine"] != LOCAL_MACHINE] or copies
+    return max(others, key=lambda c: (c["stamp"], not c["trimmed"]))
+
+
+def repo_stamps(knowledge_dir=None) -> dict:
+    """{session id: stamp of the copy `resume` would bring}."""
+    by_id = {}
+    for c in _repo_copies(knowledge_dir):
+        by_id.setdefault(c["id"], []).append(c)
+    return {i: _best_copy(cs)["stamp"] for i, cs in by_id.items()}
+
+
+def needs_refresh(path: Path, brought: dict, stamps: dict) -> bool:
+    """A brought copy nobody touched here, whose origin moved on since."""
+    if path.stem not in stamps or not is_echo(path, brought):
+        return False
+    rec = brought.get(path.stem)
+    seen = rec.get("src") if isinstance(rec, dict) else None
+    if seen is None:  # brought before the record kept the source's stamp
+        seen = path.stat().st_mtime
+    return stamps[path.stem] > seen + 1
+
+
 def _repo_session(sid: str, knowledge_dir=None):
-    """(row, error) — the best copy of a session the repo holds: the full
-    archive when somebody kept it, else the trimmed export every push makes."""
-    hits = {r["id"]: r for r in archived_sessions(knowledge_dir)
-            if r["id"].startswith(sid)}
-    for machine, p in _knowledge_sessions(knowledge_dir):
-        if p.stem.startswith(sid) and p.stem not in hits:
-            hits[p.stem] = {"id": p.stem, "machine": machine,
-                            "project": p.parent.name, "path": p, "trimmed": True}
-    if not hits:
+    """(row, error) — the copy of a session `resume` brings (`_best_copy`)."""
+    copies = _repo_copies(knowledge_dir, sid)
+    ids = sorted({c["id"] for c in copies})
+    if not ids:
         return None, f"no session in the repo starts with {sid}"
-    if len(hits) > 1:
-        return None, "ambiguous id: " + ", ".join(i[:12] for i in list(hits)[:5])
-    return next(iter(hits.values())), None
+    if len(ids) > 1:
+        return None, "ambiguous id: " + ", ".join(i[:12] for i in ids[:5])
+    return _best_copy(copies), None
 
 
 def resume_session(sid: str, project_dir=None, claude_dir=None,
@@ -1306,8 +1344,9 @@ def resume_session(sid: str, project_dir=None, claude_dir=None,
     trimmed export, rebuilt into text-only turns: the tool outputs are gone,
     the conversation is not, and nobody had to remember to keep it.
 
-    Refuses to clobber an existing local session — a half-overwritten
-    transcript is worse than no transcript.
+    Refuses to clobber a local session that was recorded or continued here.
+    A brought copy nobody touched is replaced when the origin moved on, and
+    through a temp file: a half-overwritten transcript is worse than none.
     """
     row, err = _repo_session(sid, knowledge_dir)
     if err:
@@ -1319,9 +1358,11 @@ def resume_session(sid: str, project_dir=None, claude_dir=None,
     cd = Path(claude_dir) if claude_dir else CLAUDE_DIR
     target = cd / "projects" / project_slug(where)
     out = target / (row["id"] + ".jsonl")
-    if out.exists():
+    reg = brought_sessions(cd)
+    if out.exists() and not is_echo(out, reg):
         return {"error": f"{out} already exists: this session is already here"}
     target.mkdir(parents=True, exist_ok=True)
+    final, out = out, out.with_suffix(".part")
     if row.get("trimmed"):
         lines = _resumable_lines(row["path"], row["id"], str(Path(where)))
     else:
@@ -1335,8 +1376,9 @@ def resume_session(sid: str, project_dir=None, claude_dir=None,
                 last = _line_time(line) or last
     if last:  # /resume sorts by mtime: a fresh write would float to the top
         os.utime(out, (last, last))
-    reg = brought_sessions(cd)
-    reg[row["id"]] = out.stat().st_mtime
+    os.replace(out, final)
+    out = final
+    reg[row["id"]] = {"mtime": out.stat().st_mtime, "src": row["stamp"]}
     (cd / BROUGHT).write_text(json.dumps(reg, indent=1), encoding="utf-8")
     return {"ok": True, "id": row["id"], "machine": row["machine"],
             "project": row["project"], "lines": n, "path": str(out),

@@ -1949,9 +1949,45 @@ def test_a_brought_session_is_not_echoed_back_until_it_is_continued():
         with out.open("a", encoding="utf-8") as fh:  # continued on this machine
             fh.write(json.dumps({"type": "user", "message": {
                 "role": "user", "content": "and one more thing"}}) + "\n")
-        later = srv.brought_sessions(home)[out.stem] + 5  # still past the settle window
+        later = srv.brought_sessions(home)[out.stem]["mtime"] + 5  # past the settle window
         os.utime(out, (later, later))
         assert srv.export_sessions(projects_dir=Path(home) / "projects", dest=here) == 1
+
+
+def test_a_brought_copy_follows_its_origin_until_it_is_continued_here():
+    """`resume` refused to touch a chat that was already here, so a chat
+    brought once froze: the origin went on and this machine never saw it.
+    An untouched copy is the origin's, so it is replaced; a continued one is
+    ours, so it is not."""
+    with tempfile.TemporaryDirectory() as proj, tempfile.TemporaryDirectory() as kn, \
+         tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as work:
+        pdir = Path(proj) / "D--repo"
+        pdir.mkdir()
+        src = _settled(_write_session(pdir), age=5000)
+        other = Path(kn) / "OtherPC"
+        srv.export_sessions(projects_dir=Path(proj), dest=other)
+        kw = dict(project_dir=work, claude_dir=Path(home), knowledge_dir=Path(kn))
+        out = Path(srv.resume_session("11111111", **kw)["path"])
+        reg = srv.brought_sessions(home)
+        assert not srv.needs_refresh(out, reg, srv.repo_stamps(Path(kn)))
+
+        with src.open("a", encoding="utf-8") as fh:  # the origin goes on
+            fh.write("\n" + json.dumps({"type": "user", "message": {
+                "role": "user", "content": "Origin kept going"}}) + "\n")
+        _settled(src, age=2000)
+        assert srv.export_sessions(projects_dir=Path(proj), dest=other) == 1
+        assert srv.needs_refresh(out, reg, srv.repo_stamps(Path(kn)))
+
+        res = srv.resume_session("11111111", **kw)
+        assert res.get("ok"), res
+        assert "Origin kept going" in out.read_text(encoding="utf-8")
+        assert not srv.needs_refresh(out, srv.brought_sessions(home),
+                                     srv.repo_stamps(Path(kn)))
+        assert not out.with_suffix(".part").exists()
+
+        later = time.time()  # continued here: ours now, never clobbered
+        os.utime(out, (later, later))
+        assert "error" in srv.resume_session("11111111", **kw)
 
 
 def test_a_synthetic_copy_from_before_the_record_is_still_an_echo():
@@ -2072,6 +2108,7 @@ if __name__ == "__main__":
     test_a_resumed_session_keeps_its_place_in_the_resume_list()
     test_a_brought_session_is_not_echoed_back_until_it_is_continued()
     test_a_synthetic_copy_from_before_the_record_is_still_an_echo()
+    test_a_brought_copy_follows_its_origin_until_it_is_continued_here()
     test_sync_push_forces_a_fetch_before_the_behind_check()
     test_a_slow_network_cannot_outlast_the_claude_code_band()
     print("OK")
