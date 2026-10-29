@@ -1923,6 +1923,49 @@ def test_a_resumed_session_keeps_its_place_in_the_resume_list():
         assert stamps == ["2026-01-02T10:00:00.000Z", "2026-01-02T10:05:00.000Z"], stamps
 
 
+def test_a_brought_session_is_not_echoed_back_until_it_is_continued():
+    """Every push exported every local session, the ones `resume` had just
+    brought included: the same chat came back filed under this machine, and
+    the next pull offered it to its origin as somebody else's. A brought copy
+    is the origin's to carry until it is continued here."""
+    with tempfile.TemporaryDirectory() as proj, tempfile.TemporaryDirectory() as kn, \
+         tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as work:
+        pdir = Path(proj) / "D--repo"
+        pdir.mkdir()
+        _settled(_write_session(pdir))
+        assert srv.export_sessions(projects_dir=Path(proj), dest=Path(kn) / "OtherPC") == 1
+        res = srv.resume_session("11111111", project_dir=work,
+                                 claude_dir=Path(home), knowledge_dir=Path(kn))
+        assert res.get("ok"), res
+        out = Path(res["path"])
+        here = Path(kn) / "HerePC"
+        echo = here / srv.session_meta(out)["project"] / out.name
+        echo.parent.mkdir(parents=True)
+        echo.write_text("{}\n", encoding="utf-8")  # what an older push left behind
+
+        assert srv.export_sessions(projects_dir=Path(home) / "projects", dest=here) == 0
+        assert not echo.exists()
+
+        with out.open("a", encoding="utf-8") as fh:  # continued on this machine
+            fh.write(json.dumps({"type": "user", "message": {
+                "role": "user", "content": "and one more thing"}}) + "\n")
+        later = srv.brought_sessions(home)[out.stem] + 5  # still past the settle window
+        os.utime(out, (later, later))
+        assert srv.export_sessions(projects_dir=Path(home) / "projects", dest=here) == 1
+
+
+def test_a_synthetic_copy_from_before_the_record_is_still_an_echo():
+    with tempfile.TemporaryDirectory() as d:
+        p = Path(d) / "s.jsonl"
+        p.write_text(json.dumps({"type": "assistant", "message": {
+            "role": "assistant", "model": "<synthetic>", "content": []}}) + "\n")
+        assert srv.is_echo(p, {})
+        with p.open("a") as fh:
+            fh.write(json.dumps({"type": "assistant", "message": {
+                "role": "assistant", "model": "claude-opus-5-5", "content": []}}) + "\n")
+        assert not srv.is_echo(p, {})
+
+
 def test_sync_push_forces_a_fetch_before_the_behind_check():
     """The guard used to read the last fetch (`fetch=False`): if another machine
     pushed inside the FETCH_TTL window, `behind` came back 0, the guard stayed
@@ -2027,6 +2070,8 @@ if __name__ == "__main__":
     test_resume_of_an_unknown_id_says_so()
     test_a_session_nobody_kept_still_resumes_from_its_trimmed_export()
     test_a_resumed_session_keeps_its_place_in_the_resume_list()
+    test_a_brought_session_is_not_echoed_back_until_it_is_continued()
+    test_a_synthetic_copy_from_before_the_record_is_still_an_echo()
     test_sync_push_forces_a_fetch_before_the_behind_check()
     test_a_slow_network_cannot_outlast_the_claude_code_band()
     print("OK")
