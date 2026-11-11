@@ -172,6 +172,58 @@ def preview_parts(data):
     return out
 
 
+# what every UI that reads `status_data` paints, in the language `sto ui` picked
+DATA_LABELS = ("act_sync", "act_retry", "mod_syncing", "mod_auto_off", "mod_5h",
+               "mod_week", "mod_ctx", "st_both", "st_local", "st_repo", "st_gone",
+               "k_bring", "k_delete", "k_forget", "k_keep", "k_row_path",
+               "folder_missing", "cloud_is_repo")
+
+
+def state_phrase(down, up):
+    """'51 new in the cloud · 2 to send', or 'up to date'. Only the sides that
+    have something are named: '0 to send' is a number nobody needs to read."""
+    parts = ([t("state_down", n=down)] if down else []) + ([t("state_up", n=up)] if up else [])
+    return " · ".join(parts) or t("state_uptodate")
+
+
+def accent_code():
+    """The ANSI code `sto ui` picked, so every UI paints the same accent."""
+    try:
+        return json.loads(i18n.PREFS.read_text(encoding="utf-8")).get("accent", "36")
+    except (OSError, ValueError, AttributeError):
+        return "36"
+
+
+def status_data(cwd=None, fetch=False):
+    """The one sync state every UI shows: the TUI header and the band read this
+    and nothing else, so they cannot disagree about a number.
+
+    With `cwd` it also counts that project's chats waiting to be kept or
+    brought (what `sto act sync --cwd` moves), and records `cwd` as the
+    project's folder on this machine when none was saved: the band runs inside
+    the project, so asking the user for it would be asking what we know.
+    """
+    sy = srv.sync_status(fetch=fetch)
+    up, down = sync_preview(sy)
+    chats, project = {"down": 0, "up": 0}, None
+    if cwd:
+        project = srv.project_of_cwd(cwd)
+        if srv.local_project_path(project) is None:
+            srv.set_project_path(project, cwd)
+        keep, bring = cli.project_todo(project)
+        chats = {"down": len(bring), "up": len(keep)}
+    n_up = count_items(up) + chats["up"]
+    n_down = count_items(down) + chats["down"]
+    return {"state": "pending" if n_up or n_down else "uptodate",
+            "down": n_down, "up": n_up, "phrase": state_phrase(n_down, n_up),
+            "parts": {"down": preview_parts(down), "up": preview_parts(up)},
+            "chats": chats, "project": project,
+            "fetchError": sy.get("fetchError"),
+            "update": update_state().get("available", 0),
+            "limits": srv.usage_snapshot(detail=False).get("limits") or [],
+            "machine": srv.LOCAL_MACHINE, "accent": accent_code(),
+            "labels": {k: t(k) for k in DATA_LABELS}}
+
 def counters():
     """The big numbers on the home: sessions, projects, memories, skills…"""
     rows, _ = cli.cached_sessions()
