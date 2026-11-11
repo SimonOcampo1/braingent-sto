@@ -19,12 +19,12 @@ func fake(t *testing.T, body string, code int) Client {
 
 func TestDataDecodesTheView(t *testing.T) {
 	var s Status
-	err := fake(t, `{"state": "pending", "down": 2, "up": 1, "project": null, "toBring": 171,
+	err := fake(t, `{"state": "pending", "down": 2, "up": 1, "project": null,
 		"parts": {"down": ["2 memories"], "up": []}, "labels": {"act_sync": "Sync"}}`, 0).Data(&s, "status")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.State != "pending" || s.Down != 2 || s.ToBring != 171 || s.Project != "" || s.L("act_sync") != "Sync" {
+	if s.State != "pending" || s.Down != 2 || s.Project != "" || s.L("act_sync") != "Sync" {
 		t.Fatalf("status = %+v", s)
 	}
 	if s.L("missing") != "missing" {

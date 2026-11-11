@@ -29,7 +29,6 @@ type Status struct {
 		Up   int `json:"up"`
 	} `json:"chats"`
 	Project    string            `json:"project"`
-	ToBring    int               `json:"toBring"`
 	FetchError string            `json:"fetchError"`
 	Update     int               `json:"update"`
 	Machine    string            `json:"machine"`

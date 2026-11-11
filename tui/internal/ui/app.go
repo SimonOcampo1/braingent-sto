@@ -91,7 +91,6 @@ type Model struct {
 	grouped bool
 	alpha   bool   // A-Z instead of newest first
 	kind    string // the search results' filter: "" for all, or a kinds entry
-	only    string // "repo" after the card's "chats you can bring" line; esc clears it
 
 	searching bool // the results of `/` replace the tab's list
 	typing    bool // the query is being written
@@ -185,9 +184,6 @@ func (m *Model) rebuild(t int) {
 	case tChats:
 		if m.st != nil {
 			here = m.st.Project
-		}
-		if m.only != "" {
-			its = slices.DeleteFunc(slices.Clone(its), func(it item) bool { return it.state != m.only })
 		}
 	case tSettings:
 		its, grouped = m.settingItems(), false
@@ -322,10 +318,6 @@ func (m *Model) open() tea.Cmd {
 	}
 	if m.searching && it.tab >= 0 {
 		m.searching, m.tab = false, it.tab
-		if it.tab == tChats {
-			m.only = ""
-			m.rebuild(tChats)
-		}
 		m.lists[it.tab].pick(it.id)
 		return nil
 	}
@@ -523,12 +515,7 @@ func (m Model) keyMsg(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	case "S":
 		m.openSync()
 	case "esc":
-		if m.searching {
-			m.searching = false
-		} else if m.only != "" {
-			m.only = ""
-			m.rebuild(tChats)
-		}
+		m.searching = false
 	}
 	return m, nil
 }
@@ -591,9 +578,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "sync":
 			m.openSync()
-		case "bring":
-			m.tab, m.only, m.searching = tChats, "repo", false
-			m.rebuild(tChats)
 		case "item":
 			return m, m.itemAct()
 		case "fold":
@@ -709,11 +693,6 @@ func (m Model) card(W, ox, y int) []string {
 	if len(parts) > 0 {
 		body = append(body, ansi.Truncate(strings.Join(parts, "   "), inW, "…"))
 	}
-	if v := m.st.ToBring; v > 0 {
-		t := ansi.Truncate(n(m.L("tui_to_bring"), v)+"  →", inW, "…")
-		m.fr.hits.add(ox+2, y+1+len(body), lipgloss.Width(t), target{"bring", 0})
-		body = append(body, faint.Render(t))
-	}
 	if m.st.Update > 0 {
 		body = append(body, ansi.Truncate(acc.Render(n(m.L("update_notice"), m.st.Update))+faint.Render("  → sto update"), inW, "…"))
 	}
@@ -790,6 +769,9 @@ func (m Model) titleRow(l line, width int, on bool) string {
 	right := fmt.Sprint(l.count)
 	if m.shown() == tChats {
 		right = n(m.L("tui_n_chats"), l.count)
+		if k := m.cloudChats(l.group); k > 0 {
+			right += fmt.Sprintf("  ·  ↓%d", k)
+		}
 		if l.here {
 			right += "  ·  " + m.L("tui_here")
 		}

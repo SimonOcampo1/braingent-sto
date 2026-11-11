@@ -115,7 +115,6 @@ STRINGS = {
         # the Go TUI: it gets these through `sto data status`
         "tui_chats": "Chats", "tui_memories": "Memorias", "tui_tools": "Herramientas",
         "tui_settings": "Ajustes", "tui_n_chats": "{n} chats", "tui_here": "estás acá",
-        "tui_to_bring": "{n} chats en la nube que podés traer",
         "tui_will_bring": "Vas a traer", "tui_will_send": "Vas a enviar",
         "tui_confirm": "↵ confirmar  esc cancelar",
         "tui_project": "Proyecto", "tui_folder": "Carpeta acá", "tui_machine": "Máquina",
@@ -365,7 +364,6 @@ STRINGS = {
         # the Go TUI: it gets these through `sto data status`
         "tui_chats": "Chats", "tui_memories": "Memories", "tui_tools": "Tools",
         "tui_settings": "Settings", "tui_n_chats": "{n} chats", "tui_here": "you are here",
-        "tui_to_bring": "{n} chats in the cloud you can bring",
         "tui_will_bring": "You will bring", "tui_will_send": "You will send",
         "tui_confirm": "↵ confirm  esc cancel",
         "tui_project": "Project", "tui_folder": "Folder here", "tui_machine": "Machine",
