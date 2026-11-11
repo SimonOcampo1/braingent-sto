@@ -797,7 +797,7 @@ def test_a_chat_of_ours_that_only_the_repo_has_can_be_brought():
     assert cli.session_todo(dict(row, path="/home/me/.claude/projects/p/x.jsonl")) is None
 
 
-def test_session_todo_and_the_mod_json():
+def test_session_todo():
     # local and never exported → keep; from elsewhere → bring; exported → nothing
     with tempfile.TemporaryDirectory() as d:
         live = Path(d) / "live.jsonl"
@@ -817,11 +817,8 @@ def test_session_todo_and_the_mod_json():
             assert cli.session_todo(rows[0]) is None
         finally:
             cli.srv.KNOWLEDGE_SESSIONS = old
-    # the band parses stdout: a bad subcommand is an error, a good one is JSON
-    assert "error" in cli.main(["mod", "bogus"])
-    assert {"status", "sync", "sync-memories", "pull"} <= set(cli.MOD_SUBS)
-    res = json.loads(cli.main(["mod", "status", "--cwd", tempfile.gettempdir()])["message"])
-    assert "error" in res or {"up", "down", "pathSaved", "labels"} <= set(res)
+    # the band moved to `sto data` / `sto act`
+    assert "mod" not in cli.CLI
 
 
 def test_data_views_print_json_and_never_a_traceback():
@@ -938,7 +935,7 @@ if __name__ == "__main__":
     test_memory_graph_carries_the_body_so_the_window_can_read_it()
     test_the_graph_template_renders_markdown_and_escapes_it()
     test_the_graph_html_survives_a_memory_that_quotes_markup()
-    test_session_todo_and_the_mod_json()
+    test_session_todo()
     test_a_chat_of_ours_that_only_the_repo_has_can_be_brought()
     test_data_views_print_json_and_never_a_traceback()
     test_act_streams_steps_and_ends_in_exactly_one_final_line()
