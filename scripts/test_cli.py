@@ -852,6 +852,50 @@ def test_session_todo():
     assert "mod" not in cli.CLI
 
 
+def test_data_detail_turns_a_chat_or_a_memory_into_markdown():
+    real = (cli.cached_sessions, cli.srv.session_timeline, cli.srv.KNOWLEDGE_MEMORY)
+    try:
+        cli.cached_sessions = lambda **k: ([{"id": "abc", "title": "Fix it", "project": "p",
+                                             "mtime": 1.0, "path": "/x.jsonl"}], {})
+        cli.srv.session_timeline = lambda path: {"timeline": [
+            {"role": "user", "text": "why?"}, {"role": "tool", "tool": "Bash", "detail": "ls"},
+            {"role": "assistant", "text": "because"}]}
+        d = json.loads(cli.main(["data", "detail", "chat", "abc"])["message"])
+        assert d["title"] == "Fix it"
+        md = d["markdown"]
+        assert md.index("why?") < md.index("Bash") < md.index("because"), md
+
+        cli.srv.KNOWLEDGE_MEMORY = Path(tempfile.mkdtemp())
+        f = cli.srv.KNOWLEDGE_MEMORY / "my proj" / "pc" / "a-note.md"
+        f.parent.mkdir(parents=True)
+        f.write_text("# hello", encoding="utf-8")
+        d = json.loads(cli.main(["data", "detail", "memory", "my proj/pc/a-note"])["message"])
+        assert d == {"title": "a-note", "markdown": "# hello"}
+
+        for bad in (["chat", "nope"], ["memory", "../../etc/passwd"], ["what", "x"]):
+            assert "error" in json.loads(cli.main(["data", "detail", *bad])["message"]), bad
+    finally:
+        cli.cached_sessions, cli.srv.session_timeline, cli.srv.KNOWLEDGE_MEMORY = real
+
+
+def test_settings_are_read_and_set_through_data_and_act():
+    real = (cli.i18n.LANG, cli.i18n.PREFS)
+    try:
+        cli.i18n.PREFS = Path(tempfile.mkdtemp()) / "prefs.json"
+        _, final = None, json.loads(cli.main(["act", "set", "lang", "es"])["message"])
+        assert final["done"] is True
+        s = json.loads(cli.main(["data", "settings"])["message"])
+        assert s["lang"] == "es" and s["langs"] == ["en", "es"]
+        cli.main(["act", "set", "accent", "32"])
+        s = json.loads(cli.main(["data", "settings"])["message"])
+        assert s["accent"] == "32" and {"code": "32", "name": cli.i18n.t("c_verde")} in s["accents"]
+        for bad in (["lang", "fr"], ["accent", "99"], ["volume", "11"]):
+            assert "error" in json.loads(cli.main(["act", "set", *bad])["message"]), bad
+    finally:
+        cli.i18n.set_lang(real[0])
+        cli.i18n.LANG, cli.i18n.PREFS = real
+
+
 def test_data_views_print_json_and_never_a_traceback():
     import ui_data as ui
     real = (ui.status_data, cli.cached_sessions, cli.mark_synced, cli.srv.list_memory,
@@ -982,4 +1026,6 @@ if __name__ == "__main__":
     test_a_chat_of_ours_that_only_the_repo_has_can_be_brought()
     test_data_views_print_json_and_never_a_traceback()
     test_act_streams_steps_and_ends_in_exactly_one_final_line()
+    test_data_detail_turns_a_chat_or_a_memory_into_markdown()
+    test_settings_are_read_and_set_through_data_and_act()
     print("OK")

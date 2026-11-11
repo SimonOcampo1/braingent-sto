@@ -887,6 +887,65 @@ def _data_chats():
                         for p in sorted({r["project"] for r in rows})}}
 
 
+def _chat_md(row):
+    """One transcript as markdown for the TUI's reader: who spoke, in bold,
+    and the tool calls quoted so they read as asides."""
+    out = []
+    for it in srv.session_timeline(Path(row["path"]))["timeline"]:
+        role = it["role"]
+        if role in ("user", "assistant"):
+            out.append(f"**{t('cli_you' if role == 'user' else 'cli_claude').lstrip('> ')}**\n\n{it['text']}")
+        elif role == "tool":
+            out.append(f"> \u203a {it['tool']}  {it.get('detail', '')[:120]}")
+        elif role == "image":
+            out.append("> " + t("cli_image"))
+        elif role == "error":
+            out.append(f"> \u00d7 {it['text'][:400]}")
+    return "\n\n".join(out)
+
+
+def _inside(path, root):
+    """`path` when it resolves under `root`; an id never walks out of its tree."""
+    p, r = Path(path).resolve(), Path(root).resolve()
+    return p if p.is_relative_to(r) and p.is_file() else None
+
+
+def _data_detail(kind="", ref=""):
+    """sto data detail chat <id> | memory <project>/<machine>/<slug> | note <path>"""
+    if kind == "chat":
+        row, err = resolve_id(ref, cached_sessions()[0]) if ref else (None, t("cli_use_show"))
+        return {"error": err} if err else {"title": row["title"], "markdown": _chat_md(row)}
+    if kind == "memory":
+        parts = ref.rsplit("/", 2)
+        f = len(parts) == 3 and _inside(srv.KNOWLEDGE_MEMORY / parts[0] / parts[1]
+                                         / f"{parts[2]}.md", srv.KNOWLEDGE_MEMORY)
+    elif kind == "note":
+        f = _inside(ref, srv.REPO_ROOT / "vault")
+    else:
+        return {"error": t("cli_commands", names="chat, memory, note")}
+    if not f:
+        return {"error": t("cli_mem_missing", target=ref)}
+    return {"title": f.stem, "markdown": f.read_text(encoding="utf-8", errors="replace")}
+
+
+def _data_settings():
+    ui = _ui()
+    return {"lang": i18n.LANG, "langs": i18n.LANGS, "accent": ui.accent_code(),
+            "accents": [{"code": c, "name": t(k)} for k, c in ui.ACCENTS]}
+
+
+def _act_set(key="", value=""):
+    """sto act set lang <en|es> | accent <code>"""
+    ui = _ui()
+    if key == "lang" and value in i18n.LANGS:
+        ui.set_lang(value)
+    elif key == "accent" and value in {c for _, c in ui.ACCENTS}:
+        ui.set_accent(value)
+    else:
+        return {"error": t("bad_setting", key=key, value=value)}
+    return {"done": True, "message": ""}
+
+
 def _ui():
     """`ui_data`, imported on first use: it imports this module at its top,
     so importing it back at ours would be a cycle."""
@@ -909,6 +968,8 @@ DATA_VIEWS = {
                         "plugins": _ui().module_items("plugins"),
                         "modules": srv.config_status()},
     "search": lambda o: _data_search(o.get("q")),
+    "detail": lambda o: _data_detail(*o["args"][:2]),
+    "settings": lambda o: _data_settings(),
 }
 
 
@@ -916,6 +977,7 @@ def cmd_data(*args):
     """sto data <view> [--cwd DIR] [--all] [--fetch] [--limits] [--q TEXT] — JSON for the UIs."""
     rest, opts = _opts(args, "cwd", "all", "fetch", "limits", "q")
     view = rest[0] if rest else "status"
+    opts["args"] = rest[1:]
     try:
         out = (DATA_VIEWS[view](opts) if view in DATA_VIEWS
                else {"error": t("cli_commands", names=", ".join(DATA_VIEWS))})
@@ -996,6 +1058,7 @@ ACTS = {
     "keep": lambda a, o: _act_result(srv.keep_session(a[0])),
     "resume": lambda a, o: _act_result(srv.resume_session(a[0])),
     "set-folder": lambda a, o: _act_result(srv.set_project_path(a[0], a[1])),
+    "set": lambda a, o: _act_set(*a[:2]),
 }
 
 
