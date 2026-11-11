@@ -4,8 +4,8 @@ import type { EngineInterface, Register, SessionContextUsage, SessionRateLimit }
 import type { StoStatus, Usage } from '../types'
 
 // The band asks `sto` for everything sync-related, so the rules stay in one
-// place (scripts/cli.py) and the strings in scripts/i18n.py. What the engine
-// already knows (limits, context) never leaves the engine.
+// place (scripts/cli.py, scripts/ui_data.py) and the strings in scripts/i18n.py.
+// It reads the same `sto data status` the TUI header reads: one number, two UIs.
 const status = atom({ plugin: 'sto-band', key: 'status' } as const, null)
 const error = atom({ plugin: 'sto-band', key: 'error' } as const, null)
 const usage = atom({ plugin: 'sto-band', key: 'usage' } as const, {})
@@ -14,7 +14,6 @@ const isAuto = atom({ plugin: 'sto-band', key: 'isAuto' } as const, true)
 
 const REFRESH_MS = 60_000
 const AUTO_MS = 30 * 60_000
-const LONG = new Set(['sync', 'sync-memories', 'pull'])
 const ANSI: Record<string, string> = {
   '31': 'red', '32': 'green', '33': 'yellow',
   '34': 'blue', '35': 'magenta', '36': 'cyan',
@@ -25,13 +24,13 @@ export function toUsage(limits: readonly SessionRateLimit[], context: SessionCon
   return { fiveHour: pct('five_hour'), week: pct('seven_day'), ctx: context.percent }
 }
 
-/** `sto mod <sub>` parsed, or the reason in one line. */
-async function sto($: EngineInterface, sub: string): Promise<{ data?: StoStatus & { message?: string }; error?: string }> {
+/** `sto <argv>`'s last stdout line as JSON: `sto act` prints steps before its
+ *  final line, `sto data` prints one line. Or the reason, in one line. */
+async function sto($: EngineInterface, argv: string[], long = false): Promise<{ data?: any; error?: string }> {
   try {
-    const cwd = await $.session.cwd()
-    const r = await $.process.run(['sto', 'mod', sub, '--cwd', cwd],
-                                  { timeoutMs: LONG.has(sub) ? 600_000 : 30_000 })
-    const data = JSON.parse(r.stdout)
+    const r = await $.process.run(['sto', ...argv], { timeoutMs: long ? 600_000 : 30_000 })
+    const last = r.stdout.trim().split('\n').pop() ?? ''
+    const data = JSON.parse(last)
     return data.error ? { error: data.error } : { data }
   } catch (err) {
     return { error: 'sto: ' + String((err as Error)?.message ?? err).slice(0, 80) }
@@ -47,25 +46,35 @@ async function refresh($: EngineInterface, force = false) {
   lastAt = now
   const u = await $.session.usage()
   await update($, usage, () => toUsage(u.rateLimits, u.context))
-  const r = await sto($, 'status')
-  await update($, error, () => r.error ?? null)
-  if (r.data) await update($, status, () => r.data!)
+  const cwd = await $.session.cwd()
+  const r = await sto($, ['data', 'status', '--cwd', cwd, '--fetch'])
+  await update($, error, () => r.error ?? r.data?.fetchError ?? null)
+  if (r.data) await update($, status, () => r.data as StoStatus)
 }
 
-/** One sync at a time, whoever asked: a button, a command or the timer.
- *  `quiet` toasts only a failure, for the runs nobody pressed for. */
-async function runSync($: EngineInterface, sub: string, quiet = false): Promise<string> {
-  if (await read($, isBusy)) return 'STO: sync already running'
+/** One sync at a time, whoever asked: the button, a command or the timer.
+ *  `act sync --cwd` moves this project's chats too (the button and /sto sync);
+ *  the timer's bare `act sync` carries memories and config. `quiet` toasts
+ *  only a failure. */
+async function runSync($: EngineInterface, argv: string[], quiet = false): Promise<string> {
+  if (await read($, isBusy)) return (await read($, status))?.labels?.mod_syncing ?? 'syncing…'
   await update($, isBusy, () => true)
+  let r: { data?: any; error?: string } = {}
   try {
-    const r = await sto($, sub)
-    const text = r.error ?? r.data?.message ?? 'STO: ok'
-    if (r.error || !quiet) $.ui.toast(text)
-    return text
+    r = await sto($, argv, true)
   } finally {
     await update($, isBusy, () => false)
     await refresh($, true)
   }
+  // after the refresh, or its fresh status would wipe the reason this sync failed
+  if (r.error) await update($, error, () => r.error!)
+  const text = r.error ?? r.data?.message ?? ''
+  if (r.error || !quiet) $.ui.toast(text)
+  return text
+}
+
+async function syncHere($: EngineInterface, quiet = false) {
+  return runSync($, ['act', 'sync', '--cwd', await $.session.cwd()], quiet)
 }
 
 /** Auto on or off, remembered across sessions in the store. */
@@ -78,16 +87,16 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'sto',
-      description: '/sto sync: chats round trip. /sto mem: memories (pull, push). /sto auto: toggle. Bare: refresh',
+      description: '/sto sync: sync now. /sto auto: auto sync on/off. Bare: the state in one line',
     })
     const auto = (await $.store.get('auto')) !== false
     await update($, isAuto, () => auto)
-    // pull before anything else: the memories another machine wrote land
+    // bring down before anything else: the memories another machine wrote land
     // before the first prompt reads them
-    void (auto ? runSync($, 'pull', true) : refresh($, true))
+    void (auto ? runSync($, ['act', 'pull'], true) : refresh($, true))
     $.clock.every(AUTO_MS, () => {
       void (async () => {
-        if (await read($, isAuto)) await runSync($, 'sync-memories', true)
+        if (await read($, isAuto)) await runSync($, ['act', 'sync'], true)
       })()
     })
     return next(e)
@@ -105,15 +114,14 @@ export const register: Register = on => {
 
   on('command.run', { command: 'sto' }, async ($, e) => {
     const arg = (e.args ?? '').trim()
-    if (arg === 'sync') return { text: await runSync($, 'sync') }
-    if (arg === 'mem') return { text: await runSync($, 'sync-memories') }
+    if (arg === 'sync') return { text: await syncHere($) }
     if (arg === 'auto') {
       const turnOn = !(await read($, isAuto))
       await setAuto($, turnOn)
-      return { text: 'STO auto: ' + (turnOn ? 'on' : 'off') }
+      return { text: 'braingent auto: ' + (turnOn ? 'on' : 'off') }
     }
     await refresh($, true)
-    return { text: (await read($, error)) ?? 'STO: ok' }
+    return { text: (await read($, error)) ?? (await read($, status))?.phrase ?? '' }
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
@@ -128,34 +136,24 @@ export const register: Register = on => {
     const accent = ANSI[s?.accent ?? '36'] ?? 'cyan'
     const pct = (label: string, v?: number) =>
       v === undefined ? null : <Text dimColor>{label} {Math.round(v)}%  </Text>
+    const arrows = s ? [s.down ? '↓' + s.down : '', s.up ? '↑' + s.up : ''].filter(Boolean).join(' ') : ''
 
     return (
       <Box>
-        <Text color={accent} bold>STO  </Text>
-        {busy && <Text color={accent}>{L('mod_syncing', 'syncing...')}  </Text>}
-        {!busy && s && (
-          <Text>
-            {L('mod_chats', 'chats')}{' '}
-            {s.up || s.down
-              ? <Text color={accent}>{'↑'}{s.up} {'↓'}{s.down}</Text>
-              : <Text dimColor>{L('mod_uptodate', 'up to date')}</Text>}
-            {!s.pathSaved && <Text color="warning">  {L('mod_no_path', 'no path')}</Text>}
-            {(s.ahead > 0 || s.behind > 0) &&
-              <Text dimColor>  {L('mod_repo', 'repo')} {'↑'}{s.ahead} {'↓'}{s.behind}</Text>}
-            {'  '}
-          </Text>
-        )}
-        {!busy && err && <Text color="warning">{err.slice(0, 60)}  </Text>}
+        <Text color={accent} bold>braingent  </Text>
+        {busy && <Text color={accent}>{L('mod_syncing', 'syncing…')}  </Text>}
+        {!busy && err && <Text color="warning">! {err.slice(0, 60)}  </Text>}
+        {!busy && err && <Button key="retry" label={L('act_retry', 'retry')}
+                                 onPress={() => void syncHere($)} />}
+        {!busy && !err && s?.state === 'pending' && <Text color={accent}>{arrows}  </Text>}
+        {!busy && !err && s?.state === 'pending' &&
+          <Button key="sync" label={L('act_sync', 'Sync')} onPress={() => void syncHere($)} />}
+        {!busy && !err && s?.state === 'uptodate' && <Text dimColor>{s.phrase}  </Text>}
         {pct(L('mod_5h', '5h'), u.fiveHour)}
         {pct(L('mod_week', 'wk'), u.week)}
         {pct(L('mod_ctx', 'ctx'), u.ctx)}
-        {!busy && <Button key="chats" label={L('mod_btn_chats', 'sync chats')}
-                          onPress={() => void runSync($, 'sync')} />}
-        {!busy && <Button key="memories" label={L('mod_btn_memories', 'sync memories')}
-                          onPress={() => void runSync($, 'sync-memories')} />}
-        <Button key="auto" dimColor={!auto}
-                label={auto ? L('mod_auto_on', 'auto: on') : L('mod_auto_off', 'auto: off')}
-                onPress={() => void setAuto($, !auto)} />
+        {!auto && <Button key="auto" dimColor label={L('mod_auto_off', 'auto: off')}
+                          onPress={() => void setAuto($, true)} />}
       </Box>
     )
   })
