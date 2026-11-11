@@ -5,6 +5,7 @@ package sto
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -147,7 +148,12 @@ func engineErr(line []byte) error {
 
 // Data runs `sto data <view> args...` and decodes the answer into v.
 func (c Client) Data(v any, view string, args ...string) error {
-	out, err := exec.Command(c.Bin, append([]string{"data", view}, args...)...).Output()
+	return c.DataCtx(context.Background(), v, view, args...)
+}
+
+// DataCtx is Data that dies with ctx: a search the next key made stale.
+func (c Client) DataCtx(ctx context.Context, v any, view string, args ...string) error {
+	out, err := exec.CommandContext(ctx, c.Bin, append([]string{"data", view}, args...)...).Output()
 	if err != nil {
 		return fmt.Errorf("sto data %s: %w", view, err)
 	}

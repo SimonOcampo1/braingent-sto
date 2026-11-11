@@ -5,6 +5,7 @@
 package ui
 
 import (
+	"context"
 	"fmt"
 	"slices"
 	"strings"
@@ -37,6 +38,22 @@ type loaded struct {
 type stepMsg string
 
 type tickMsg struct{}
+
+// searchAfter fires once typing pauses; seq is the keystroke it waited for,
+// so a pause a later key superseded does nothing.
+type searchAfter struct{ seq int }
+
+// searched is a search's answer, tagged with the query's seq so an answer
+// to an older query is dropped.
+type searched struct {
+	seq int
+	v   *sto.Search
+	err error
+}
+
+// searchPause is how long typing must stop before the search runs: each one
+// costs half a second of the engine, so not one per letter.
+const searchPause = 200 * time.Millisecond
 
 // spinner turns beside the footer's progress while an act runs.
 var spinner = []string{"◐", "◓", "◑", "◒"}
@@ -92,9 +109,12 @@ type Model struct {
 	alpha   bool   // A-Z instead of newest first
 	kind    string // the search results' filter: "" for all, or a kinds entry
 
-	searching bool // the results of `/` replace the tab's list
-	typing    bool // the query is being written
-	query     string
+	searching  bool // the results of `/` replace the tab's list
+	typing     bool // the query is being written
+	query      string
+	seq        int                // bumped by every keystroke and every search
+	searchBusy bool               // a search is running; its last results stay
+	cancel     context.CancelFunc // kills the running search
 
 	read *reader
 
@@ -352,6 +372,43 @@ func (m Model) chatsIn(project, state string) int {
 	return k
 }
 
+// pause schedules a search for when typing stops.
+func (m *Model) pause() tea.Cmd {
+	m.seq++
+	seq := m.seq
+	return tea.Tick(searchPause, func(time.Time) tea.Msg { return searchAfter{seq} })
+}
+
+func (m *Model) stopSearch() {
+	if m.cancel != nil {
+		m.cancel()
+	}
+	m.searchBusy = false
+}
+
+// search runs the query now, killing the one still running. Under two
+// letters it clears the results instead: one letter matches everything.
+func (m *Model) search() tea.Cmd {
+	m.stopSearch()
+	m.seq++
+	if len([]rune(strings.TrimSpace(m.query))) < 2 {
+		m.items[tSearch], m.done[tSearch] = nil, false
+		m.rebuild(tSearch)
+		return nil
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	seq, q, c, ticking := m.seq, m.query, m.c, m.busy != ""
+	m.cancel, m.searchBusy = cancel, true
+	run := func() tea.Msg {
+		s := &sto.Search{}
+		return searched{seq, s, c.DataCtx(ctx, s, "search", "--q", q)}
+	}
+	if ticking {
+		return run
+	}
+	return tea.Batch(run, tick())
+}
+
 func (m *Model) openSync() {
 	if m.st != nil && m.st.State == "pending" {
 		m.confirm = true
@@ -407,9 +464,6 @@ func (m Model) loadedMsg(msg loaded) (Model, tea.Cmd) {
 	case *sto.Settings:
 		m.set, m.done[tSettings] = v, true
 		m.rebuild(tSettings)
-	case *sto.Search:
-		m.items[tSearch], m.done[tSearch] = hitItems(v.Hits, m.tab, m.L("tui_tools"), m.L("tui_notes")), true
-		m.rebuild(tSearch)
 	case *sto.Detail:
 		if m.read != nil {
 			m.read.title, m.read.md, m.read.turns = v.Title, v.Markdown, v.Turns
@@ -432,21 +486,23 @@ func (m Model) keyMsg(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		switch k {
 		case "esc":
 			m.typing, m.searching = false, false
-		case "enter":
-			m.typing = false
-			if strings.TrimSpace(m.query) != "" {
-				m.items[tSearch], m.done[tSearch] = nil, false
-				m.rebuild(tSearch)
-				return m, m.load("search", "--q", m.query)
+			m.stopSearch()
+		case "enter": // stop typing, move among the results
+			if m.typing = false; strings.TrimSpace(m.query) == "" {
+				m.searching = false
 			}
-			m.searching = false
+			return m, m.search()
+		case "down", "up":
+			m.move(map[string]int{"down": 1, "up": -1}[k])
 		case "backspace":
 			if r := []rune(m.query); len(r) > 0 {
 				m.query = string(r[:len(r)-1])
+				return m, m.pause()
 			}
 		default:
 			if msg.Text != "" {
 				m.query += msg.Text
+				return m, m.pause()
 			}
 		}
 		return m, nil
@@ -527,8 +583,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.w, m.h = msg.Width, msg.Height
 	case loaded:
 		return m.loadedMsg(msg)
+	case searchAfter:
+		if msg.seq == m.seq {
+			return m, m.search()
+		}
+	case searched:
+		if msg.seq != m.seq {
+			break
+		}
+		m.searchBusy = false
+		if msg.err != nil {
+			m.flash, m.failed = msg.err.Error(), true
+			break
+		}
+		m.items[tSearch], m.done[tSearch] = hitItems(msg.v.Hits, m.tab, m.L("tui_tools"), m.L("tui_notes")), true
+		m.rebuild(tSearch)
 	case tickMsg:
-		if m.busy != "" {
+		if m.busy != "" || m.searchBusy {
 			m.spin++
 			return m, tick()
 		}
@@ -799,7 +870,9 @@ func (m Model) list(width, height, ox, y int) []string {
 	l := m.lists[t]
 	if len(l.lines) == 0 {
 		msg := m.L("loading")
-		if m.done[t] {
+		if t == tSearch && len([]rune(strings.TrimSpace(m.query))) < 2 {
+			msg = m.L("tui_two_letters")
+		} else if m.done[t] {
 			msg = m.L("empty")
 		}
 		return []string{faint.Render(" " + msg)}
@@ -1053,7 +1126,11 @@ func (m Model) footer(W int) string {
 		"tab", "tui_k_view", "q", "tui_k_quit")
 	switch {
 	case m.typing:
-		left = acc.Render("/ ") + m.query + acc.Render("█") + faint.Render("   ↵  esc")
+		left = acc.Render("/ ") + m.query + acc.Render("█")
+		if m.searchBusy {
+			left += "  " + acc.Render(spinner[m.spin%len(spinner)])
+		}
+		left += "   " + m.hints("↵", "tui_k_results", "esc", "tui_k_close")
 	case m.busy != "":
 		left = acc.Render(spinner[m.spin%len(spinner)] + " " + m.busy)
 	case m.flash != "" && m.failed:

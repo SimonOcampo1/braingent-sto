@@ -89,8 +89,8 @@ func TestSearchJumpsToTheHitInItsTab(t *testing.T) {
 	if m.query != "ze" || cmd == nil || !m.searching || m.typing {
 		t.Fatalf("query = %q, searching = %v, typing = %v", m.query, m.searching, m.typing)
 	}
-	next, _ := m.Update(loaded{"search", &sto.Search{Hits: []sto.Hit{
-		{Kind: "memory", Label: "z", Ref: map[string]any{"project": "p", "machine": "pc", "slug": "z"}}}}, nil})
+	next, _ := m.Update(searched{seq: m.seq, v: &sto.Search{Hits: []sto.Hit{
+		{Kind: "memory", Label: "z", Ref: map[string]any{"project": "p", "machine": "pc", "slug": "z"}}}}})
 	m, _ = press(next.(Model), "enter")
 	if m.searching || m.tab != tMemories || m.selected().id != "p/pc/z" {
 		t.Fatalf("tab = %d, searching = %v, selected = %+v", m.tab, m.searching, m.selected())
@@ -217,9 +217,9 @@ func TestGroupTitlesLineTheirColumnsUp(t *testing.T) {
 func TestTheSearchFilterKeepsOneKind(t *testing.T) {
 	m := loadedModel(t)
 	m.searching = true
-	next, _ := m.Update(loaded{"search", &sto.Search{Hits: []sto.Hit{
+	next, _ := m.Update(searched{seq: m.seq, v: &sto.Search{Hits: []sto.Hit{
 		{Kind: "session", Label: "a chat", Ref: map[string]any{"id": "c", "project": "p"}},
-		{Kind: "memory", Label: "a memory", Ref: map[string]any{"project": "p", "machine": "m", "slug": "s"}}}}, nil})
+		{Kind: "memory", Label: "a memory", Ref: map[string]any{"project": "p", "machine": "m", "slug": "s"}}}}})
 	m, _ = press(next.(Model), "f") // all -> chats
 	var titles []string
 	for _, l := range m.lists[tSearch].lines {
@@ -271,5 +271,31 @@ func TestRowsSitIndentedUnderTheirGroup(t *testing.T) {
 	g, f := ansi.Strip(grouped.row(it, 60, false)), ansi.Strip(flat.row(it, 60, false))
 	if !strings.HasPrefix(g, "   ● x") || !strings.HasPrefix(f, " ● x") {
 		t.Fatalf("grouped %q\nflat    %q", g, f)
+	}
+}
+
+func TestLiveSearchWaitsForAPauseAndDropsStaleAnswers(t *testing.T) {
+	m := loadedModel(t)
+	m, cmd := press(m, "/", "s")
+	if cmd == nil {
+		t.Fatal("each key schedules a search after a pause")
+	}
+	if next, cmd := m.Update(searchAfter{m.seq}); cmd != nil || next.(Model).searchBusy {
+		t.Fatal("one letter does not search")
+	}
+	m, _ = press(m, "y")
+	if _, cmd := m.Update(searchAfter{m.seq - 1}); cmd != nil {
+		t.Fatal("a pause that a later key superseded does nothing")
+	}
+	next, cmd := m.Update(searchAfter{m.seq})
+	if m = next.(Model); cmd == nil || !m.searchBusy {
+		t.Fatal("two letters and a pause search")
+	}
+	hits := &sto.Search{Hits: []sto.Hit{{Kind: "memory", Label: "old", Ref: map[string]any{"project": "p", "machine": "m", "slug": "o"}}}}
+	if next, _ = m.Update(searched{seq: m.seq - 1, v: hits}); len(next.(Model).items[tSearch]) != 0 {
+		t.Fatal("an answer to an older query is dropped")
+	}
+	if next, _ = m.Update(searched{seq: m.seq, v: hits}); len(next.(Model).items[tSearch]) != 1 || next.(Model).searchBusy {
+		t.Fatal("the answer to the current query lands")
 	}
 }
