@@ -826,8 +826,8 @@ def test_data_views_print_json_and_never_a_traceback():
     real = (ui.status_data, cli.cached_sessions, cli.mark_synced, cli.srv.list_memory,
             cli.srv.project_paths)
     try:
-        ui.status_data = lambda cwd=None, fetch=False, limits=False: {
-            "state": "uptodate", "cwd": cwd, "fetch": fetch, "limits": limits}
+        ui.status_data = lambda cwd=None, fetch=False, limits=False, all_chats=False: {
+            "state": "uptodate", "cwd": cwd, "fetch": fetch, "limits": limits, "all": all_chats}
         cli.cached_sessions = lambda **k: ([{"id": "a", "title": "t", "project": "p",
                                              "mtime": 1.0, "machine": None, "path": "/x"}], {})
         cli.mark_synced = lambda rows: [r.update(synced=False) or r for r in rows]
@@ -835,9 +835,10 @@ def test_data_views_print_json_and_never_a_traceback():
         cli.srv.project_paths = lambda: {"p": {cli.srv.LOCAL_MACHINE: "/work/p"}}
 
         s = json.loads(cli.main(["data", "status", "--cwd", "/w", "--fetch"])["message"])
-        assert s == {"state": "uptodate", "cwd": "/w", "fetch": True, "limits": False}
-        s = json.loads(cli.main(["data", "status", "--limits"])["message"])
-        assert s["limits"] is True and s["fetch"] is False
+        assert s == {"state": "uptodate", "cwd": "/w", "fetch": True, "limits": False,
+                     "all": False}
+        s = json.loads(cli.main(["data", "status", "--limits", "--all"])["message"])
+        assert s["limits"] is True and s["fetch"] is False and s["all"] is True
         c = json.loads(cli.main(["data", "chats"])["message"])
         assert c["rows"][0]["state"] == "local"
         assert c["rows"][0]["machine"] == cli.srv.LOCAL_MACHINE
@@ -879,6 +880,14 @@ def test_act_streams_steps_and_ends_in_exactly_one_final_line():
 
         steps, final = run("sync", "--cwd", "/work/p")
         assert [s["step"] for s in steps] == [i18n.t("s_fetch"), i18n.t("s_chats")]
+        assert final["done"] is True
+
+        kept, brought, asked = [], [], []
+        cli.project_todo = lambda p: asked.append(p) or (["k1", "k2"], ["b1"])
+        cli.srv.keep_session = lambda sid: kept.append(sid) or {"ok": True}
+        cli.srv.resume_session = lambda sid: brought.append(sid) or {"ok": True}
+        _, final = run("sync", "--all")     # the TUI: send every chat, bring none
+        assert asked == [None] and kept == ["k1", "k2"] and brought == []
         assert final["done"] is True
 
         cli.srv.sync_push = lambda progress=None: {"error": "no network"}
