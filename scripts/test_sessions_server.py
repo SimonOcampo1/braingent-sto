@@ -2117,6 +2117,60 @@ def test_sync_push_forces_a_fetch_before_the_behind_check():
         srv.sync_status, srv.sync_stage, srv._git = real
 
 
+def test_delete_session_takes_the_transcript_here_and_its_copies_in_the_cloud():
+    with tempfile.TemporaryDirectory() as d:
+        projects, kd = Path(d) / "projects", Path(d) / "knowledge" / "sessions"
+        sid = "abc-123"
+        live = projects / "-work-p" / f"{sid}.jsonl"
+        live.parent.mkdir(parents=True)
+        live.write_text("{}", encoding="utf-8")
+        (projects / "-work-p" / sid / "subagents").mkdir(parents=True)  # Claude Code's sidecar
+        os.utime(live, (time.time() - 3600,) * 2)
+        trimmed = kd / "pc" / "p" / f"{sid}.jsonl"
+        full = kd / "other" / "p" / f"{sid}{srv.FULL_SUFFIX}"
+        for f in (trimmed, full):
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_text("x", encoding="utf-8")
+        keep = kd / "pc" / "p" / "abc-1234.jsonl"   # shares the prefix, not the id
+        keep.write_text("x", encoding="utf-8")
+
+        assert srv.delete_session(sid, everywhere=False, projects_dir=projects, knowledge_dir=kd) is None
+        assert not live.exists() and not (projects / "-work-p" / sid).exists()
+        assert trimmed.exists() and full.exists()            # here only
+
+        assert srv.delete_session(sid, everywhere=True, projects_dir=projects, knowledge_dir=kd) is None
+        assert not trimmed.exists() and not full.exists() and keep.exists()
+        assert srv.delete_session(sid, everywhere=True, projects_dir=projects, knowledge_dir=kd) is not None
+
+        busy = projects / "-work-p" / "live-1.jsonl"          # being written right now
+        busy.write_text("{}", encoding="utf-8")
+        assert srv.delete_session("live-1", everywhere=False, projects_dir=projects, knowledge_dir=kd) is not None
+        assert busy.exists()
+
+
+def test_delete_memory_takes_every_copy_here_and_in_the_cloud():
+    with tempfile.TemporaryDirectory() as d:
+        projects, mem = Path(d) / "projects", Path(d) / "knowledge" / "memory"
+        dirs = [projects / "-work-p" / "memory", projects / "-work-p-sub" / "memory"]
+        for md in dirs:
+            md.mkdir(parents=True)
+            (md / "gone.md").write_text("---\nname: gone\n---\nx", encoding="utf-8")
+            (md / "stays.md").write_text("---\nname: stays\n---\nx", encoding="utf-8")
+        for m in ("pc", "other"):
+            (mem / "p" / m).mkdir(parents=True)
+            (mem / "p" / m / "gone.md").write_text("x", encoding="utf-8")
+        real = srv._memory_dirs
+        try:
+            srv._memory_dirs = lambda projects_dir=None: {"p": dirs}
+            assert srv.delete_memory("p", "gone", knowledge_memory=mem) is None
+        finally:
+            srv._memory_dirs = real
+        assert not any((md / "gone.md").exists() for md in dirs)
+        assert all((md / "stays.md").exists() for md in dirs)
+        assert not list(mem.rglob("gone.md"))
+        assert srv.delete_memory("p", "../../x", knowledge_memory=mem) is not None
+
+
 if __name__ == "__main__":
     test_session_meta()
     test_session_meta_redacts_title()
@@ -2206,4 +2260,6 @@ if __name__ == "__main__":
     test_a_chat_continued_on_two_machines_brings_theirs_beside_ours()
     test_sync_push_forces_a_fetch_before_the_behind_check()
     test_a_slow_network_cannot_outlast_the_claude_code_band()
+    test_delete_session_takes_the_transcript_here_and_its_copies_in_the_cloud()
+    test_delete_memory_takes_every_copy_here_and_in_the_cloud()
     print("OK")

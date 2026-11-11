@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -297,5 +298,81 @@ func TestLiveSearchWaitsForAPauseAndDropsStaleAnswers(t *testing.T) {
 	}
 	if next, _ = m.Update(searched{seq: m.seq, v: hits}); len(next.(Model).items[tSearch]) != 1 || next.(Model).searchBusy {
 		t.Fatal("the answer to the current query lands")
+	}
+}
+
+// fakeSto is a sto that records its arguments and answers done.
+func fakeSto(t *testing.T) (sto.Client, func() string) {
+	dir := t.TempDir()
+	bin, log := filepath.Join(dir, "sto"), filepath.Join(dir, "args")
+	os.WriteFile(bin, []byte("#!/bin/sh\necho \"$@\" > "+log+"\necho '{\"done\": true, \"message\": \"\"}'\n"), 0o755)
+	return sto.Client{Bin: bin}, func() string { b, _ := os.ReadFile(log); return strings.TrimSpace(string(b)) }
+}
+
+func TestMarkedItemsAreDeletedTogetherAfterAskingWhere(t *testing.T) {
+	m := loadedModel(t)
+	c, args := fakeSto(t)
+	m.c = c
+	m, _ = press(m, "x", "j", "x") // both chats of p
+	if len(m.marked) != 2 {
+		t.Fatalf("marked = %v", m.marked)
+	}
+	if m, _ = press(m, "d"); m.del == nil || len(m.del.targets) != 2 {
+		t.Fatal("d asks where to delete the marked items")
+	}
+	if !strings.Contains(ansi.Strip(m.View().Content), "first") {
+		t.Fatal("the question lists what goes")
+	}
+	m, cmd := press(m, "2")
+	if cmd == nil || m.del != nil || len(m.marked) != 0 {
+		t.Fatal("2 deletes everywhere, closes the question and clears the marks")
+	}
+	cmd().(tea.BatchMsg)[0]()
+	if got := args(); got != "act delete --scope everywhere chat:1 chat:2" {
+		t.Fatalf("sto got %q", got)
+	}
+}
+
+func TestAMemoryCannotBeDeletedOnlyHere(t *testing.T) {
+	m := loadedModel(t)
+	m.items[tMemories] = []item{{kind: "memory", id: "p/pc/s", title: "s", group: "p"}}
+	m.rebuild(tMemories)
+	m.tab = tMemories
+	m, _ = press(m, "d")
+	if m.del == nil {
+		t.Fatal("d on a memory asks")
+	}
+	if m, cmd := press(m, "1"); cmd != nil || m.del == nil {
+		t.Fatal("this machine only is refused for a memory, and the question stays")
+	}
+	if m, _ = press(m, "esc"); m.del != nil {
+		t.Fatal("esc cancels")
+	}
+}
+
+func TestSettingsAreNotDeletable(t *testing.T) {
+	m := loadedModel(t)
+	next, _ := m.Update(loaded{"settings", &sto.Settings{Lang: "en", Langs: []string{"en"}}, nil})
+	m = next.(Model)
+	m.tab = tSettings
+	if m, _ = press(m, "x", "d"); m.del != nil || len(m.marked) != 0 {
+		t.Fatal("a setting is neither marked nor deleted")
+	}
+}
+
+func TestTheDeleteButtonsAnswerClicks(t *testing.T) {
+	m := loadedModel(t)
+	c, args := fakeSto(t)
+	m.c = c
+	m, _ = press(m, "d") // the chat under the cursor
+	m = click(t, m, "1  tui_del_here")
+	if m.del != nil || m.busy == "" {
+		t.Fatal("clicking this machine runs the deletion")
+	}
+	for args() == "" {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := args(); got != "act delete --scope here chat:1" {
+		t.Fatalf("sto got %q", got)
 	}
 }

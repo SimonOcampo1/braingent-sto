@@ -901,6 +901,47 @@ def test_settings_are_read_and_set_through_data_and_act():
         cli.i18n.LANG, cli.i18n.PREFS = real
 
 
+def test_act_delete_takes_many_targets_here_or_everywhere():
+    import contextlib, io
+    names = ("delete_skill", "forget", "plugin_cmd", "delete_session", "delete_memory")
+    real = {n: getattr(cli.srv, n) for n in names}
+    calls = []
+
+    def run(*argv):
+        with contextlib.redirect_stdout(io.StringIO()):
+            return json.loads(cli.main(["act", "delete", *argv])["message"])
+    try:
+        cli.srv.delete_skill = lambda sid: calls.append(("rm skill", sid)) or None
+        cli.srv.forget = lambda target, apply=False: calls.append(("forget", target, apply)) or ([], None)
+        cli.srv.plugin_cmd = lambda verb, name: calls.append((verb, name)) or {}
+        cli.srv.delete_session = lambda sid, everywhere=False: calls.append(("chat", sid, everywhere)) or None
+        cli.srv.delete_memory = lambda project, slug: calls.append(("memory", project, slug)) or None
+
+        final = run("skill:x", "plugin:y@m", "chat:c1")
+        assert final["done"] is True, final
+        assert calls == [("rm skill", "personal:x"), ("uninstall", "y@m"), ("chat", "c1", False)], calls
+
+        calls.clear()
+        final = run("--scope", "everywhere", "skill:x", "memory:my proj/pc/s", "chat:c1")
+        assert final["done"] is True, final
+        assert calls == [("rm skill", "personal:x"), ("forget", "skill:x", True),
+                         ("memory", "my proj", "s"), ("chat", "c1", True)], calls
+
+        # a memory has no "only here": refused, and the rest still goes
+        calls.clear()
+        final = run("memory:p/pc/s", "skill:x")
+        assert "error" in final and calls == [("rm skill", "personal:x")], (final, calls)
+
+        # everywhere is fine when one of the two sides had it
+        cli.srv.delete_skill = lambda sid: "skill not found"
+        assert run("--scope", "everywhere", "skill:x")["done"] is True
+        cli.srv.forget = lambda target, apply=False: ([], "not in repo")
+        assert "error" in run("--scope", "everywhere", "skill:x")
+    finally:
+        for n, f in real.items():
+            setattr(cli.srv, n, f)
+
+
 def test_data_views_print_json_and_never_a_traceback():
     import ui_data as ui
     real = (ui.status_data, cli.cached_sessions, cli.mark_synced, cli.srv.list_memory,
@@ -1042,4 +1083,5 @@ if __name__ == "__main__":
     test_act_streams_steps_and_ends_in_exactly_one_final_line()
     test_data_detail_turns_a_chat_or_a_memory_into_markdown()
     test_settings_are_read_and_set_through_data_and_act()
+    test_act_delete_takes_many_targets_here_or_everywhere()
     print("OK")

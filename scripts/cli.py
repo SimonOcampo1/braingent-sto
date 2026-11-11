@@ -1056,15 +1056,42 @@ def _act_files(fn, target, dry=False):
     return {"error": err} if err else {"done": True, "message": "", "paths": list(paths)}
 
 
-def _act_delete(target):
+def _delete_one(target, everywhere):
+    """None, or why `target` (`kind:name`) could not be deleted. Here is this
+    machine; everywhere adds the cloud, and it is enough that one side had it."""
     kind, _, name = target.partition(":")
+    if kind == "chat":
+        return srv.delete_session(name, everywhere=everywhere)
+    if kind == "memory":
+        if not everywhere:
+            return t("del_memory_here")
+        project, _, slug = name.rpartition("/")
+        return srv.delete_memory(project.rpartition("/")[0], slug)
     if kind == "skill":
-        err = srv.delete_skill("personal:" + name)
+        here = srv.delete_skill("personal:" + name)
     elif kind == "plugin":
-        err = srv.plugin_cmd("uninstall", name).get("error")
+        here = srv.plugin_cmd("uninstall", name).get("error")
     else:
-        err = t("not_deletable", id=kind)
-    return {"error": err} if err else {"done": True, "message": t("deleted", id=name)}
+        return t("not_deletable", id=kind)
+    if not everywhere:
+        return here
+    cloud = srv.forget(f"{kind}:{name}", apply=True)[1]
+    return None if here is None or cloud is None else cloud
+
+
+def _act_delete(targets, scope="here"):
+    """sto act delete [--scope here|everywhere] kind:name... — one step per
+    target; the rest still go when one fails, and the end says how many."""
+    fails = []
+    for target in targets:
+        _emit({"step": target.partition(":")[2]})
+        err = _delete_one(target, scope == "everywhere")
+        if err:
+            fails.append(f"{target.partition(':')[2]}: {err}")
+    ok = len(targets) - len(fails)
+    if fails:
+        return {"error": t("del_failed", ok=ok, fail=len(fails), why=fails[0])}
+    return {"done": True, "message": t("del_done", n=ok)}
 
 
 def _act_result(res):
@@ -1077,7 +1104,7 @@ ACTS = {
                           else {"done": True, "message": t("mod_pulled")})(srv.sync_pull(_step)),
     "bring": lambda a, o: _act_files(srv.bring, a[0], bool(o.get("dry"))),
     "forget": lambda a, o: _act_files(srv.forget, a[0], bool(o.get("dry"))),
-    "delete": lambda a, o: _act_delete(a[0]),
+    "delete": lambda a, o: _act_delete(a, o.get("scope") or "here"),
     "keep": lambda a, o: _act_result(srv.keep_session(a[0])),
     "resume": lambda a, o: _act_result(srv.resume_session(a[0])),
     "set-folder": lambda a, o: _act_result(srv.set_project_path(a[0], a[1])),
@@ -1089,7 +1116,7 @@ ACTS = {
 def cmd_act(*args):
     """sto act <verb> [args] [--cwd DIR] [--all] [--dry] — JSON lines for the UIs:
     steps, then exactly one final `done` or `error` line."""
-    rest, opts = _opts(args, "cwd", "all", "dry")
+    rest, opts = _opts(args, "cwd", "all", "dry", "scope")
     verb = rest[0] if rest else ""
     try:
         out = (ACTS[verb](rest[1:], opts) if verb in ACTS

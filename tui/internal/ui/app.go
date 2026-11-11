@@ -118,8 +118,10 @@ type Model struct {
 
 	read *reader
 
-	confirm bool   // the Sync summary is open
-	busy    string // progress of a running act; keys wait while it is set
+	confirm bool            // the Sync summary is open
+	marked  map[string]bool // delete targets (kind:name) picked with x
+	del     *deletion       // the question of where to delete, while it is open
+	busy    string          // progress of a running act; keys wait while it is set
 	flash   string
 	failed  bool
 	spin    int // the frame of the spinner beside busy
@@ -409,6 +411,81 @@ func (m *Model) search() tea.Cmd {
 	return tea.Batch(run, tick())
 }
 
+// deletion is what d is about to delete, waiting for where: this machine
+// only, or everywhere. here is false when a memory is among the targets.
+type deletion struct {
+	targets, titles []string
+	here            bool
+}
+
+// delTarget is what `sto act delete` takes for an item, or "" when the item
+// cannot be deleted (a setting, a vault note).
+func delTarget(it *item) string {
+	switch it.kind {
+	case "chat", "memory", "plugin":
+		return it.kind + ":" + it.id
+	case "skill":
+		return "skill:" + it.title
+	}
+	return ""
+}
+
+// mark toggles the item under the cursor in the set d deletes.
+func (m *Model) mark() {
+	if it := m.selected(); it != nil && delTarget(it) != "" {
+		if m.marked == nil {
+			m.marked = map[string]bool{}
+		}
+		if t := delTarget(it); m.marked[t] {
+			delete(m.marked, t)
+		} else {
+			m.marked[t] = true
+		}
+	}
+}
+
+// askDelete opens the question for the marked items, or for the one under
+// the cursor when nothing is marked.
+func (m *Model) askDelete() {
+	titles := map[string]string{}
+	for t := range tSearch + 1 {
+		for _, it := range m.items[t] {
+			titles[delTarget(&it)] = it.title
+		}
+	}
+	var targets []string
+	for t := range m.marked {
+		targets = append(targets, t)
+	}
+	slices.Sort(targets)
+	if len(targets) == 0 {
+		if it := m.selected(); it != nil && delTarget(it) != "" {
+			targets = []string{delTarget(it)}
+			titles[targets[0]] = it.title
+		}
+	}
+	if len(targets) == 0 {
+		return
+	}
+	d := &deletion{targets: targets, here: true}
+	for _, t := range targets {
+		d.titles = append(d.titles, titles[t])
+		d.here = d.here && !strings.HasPrefix(t, "memory:")
+	}
+	m.del = d
+}
+
+// deleteNow runs the deletion where the answer said.
+func (m *Model) deleteNow(everywhere bool) tea.Cmd {
+	if !everywhere && !m.del.here {
+		return nil
+	}
+	scope := map[bool]string{true: "everywhere", false: "here"}[everywhere]
+	targets := m.del.targets
+	m.del, m.marked = nil, nil
+	return m.act(m.L("loading"), append([]string{"delete", "--scope", scope}, targets...)...)
+}
+
 func (m *Model) openSync() {
 	if m.st != nil && m.st.State == "pending" {
 		m.confirm = true
@@ -476,6 +553,16 @@ func (m Model) keyMsg(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	k := msg.String()
 	m.flash = ""
 	switch {
+	case m.del != nil:
+		switch k {
+		case "1":
+			return m, m.deleteNow(false)
+		case "2":
+			return m, m.deleteNow(true)
+		case "esc", "q":
+			m.del = nil
+		}
+		return m, nil
 	case m.confirm:
 		m.confirm = false
 		if k == "enter" {
@@ -567,12 +654,16 @@ func (m Model) keyMsg(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		for t := range tSettings {
 			m.rebuild(t)
 		}
+	case "x":
+		m.mark()
+	case "d":
+		m.askDelete()
 	case "a":
 		return m, m.itemAct()
 	case "S":
 		m.openSync()
 	case "esc":
-		m.searching = false
+		m.searching, m.marked = false, nil
 	}
 	return m, nil
 }
@@ -634,6 +725,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			break
 		}
 		t, ok := m.fr.hits.at(msg.X, msg.Y)
+		if m.del != nil {
+			switch {
+			case ok && t.kind == "delhere":
+				return m, m.deleteNow(false)
+			case ok && t.kind == "delall":
+				return m, m.deleteNow(true)
+			case !ok:
+				m.del = nil
+			}
+			break
+		}
 		if m.confirm {
 			m.confirm = false
 			if ok && t.kind == "confirm" {
@@ -821,7 +923,10 @@ func (m Model) row(it *item, width int, on bool) string {
 	if m.grouped && m.shown() != tSettings { // a row sits indented under its group's title
 		lead = "   "
 	}
-	tw := max(4, width-len(lead)-2-lipgloss.Width(t))
+	if m.marked[delTarget(it)] { // marked for d: a square inside the indent
+		lead = map[bool]string{true: " " + acc.Render("■") + " ", false: acc.Render("■")}[len(lead) == 3]
+	}
+	tw := max(4, width-lipgloss.Width(lead)-2-lipgloss.Width(t))
 	title := ansi.Truncate(it.title, tw, "…")
 	r := lead + sym(it.state) + " " + title + strings.Repeat(" ", max(0, tw-lipgloss.Width(title))) + faint.Render(t)
 	if on {
@@ -1024,6 +1129,40 @@ func (m Model) summary(W, H, ox, oy int) string {
 	return lipgloss.Place(W, H, lipgloss.Center, lipgloss.Center, box)
 }
 
+// deleteBox asks where to delete: this machine only, or everywhere.
+func (m Model) deleteBox(W, H, ox, oy int) string {
+	d := m.del
+	lines := []string{bold.Render(n(m.L("tui_del_title"), len(d.targets))), ""}
+	for i, t := range d.titles {
+		if i == 8 {
+			lines = append(lines, faint.Render(fmt.Sprintf("… +%d", len(d.titles)-8)))
+			break
+		}
+		lines = append(lines, "  "+ansi.Truncate(t, 60, "…"))
+	}
+	lines = append(lines, "")
+	here := button.Render("1  " + m.L("tui_del_here"))
+	if !d.here {
+		here = faint.Render(" 1  " + m.L("tui_del_here") + " ")
+	}
+	all := button.Render("2  " + m.L("tui_del_everywhere"))
+	row := len(lines)
+	lines = append(lines, here+"  "+all+"   "+faint.Render("esc"), "")
+	if !d.here {
+		lines = append(lines, faint.Render(ansi.Wrap(m.L("del_memory_here"), 56, "")))
+	}
+	lines = append(lines, faint.Render(ansi.Wrap(m.L("tui_del_note"), 56, "")))
+	box := popup.Render(strings.Join(lines, "\n"))
+	bw, bh := lipgloss.Width(box), lipgloss.Height(box)
+	x0, y0 := ox+(W-bw)/2, oy+(H-bh)/2
+	m.fr.hits.reset()
+	if d.here {
+		m.fr.hits.add(x0+3, y0+2+row, lipgloss.Width(here), target{"delhere", 0})
+	}
+	m.fr.hits.add(x0+3+lipgloss.Width(here)+2, y0+2+row, lipgloss.Width(all), target{"delall", 0})
+	return lipgloss.Place(W, H, lipgloss.Center, lipgloss.Center, box)
+}
+
 // page is the reader: the markdown rendered once per width, scrolled.
 func (m Model) page(W, H int) string {
 	r := m.read
@@ -1122,7 +1261,7 @@ func (m Model) footer(W int) string {
 		sort = "tui_sort_new"
 	}
 	left := m.hints("j k", "tui_k_move", "↵", "tui_read", "/", "tui_search", "a", "tui_k_action",
-		"S", "act_sync", "space", "tui_k_fold", "c", "tui_k_fold_all", "s", sort, "b", "tui_k_group",
+		"S", "act_sync", "x", "tui_k_mark", "d", "tui_k_delete", "space", "tui_k_fold", "c", "tui_k_fold_all", "s", sort, "b", "tui_k_group",
 		"tab", "tui_k_view", "q", "tui_k_quit")
 	switch {
 	case m.typing:
@@ -1169,6 +1308,8 @@ func (m Model) View() tea.View {
 	switch {
 	case m.read != nil:
 		content = m.page(W, H)
+	case m.del != nil:
+		content = m.deleteBox(W, H, ox, oy)
 	case m.confirm && m.st != nil:
 		content = m.summary(W, H, ox, oy)
 	default:
