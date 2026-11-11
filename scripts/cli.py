@@ -793,12 +793,31 @@ def _tui_tree():
     return r.stdout.strip() if r.returncode == 0 else ""
 
 
-def _go_tui():
-    """The Go TUI for this version, built once with `go` when it is missing,
-    the binaries of older versions swept. None when it cannot be had.
+# where the release Action publishes the TUI, one release per tui/ version
+TUI_RELEASES = "https://github.com/SimonOcampo1/braingent-sto/releases/download"
 
-    ponytail: built from HEAD's hash, so uncommitted edits under tui/ need a
-    plain `go build`; and no download yet, that waits for the release Action.
+
+def _platform():
+    """(GOOS, GOARCH) of this machine, as the release names its builds."""
+    import platform
+    os_ = {"win32": "windows", "darwin": "darwin"}.get(sys.platform, "linux")
+    arch = platform.machine().lower()
+    return os_, "arm64" if arch in ("arm64", "aarch64") else "amd64"
+
+
+def _download(url, dest):
+    import urllib.request
+    with urllib.request.urlopen(url, timeout=60) as res, open(dest, "wb") as out:
+        shutil.copyfileobj(res, out)
+
+
+def _go_tui():
+    """The Go TUI for this version: built once with `go`, or without it
+    downloaded from the release the Action made of this tui/; the binaries
+    of older versions swept. None when it cannot be had.
+
+    ponytail: named after HEAD's hash, so uncommitted edits under tui/ need
+    a plain `go build`.
     """
     tree = _tui_tree()
     if not tree:
@@ -806,14 +825,24 @@ def _go_tui():
     exe = TUI_CACHE / f"braingent-tui-{tree}{EXE}"
     if exe.exists():
         return exe
-    if not shutil.which("go"):
-        return None
     TUI_CACHE.mkdir(parents=True, exist_ok=True)
     for old in TUI_CACHE.glob("braingent-tui-*"):
         old.unlink(missing_ok=True)
     print(t("tui_building"), flush=True)
-    subprocess.run(["go", "build", "-o", str(exe), "."], cwd=Path(__file__).parent.parent / "tui")
-    return exe if exe.exists() else None
+    if shutil.which("go"):
+        subprocess.run(["go", "build", "-o", str(exe), "."], cwd=Path(__file__).parent.parent / "tui")
+        return exe if exe.exists() else None
+    # no Go: the build the release Action made of this very tui/
+    goos, arch = _platform()
+    part = exe.parent / (exe.name + ".part")
+    try:
+        _download(f"{TUI_RELEASES}/tui-{tree[:12]}/braingent-tui-{goos}-{arch}{EXE}", part)
+    except OSError:
+        part.unlink(missing_ok=True)   # half a binary is worse than none
+        return None
+    part.chmod(0o755)
+    part.replace(exe)
+    return exe
 
 
 def cmd_ui(*args):

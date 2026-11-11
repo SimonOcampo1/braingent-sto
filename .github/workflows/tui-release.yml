@@ -1,0 +1,44 @@
+# Builds the Go TUI for every platform whenever tui/ changes on main, into a
+# release tagged with the git hash of tui/: `sto ui` on a machine without Go
+# downloads exactly the build of the tui/ it has, so no tag is ever cut by hand.
+name: tui release
+
+on:
+  push:
+    branches: [main]
+    paths: ["tui/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: tui/go.mod
+          cache-dependency-path: tui/go.sum
+      - name: test
+        working-directory: tui
+        run: go test ./...
+      - name: build and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tree=$(git rev-parse HEAD:tui)
+          tag="tui-${tree:0:12}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "$tag already published"; exit 0
+          fi
+          mkdir dist
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
+            os=${target%/*}; arch=${target#*/}; ext=""
+            [ "$os" = windows ] && ext=".exe"
+            (cd tui && CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -trimpath -ldflags "-s -w" \
+              -o "../dist/braingent-tui-$os-$arch$ext" .)
+          done
+          gh release create "$tag" dist/* --target "$GITHUB_SHA" \
+            --title "TUI $tag" --notes "The Go TUI built from tui/ at $tree. sto ui downloads it on machines without Go."
