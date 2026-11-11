@@ -9,15 +9,13 @@ import (
 // Only ANSI colors, so the TUI inherits the terminal's palette. The accent
 // is the one `sto ui` saved; setAccent repaints every style that uses it.
 var (
-	muted    = lipgloss.Color("8")
-	ink      = lipgloss.Color("0")
-	faint    = lipgloss.NewStyle().Foreground(muted)
-	bold     = lipgloss.NewStyle().Bold(true)
-	errStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
-	panel    = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(muted).Padding(0, 1)
-	tabIdle  = lipgloss.NewStyle().Foreground(muted).Padding(0, 1)
-	// a group's name as a label, so a title reads as one without the accent
-	groupLabel                              = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15")).Background(muted).Padding(0, 1)
+	muted                                   = lipgloss.Color("8")
+	ink                                     = lipgloss.Color("0")
+	faint                                   = lipgloss.NewStyle().Foreground(muted)
+	bold                                    = lipgloss.NewStyle().Bold(true)
+	errStyle                                = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
+	panel                                   = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(muted).Padding(0, 1)
+	tabIdle                                 = lipgloss.NewStyle().Foreground(muted).Padding(0, 1)
 	brand, acc, tabActive, button, sel, grp lipgloss.Style
 	popup, bigButton, keyStyle              lipgloss.Style
 )

@@ -779,12 +779,12 @@ func (m Model) titleRow(l line, width int, on bool) string {
 	if l.here {
 		here = "  ⌂ " + m.L("tui_here")
 	}
-	name := ansi.Truncate(l.group, max(4, width-lipgloss.Width(right)-lipgloss.Width(here)-7), "…")
-	gap := strings.Repeat(" ", max(1, width-5-lipgloss.Width(name+here)-lipgloss.Width(right)))
+	name := ansi.Truncate(l.group, max(4, width-lipgloss.Width(right)-lipgloss.Width(here)-5), "…")
+	gap := strings.Repeat(" ", max(1, width-3-lipgloss.Width(name+here)-lipgloss.Width(right)))
 	if on {
-		return sel.Render(" " + mark + " " + name + " " + here + gap + right)
+		return sel.Render(" " + mark + name + here + gap + right)
 	}
-	return faint.Render(" "+mark) + groupLabel.Render(name) + faint.Render(here) + gap +
+	return faint.Render(" "+mark) + grp.Render(name) + faint.Render(here) + gap +
 		faint.Render(fmt.Sprintf("%10s  ", count)) + acc.Render(fmt.Sprintf("%-11s", moves))
 }
 
