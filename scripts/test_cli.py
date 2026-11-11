@@ -970,6 +970,15 @@ def test_act_streams_steps_and_ends_in_exactly_one_final_line():
         assert asked == [None] and kept == ["k1", "k2"] and brought == []
         assert final["done"] is True
 
+        asked.clear()
+        _, final = run("bring-chats", "p")  # a whole project's chats, by hand
+        assert asked == ["p"] and brought == ["b1"] and kept == ["k1", "k2"]
+        assert final["done"] is True
+        cli.srv.local_project_path = lambda p: None
+        _, final = run("bring-chats", "p")  # nowhere here to file them
+        assert "error" in final and brought == ["b1"]
+        cli.srv.local_project_path = lambda p: "/work/p"
+
         cli.srv.sync_push = lambda progress=None: {"error": "no network"}
         _, final = run("sync")
         assert final == {"error": "no network"}

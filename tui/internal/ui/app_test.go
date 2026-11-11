@@ -189,3 +189,62 @@ func TestTheSpinnerTurnsWhileAnActRuns(t *testing.T) {
 		t.Fatal("the spinner stops when the act ends")
 	}
 }
+
+func TestHomeAndEndJumpToTheEnds(t *testing.T) {
+	m := loadedModel(t)
+	end := tea.KeyPressMsg{Code: tea.KeyEnd}
+	next, _ := m.Update(end)
+	if m = next.(Model); m.selected() == nil || m.selected().id != "2" {
+		t.Fatalf("end selects the last row, got %+v", m.selected())
+	}
+	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyHome})
+	if m = next.(Model); m.cur().cur != 0 {
+		t.Fatalf("home goes to the first line, got %d", m.cur().cur)
+	}
+}
+
+func TestTheGroupCountSitsAtTheRightEdge(t *testing.T) {
+	m := loadedModel(t)
+	r := ansi.Strip(m.titleRow(line{group: "proj", count: 12}, 60, false))
+	if ansi.StringWidth(r) != 60 || !strings.HasSuffix(strings.TrimRight(r, " "), "12 chats") {
+		t.Fatalf("%q (width %d)", r, ansi.StringWidth(r))
+	}
+}
+
+func TestTheSearchFilterKeepsOneKind(t *testing.T) {
+	m := loadedModel(t)
+	m.searching = true
+	next, _ := m.Update(loaded{"search", &sto.Search{Hits: []sto.Hit{
+		{Kind: "session", Label: "a chat", Ref: map[string]any{"id": "c", "project": "p"}},
+		{Kind: "memory", Label: "a memory", Ref: map[string]any{"project": "p", "machine": "m", "slug": "s"}}}}, nil})
+	m, _ = press(next.(Model), "f") // all -> chats
+	var titles []string
+	for _, l := range m.lists[tSearch].lines {
+		if l.it != nil {
+			titles = append(titles, l.it.title)
+		}
+	}
+	if fmt.Sprint(titles) != "[a chat]" {
+		t.Fatalf("f keeps the chats only: %v", titles)
+	}
+}
+
+func TestActionOnAGroupTitleBringsItsCloudChats(t *testing.T) {
+	dir := t.TempDir()
+	bin, log := filepath.Join(dir, "sto"), filepath.Join(dir, "args")
+	os.WriteFile(bin, []byte("#!/bin/sh\necho \"$@\" > "+log+"\necho '{\"done\": true, \"message\": \"\"}'\n"), 0o755)
+	m := loadedModel(t)
+	m.c = sto.Client{Bin: bin}
+	m, _ = press(m, "home") // the title of p, which holds one chat only in the cloud
+	if m.selected() != nil {
+		t.Fatal("home lands on the group title")
+	}
+	m, cmd := press(m, "a")
+	if cmd == nil {
+		t.Fatal("a on a title brings the group's cloud chats")
+	}
+	cmd().(tea.BatchMsg)[0]()
+	if got, _ := os.ReadFile(log); strings.TrimSpace(string(got)) != "act bring-chats p" {
+		t.Fatalf("sto got %q", got)
+	}
+}

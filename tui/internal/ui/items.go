@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/SimonOcampo1/braingent-sto/tui/internal/sto"
 )
@@ -33,11 +34,19 @@ type line struct {
 	folded bool // the title of a group whose items are hidden
 }
 
+// layout is how a list is laid out: grouped or flat, newest first or A-Z,
+// which groups are folded, and which project the TUI runs in.
+type layout struct {
+	here           string
+	grouped, alpha bool
+	folded         map[string]bool
+}
+
 // arrange orders items newest first, keeping the given order among equal
-// times; grouped, it puts each group under a title, the group with the
-// newest item first, a spacer between groups, and leaves the items of the
-// folded groups out.
-func arrange(its []item, here string, grouped bool, folded map[string]bool) []line {
+// times, or A-Z ignoring case; grouped, it puts each group under a title (by
+// its newest item, or A-Z too), a spacer between open groups, and leaves the
+// items of the folded groups out.
+func arrange(its []item, lo layout) []line {
 	its = append([]item(nil), its...)
 	latest, count, first := map[string]float64{}, map[string]int{}, map[string]int{}
 	for i, it := range its {
@@ -47,16 +56,26 @@ func arrange(its []item, here string, grouped bool, folded map[string]bool) []li
 			first[it.group] = i
 		}
 	}
+	lower := strings.ToLower
 	sort.SliceStable(its, func(i, j int) bool {
 		a, b := its[i], its[j]
-		if grouped && a.group != b.group {
-			if latest[a.group] != latest[b.group] {
+		if lo.grouped && a.group != b.group {
+			switch {
+			case lo.alpha && lower(a.group) != lower(b.group):
+				return lower(a.group) < lower(b.group)
+			case lo.alpha:
+				return a.group < b.group
+			case latest[a.group] != latest[b.group]:
 				return latest[a.group] > latest[b.group]
 			}
 			return first[a.group] < first[b.group]
 		}
+		if lo.alpha {
+			return lower(a.title) < lower(b.title)
+		}
 		return a.mtime > b.mtime
 	})
+	grouped, here, folded := lo.grouped, lo.here, lo.folded
 	var out []line
 	for i := range its {
 		g := its[i].group
@@ -120,21 +139,22 @@ func toolItems(d *sto.Tools, skills, plugins string) []item {
 }
 
 // hitItems turns search hits into items that know their tab and their id
-// there, the current tab's hits first.
-func hitItems(hits []sto.Hit, current int) []item {
+// there, filed by project (tools and notes under their own names), the
+// current tab's hits first.
+func hitItems(hits []sto.Hit, current int, tools, notes string) []item {
 	str := func(m map[string]any, k string) string { s, _ := m[k].(string); return s }
 	var out []item
 	for _, h := range hits {
 		it := item{title: h.Label, sub: h.Sub, tab: -1, kind: h.Kind}
 		switch h.Kind {
 		case "session":
-			it.kind, it.tab, it.id = "chat", tChats, str(h.Ref, "id")
+			it.kind, it.tab, it.id, it.group = "chat", tChats, str(h.Ref, "id"), str(h.Ref, "project")
 		case "memory":
-			it.tab, it.id = tMemories, fmt.Sprintf("%s/%s/%s", str(h.Ref, "project"), str(h.Ref, "machine"), str(h.Ref, "slug"))
+			it.tab, it.id, it.group = tMemories, fmt.Sprintf("%s/%s/%s", str(h.Ref, "project"), str(h.Ref, "machine"), str(h.Ref, "slug")), str(h.Ref, "project")
 		case "tool":
-			it.kind, it.tab, it.id = str(h.Ref, "what"), tTools, str(h.Ref, "id")
+			it.kind, it.tab, it.id, it.group = str(h.Ref, "what"), tTools, str(h.Ref, "id"), tools
 		case "note":
-			it.id = str(h.Ref, "path")
+			it.id, it.group = str(h.Ref, "path"), notes
 		}
 		out = append(out, it)
 	}

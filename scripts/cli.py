@@ -965,7 +965,7 @@ def _ui():
 
 def _data_search(q=""):
     return {"hits": [{k: h[k] for k in ("kind", "label", "sub", "ref")}
-                     for h in _ui().search_all(q or "")]}
+                     for h in _ui().search_all(q or "", limit=200)]}
 
 
 DATA_VIEWS = {
@@ -1038,6 +1038,19 @@ def _act_sync(cwd=None, all_chats=False):
     return {"done": True, "message": t("sync_done") + note}
 
 
+def _act_bring_chats(project):
+    """Every chat of `project` that is only in the cloud, brought here and
+    filed under the project's folder on this machine. Sync never does this
+    in bulk; a person asks for it one project at a time."""
+    if not srv.local_project_path(project):
+        return {"error": t("folder_missing")}
+    _, bring = project_todo(project)
+    if bring:
+        _step("s_chats")
+    fail = sum("error" in srv.resume_session(s) for s in bring)
+    return {"done": True, "message": t("sync_project_done", ok=len(bring) - fail, fail=fail)}
+
+
 def _act_files(fn, target, dry=False):
     paths, err = fn(target, apply=not dry)
     return {"error": err} if err else {"done": True, "message": "", "paths": list(paths)}
@@ -1069,6 +1082,7 @@ ACTS = {
     "resume": lambda a, o: _act_result(srv.resume_session(a[0])),
     "set-folder": lambda a, o: _act_result(srv.set_project_path(a[0], a[1])),
     "set": lambda a, o: _act_set(*a[:2]),
+    "bring-chats": lambda a, o: _act_bring_chats(" ".join(a)),
 }
 
 
