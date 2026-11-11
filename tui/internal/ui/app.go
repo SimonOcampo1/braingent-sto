@@ -763,9 +763,9 @@ func sum(xs []int) (s int) {
 }
 
 func (m Model) titleRow(l line, width int, on bool) string {
-	mark := "▾ "
+	mark := "▼ "
 	if l.folded {
-		mark = "▸ "
+		mark = "▶ "
 	}
 	count, moves := fmt.Sprint(l.count), ""
 	if m.shown() == tChats {
@@ -784,7 +784,7 @@ func (m Model) titleRow(l line, width int, on bool) string {
 	if on {
 		return sel.Render(" " + mark + name + here + gap + right)
 	}
-	return faint.Render(" "+mark) + bold.Render(name) + faint.Render(here) + gap +
+	return faint.Render(" "+mark) + grp.Render(name) + faint.Render(here) + gap +
 		faint.Render(fmt.Sprintf("%10s  ", count)) + acc.Render(fmt.Sprintf("%-11s", moves))
 }
 
