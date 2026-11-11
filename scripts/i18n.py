@@ -119,7 +119,7 @@ STRINGS = {
         "tui_will_bring": "Vas a traer", "tui_will_send": "Vas a enviar",
         "tui_confirm": "↵ confirmar  esc cancelar",
         "tui_project": "Proyecto", "tui_folder": "Carpeta acá", "tui_machine": "Máquina",
-        "tui_when": "Cuándo", "tui_keys": "j k mover  a guardar/traer  b agrupar  tab vista  S sincronizar  esc volver  q salir",
+        "tui_when": "Cuándo", "tui_building": "preparando la interfaz (solo esta vez)…", "tui_keys": "j k mover  a guardar/traer  b agrupar  tab vista  S sincronizar  esc volver  q salir",
         "forget_title": "Sacar {what} del repo",
         "mem_links": "Enlaces", # → sale de esta memoria · ← apunta a ella
         "bring_title": "Traer {what} del repo a esta máquina",
@@ -357,7 +357,7 @@ STRINGS = {
         "tui_will_bring": "You will bring", "tui_will_send": "You will send",
         "tui_confirm": "↵ confirm  esc cancel",
         "tui_project": "Project", "tui_folder": "Folder here", "tui_machine": "Machine",
-        "tui_when": "When", "tui_keys": "j k move  a keep/bring  b group  tab view  S sync  esc back  q quit",
+        "tui_when": "When", "tui_building": "getting the interface ready (only this once)…", "tui_keys": "j k move  a keep/bring  b group  tab view  S sync  esc back  q quit",
         "forget_title": "Drop {what} from the repo",
         "mem_links": "Links",  # → out of this memory · ← into it
         "bring_title": "Bring {what} from the repo to this machine",
