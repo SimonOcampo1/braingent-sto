@@ -32,6 +32,7 @@ type Status struct {
 	Project    string            `json:"project"`
 	FetchError string            `json:"fetchError"`
 	Update     int               `json:"update"`
+	UpdateLog  []string          `json:"updateLog"`
 	Machine    string            `json:"machine"`
 	Accent     string            `json:"accent"`
 	Labels     map[string]string `json:"labels"`
@@ -97,6 +98,12 @@ type Tools struct {
 	Plugins []Tool `json:"plugins"`
 }
 
+// Module is one kind of config Sync can carry, and whether it does.
+type Module struct {
+	ID      string `json:"id"`
+	Enabled bool   `json:"enabled"`
+}
+
 // Settings is `sto data settings`.
 type Settings struct {
 	Lang    string   `json:"lang"`
@@ -106,6 +113,27 @@ type Settings struct {
 		Code string `json:"code"`
 		Name string `json:"name"`
 	} `json:"accents"`
+	Modules []Module `json:"modules"`
+	Badge   bool     `json:"badge"`
+	Look    struct {
+		Icon  string `json:"icon"`
+		Color string `json:"color"`
+	} `json:"look"`
+	Icons  []string `json:"icons"`
+	Colors []string `json:"colors"`
+	Cloud  string   `json:"cloud"`
+}
+
+// Limit is one of the plan's usage windows.
+type Limit struct {
+	Kind    string `json:"kind"`
+	Label   string `json:"label"`
+	Percent int    `json:"percent"`
+}
+
+// Usage is `sto data usage`.
+type Usage struct {
+	Limits []Limit `json:"limits"`
 }
 
 // Hit is one result of `sto data search`; Ref says where it lives, by kind.

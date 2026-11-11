@@ -376,3 +376,112 @@ func TestTheDeleteButtonsAnswerClicks(t *testing.T) {
 		t.Fatalf("sto got %q", got)
 	}
 }
+
+// actArgs runs the act cmd returns and gives back what sto was called with.
+func actArgs(t *testing.T, cmd tea.Cmd, args func() string) string {
+	t.Helper()
+	if cmd == nil {
+		t.Fatal("no act ran")
+	}
+	for i := 0; args() == "" && i < 200; i++ {
+		time.Sleep(10 * time.Millisecond)
+	}
+	return args()
+}
+
+func TestASkillOnlyInTheCloudIsBrought(t *testing.T) {
+	m := loadedModel(t)
+	c, args := fakeSto(t)
+	m.c = c
+	m.items[tTools] = []item{{kind: "skill", id: "repo:x", title: "x", group: "Skills", state: "repo"}}
+	m.rebuild(tTools)
+	m.tab = tTools
+	_, cmd := press(m, "a")
+	if got := actArgs(t, cmd, args); got != "act bring skill:x" {
+		t.Fatalf("sto got %q", got)
+	}
+}
+
+func TestAProjectGetsItsFolderTypedIn(t *testing.T) {
+	m := loadedModel(t)
+	c, args := fakeSto(t)
+	m.c, m.chats.Folders = c, map[string]*string{}
+	m, _ = press(m, "w")
+	if m.ask == nil || m.ask.value != "/" {
+		t.Fatalf("w asks for the folder, starting from where the TUI runs: %+v", m.ask)
+	}
+	m, _ = press(m, "t", "m", "p")
+	m, cmd := press(m, "enter")
+	if got := actArgs(t, cmd, args); got != "act set-folder p /tmp" || m.ask != nil {
+		t.Fatalf("sto got %q", got)
+	}
+}
+
+func settingsModel(t *testing.T) (Model, func() string) {
+	m := loadedModel(t)
+	c, args := fakeSto(t)
+	m.c = c
+	set := &sto.Settings{Lang: "en", Langs: []string{"en", "es"}, Badge: false,
+		Icons: []string{"desktop", "laptop"}, Colors: []string{"cyan", "green"}, Cloud: "git@github.com:me/brain.git"}
+	set.Look.Icon, set.Look.Color = "desktop", "cyan"
+	set.Modules = []sto.Module{{ID: "skills", Enabled: true}, {ID: "hooks"}}
+	next, _ := m.Update(loaded{"settings", set, nil})
+	m = next.(Model)
+	m.tab = tSettings
+	return m, args
+}
+
+func TestEverySettingChangesFromTheList(t *testing.T) {
+	for _, c := range []struct{ id, want string }{
+		{"icon", "act set icon laptop"},
+		{"color", "act set color green"},
+		{"badge", "act set badge on"},
+		{"module:hooks", "act set module hooks on"},
+		{"module:skills", "act set module skills off"},
+	} {
+		m, args := settingsModel(t)
+		m.lists[tSettings].pick(c.id)
+		if m.selected() == nil || m.selected().id != c.id {
+			t.Fatalf("%s is not in the list", c.id)
+		}
+		_, cmd := press(m, "enter")
+		if got := actArgs(t, cmd, args); got != c.want {
+			t.Errorf("%s: sto got %q, want %q", c.id, got, c.want)
+		}
+	}
+	m, _ := settingsModel(t)
+	m.lists[tSettings].pick("cloud")
+	if _, cmd := press(m, "enter"); m.selected().id != "cloud" || cmd != nil {
+		t.Fatal("the cloud's URL is shown, not changed")
+	}
+}
+
+func TestThePlanUsageSitsInTheFooter(t *testing.T) {
+	m := loadedModel(t)
+	m.st.Labels["mod_5h"], m.st.Labels["mod_week"] = "5h", "wk"
+	u := &sto.Usage{Limits: []sto.Limit{{Kind: "session", Percent: 88}, {Kind: "weekly_all", Percent: 25}, {Kind: "weekly_scoped", Percent: 3}}}
+	next, _ := m.Update(loaded{"usage", u, nil})
+	if f := ansi.Strip(next.(Model).footer(160)); !strings.HasSuffix(strings.TrimRight(f, " "), "5h 88% · wk 25%") {
+		t.Fatalf("footer = %q", f)
+	}
+}
+
+func TestUpdateAsksFirstAndGraphOpens(t *testing.T) {
+	m := loadedModel(t)
+	c, args := fakeSto(t)
+	m.c = c
+	m.st.Update, m.st.UpdateLog = 2, []string{"feat: one", "fix: two"}
+	m, _ = press(m, "u")
+	if !m.updating || !strings.Contains(ansi.Strip(m.View().Content), "fix: two") {
+		t.Fatal("u shows what the update brings before applying it")
+	}
+	m, cmd := press(m, "enter")
+	if got := actArgs(t, cmd, args); got != "act update" || m.updating {
+		t.Fatalf("sto got %q", got)
+	}
+	m, args = settingsModel(t)
+	_, cmd = press(m, "g")
+	if got := actArgs(t, cmd, args); got != "act graph" {
+		t.Fatalf("sto got %q", got)
+	}
+}

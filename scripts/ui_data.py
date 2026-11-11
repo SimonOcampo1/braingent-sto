@@ -188,6 +188,9 @@ DATA_LABELS = ("act_sync", "act_retry", "mod_syncing", "mod_auto_off", "mod_5h",
                "tui_k_results", "tui_two_letters",
                "tui_del_title", "tui_del_here", "tui_del_everywhere", "tui_del_note",
                "tui_k_mark", "tui_k_delete", "del_memory_here",
+               "tui_choose_folder", "tui_folder_of", "tui_k_save", "tui_k_apply", "tui_k_folder",
+               "tui_k_update", "tui_k_graph", "on", "off", "sec_prefs", "sec_modules", "sec_remote",
+               "machine_icon", "machine_color", "badge_row", "update_available",
                "tui_change", "tab_skills", "language", "accent_color", "tui_read",
                "tui_goto", "tui_fold", "tui_fold_all", "tui_you", "tui_claude")
 
