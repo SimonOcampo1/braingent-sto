@@ -179,7 +179,7 @@ DATA_LABELS = ("act_sync", "act_retry", "mod_syncing", "mod_auto_off", "mod_5h",
                "folder_missing", "cloud_is_repo", "update_notice", "loading", "empty",
                "tui_chats", "tui_memories", "tui_tools", "tui_settings", "tui_n_chats",
                "tui_here", "tui_to_bring", "tui_will_bring", "tui_will_send",
-               "tui_confirm", "tui_resume", "tui_project", "tui_folder", "tui_machine",
+               "tui_confirm", "tui_project", "tui_folder", "tui_machine",
                "tui_when", "tui_keys")
 
 
