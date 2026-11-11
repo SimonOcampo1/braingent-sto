@@ -180,7 +180,8 @@ DATA_LABELS = ("act_sync", "act_retry", "mod_syncing", "mod_auto_off", "mod_5h",
                "tui_chats", "tui_memories", "tui_tools", "tui_settings", "tui_n_chats",
                "tui_here", "tui_to_bring", "tui_will_bring", "tui_will_send",
                "tui_confirm", "tui_project", "tui_folder", "tui_machine",
-               "tui_when", "tui_keys")
+               "tui_when", "tui_keys", "tui_reader_keys", "tui_search", "tui_plugins",
+               "tui_change", "tab_skills", "language", "accent_color")
 
 
 def state_phrase(down, up):

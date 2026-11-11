@@ -120,7 +120,9 @@ STRINGS = {
         "tui_confirm": "↵ confirmar  esc cancelar",
         "tui_project": "Proyecto", "tui_folder": "Carpeta acá", "tui_machine": "Máquina",
         "tui_when": "Cuándo", "tui_building": "preparando la interfaz (solo esta vez)…",
-        "bad_setting": "{key}: {value} no es una opción", "tui_keys": "j k mover  a guardar/traer  b agrupar  tab vista  S sincronizar  esc volver  q salir",
+        "bad_setting": "{key}: {value} no es una opción", "tui_keys": "j k mover  ↵ leer  / buscar  a acción  S sincronizar  b agrupar  tab vista  q salir",
+        "tui_reader_keys": "j k desplazar  espacio página  esc volver", "tui_search": "buscar",
+        "tui_plugins": "Plugins", "tui_change": "cambiar",
         "forget_title": "Sacar {what} del repo",
         "mem_links": "Enlaces", # → sale de esta memoria · ← apunta a ella
         "bring_title": "Traer {what} del repo a esta máquina",
@@ -359,7 +361,9 @@ STRINGS = {
         "tui_confirm": "↵ confirm  esc cancel",
         "tui_project": "Project", "tui_folder": "Folder here", "tui_machine": "Machine",
         "tui_when": "When", "tui_building": "getting the interface ready (only this once)…",
-        "bad_setting": "{key}: {value} is not a choice", "tui_keys": "j k move  a keep/bring  b group  tab view  S sync  esc back  q quit",
+        "bad_setting": "{key}: {value} is not a choice", "tui_keys": "j k move  ↵ read  / search  a action  S sync  b group  tab view  q quit",
+        "tui_reader_keys": "j k scroll  space page  esc back", "tui_search": "search",
+        "tui_plugins": "Plugins", "tui_change": "change",
         "forget_title": "Drop {what} from the repo",
         "mem_links": "Links",  # → out of this memory · ← into it
         "bring_title": "Bring {what} from the repo to this machine",
