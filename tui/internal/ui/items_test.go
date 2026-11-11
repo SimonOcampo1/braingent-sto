@@ -32,12 +32,12 @@ func TestArrangeGroupsNewestFirst(t *testing.T) {
 		{title: "mid a", group: "a", mtime: 3},
 		{title: "old b", group: "b", mtime: 2},
 	}
-	got := fmt.Sprint(describe(arrange(its, "a", true, nil)))
+	got := fmt.Sprint(describe(arrange(its, layout{here: "a", grouped: true})))
 	want := fmt.Sprint([]string{"title b 2 false", "new b", "old b", "spacer", "title a 2 true", "mid a", "old a"})
 	if got != want {
 		t.Fatalf("grouped = %v\nwant      %v", got, want)
 	}
-	got = fmt.Sprint(describe(arrange(its, "a", false, nil)))
+	got = fmt.Sprint(describe(arrange(its, layout{here: "a"})))
 	if want := fmt.Sprint([]string{"new b", "mid a", "old b", "old a"}); got != want {
 		t.Fatalf("flat = %v, want %v", got, want)
 	}
@@ -45,14 +45,14 @@ func TestArrangeGroupsNewestFirst(t *testing.T) {
 
 func TestArrangeKeepsTheGivenOrderWhenNothingHasATime(t *testing.T) {
 	its := []item{{title: "x", group: "Skills"}, {title: "y", group: "Skills"}, {title: "p", group: "Plugins"}}
-	got := fmt.Sprint(describe(arrange(its, "", true, nil)))
+	got := fmt.Sprint(describe(arrange(its, layout{grouped: true})))
 	if want := fmt.Sprint([]string{"title Skills 2 false", "x", "y", "spacer", "title Plugins 1 false", "p"}); got != want {
 		t.Fatalf("got %v, want %v", got, want)
 	}
 }
 
 func TestStepStopsOnItemsAndTitlesButNotSpacers(t *testing.T) {
-	ls := arrange([]item{{title: "x", group: "a", mtime: 2}, {title: "y", group: "b", mtime: 1}}, "", true, nil)
+	ls := arrange([]item{{title: "x", group: "a", mtime: 2}, {title: "y", group: "b", mtime: 1}}, layout{grouped: true})
 	// title a, x, spacer, title b, y
 	for _, c := range []struct{ from, dir, want int }{{-1, 1, 0}, {1, 1, 3}, {4, 1, 4}, {3, -1, 1}, {0, -1, 0}} {
 		if got := step(ls, c.from, c.dir); got != c.want {
@@ -63,7 +63,7 @@ func TestStepStopsOnItemsAndTitlesButNotSpacers(t *testing.T) {
 
 func TestAFoldedGroupKeepsItsTitleAndHidesItsItems(t *testing.T) {
 	its := []item{{title: "x", group: "a", mtime: 2}, {title: "y", group: "b", mtime: 1}}
-	got := fmt.Sprint(describe(arrange(its, "", true, map[string]bool{"a": true})))
+	got := fmt.Sprint(describe(arrange(its, layout{grouped: true, folded: map[string]bool{"a": true}})))
 	if want := fmt.Sprint([]string{"title a 1 false folded", "title b 1 false", "y"}); got != want {
 		t.Fatalf("got %v, want %v", got, want)
 	}
@@ -85,12 +85,42 @@ func TestHitsPointAtTheirTabAndCurrentTabComesFirst(t *testing.T) {
 		{Kind: "tool", Label: "tool", Ref: map[string]any{"id": "personal:x", "what": "skill"}},
 		{Kind: "note", Label: "note", Ref: map[string]any{"path": "/v/n.md"}},
 	}
-	its := hitItems(hits, tMemories)
+	its := hitItems(hits, tMemories, "Tools", "notes")
 	got := ""
 	for _, it := range its {
 		got += fmt.Sprintf("%s:%s:%d ", it.title, it.id, it.tab)
 	}
 	if want := "mem:p/pc/s:1 chat:c1:0 tool:personal:x:2 note:/v/n.md:-1 "; got != want {
 		t.Fatalf("got  %q\nwant %q", got, want)
+	}
+}
+
+func TestArrangeSortsAlphabeticallyIgnoringCase(t *testing.T) {
+	its := []item{{title: "beta", group: "Zed", mtime: 9}, {title: "Alpha", group: "zed", mtime: 1},
+		{title: "gamma", group: "alpha", mtime: 5}, {title: "Delta", group: "Zed", mtime: 3}}
+	got := fmt.Sprint(describe(arrange(its, layout{grouped: true, alpha: true})))
+	want := fmt.Sprint([]string{"title alpha 1 false", "gamma", "spacer", "title Zed 2 false", "beta", "Delta", "spacer", "title zed 1 false", "Alpha"})
+	if got != want {
+		t.Fatalf("got  %v\nwant %v", got, want)
+	}
+	got = fmt.Sprint(describe(arrange(its, layout{alpha: true})))
+	if want := fmt.Sprint([]string{"Alpha", "beta", "Delta", "gamma"}); got != want {
+		t.Fatalf("flat got %v, want %v", got, want)
+	}
+}
+
+func TestSearchHitsAreFiledByProject(t *testing.T) {
+	its := hitItems([]sto.Hit{
+		{Kind: "session", Ref: map[string]any{"id": "c", "project": "p1"}},
+		{Kind: "memory", Ref: map[string]any{"project": "p2", "machine": "m", "slug": "s"}},
+		{Kind: "tool", Ref: map[string]any{"id": "x", "what": "skill"}},
+		{Kind: "note", Ref: map[string]any{"path": "/v/n.md"}},
+	}, tChats, "Tools", "notes")
+	var got []string
+	for _, it := range its {
+		got = append(got, it.group)
+	}
+	if fmt.Sprint(got) != "[p1 p2 Tools notes]" {
+		t.Fatalf("groups = %v", got)
 	}
 }

@@ -89,6 +89,8 @@ type Model struct {
 	errs   []string
 
 	grouped bool
+	alpha   bool   // A-Z instead of newest first
+	kind    string // the search results' filter: "" for all, or a kinds entry
 	only    string // "repo" after the card's "chats you can bring" line; esc clears it
 
 	searching bool // the results of `/` replace the tab's list
@@ -190,11 +192,13 @@ func (m *Model) rebuild(t int) {
 	case tSettings:
 		its, grouped = m.settingItems(), false
 	case tSearch:
-		grouped = false
+		if m.kind != "" {
+			its = slices.DeleteFunc(slices.Clone(its), func(it item) bool { return kindOf(it) != m.kind })
+		}
 	}
 	l := &m.lists[t]
 	key := l.key()
-	l.lines, l.cur = arrange(its, here, grouped, m.folded[t]), -1
+	l.lines, l.cur = arrange(its, layout{here: here, grouped: grouped, alpha: m.alpha && t != tSettings, folded: m.folded[t]}), -1
 	l.pick(key)
 }
 
@@ -214,7 +218,7 @@ func (l *list) key() string {
 // or opens them all when every one is folded already.
 func (m *Model) fold(all bool) {
 	t := m.shown()
-	if t == tSearch || t == tSettings || !m.grouped {
+	if t == tSettings || !m.grouped {
 		return
 	}
 	if m.folded[t] == nil {
@@ -277,7 +281,10 @@ func (m *Model) selected() *item { return m.cur().selected() }
 // only on this machine, bring one only in the cloud, change a setting.
 func (m *Model) itemAct() tea.Cmd {
 	it := m.selected()
-	if it == nil {
+	if it == nil { // a group title of Chats: bring its chats only in the cloud
+		if g := m.title(); g != "" && m.shown() == tChats && m.cloudChats(g) > 0 {
+			return m.act(m.L("loading"), "bring-chats", g)
+		}
 		return nil
 	}
 	switch {
@@ -330,6 +337,26 @@ func (m *Model) open() tea.Cmd {
 		return m.itemAct()
 	}
 	return nil
+}
+
+// title is the group whose title is under the cursor, or "".
+func (m *Model) title() string {
+	l := m.cur()
+	if l.cur < 0 || l.cur >= len(l.lines) || l.lines[l.cur].it != nil {
+		return ""
+	}
+	return l.lines[l.cur].group
+}
+
+// cloudChats counts the chats of project that are only in the cloud.
+func (m Model) cloudChats(project string) int {
+	k := 0
+	for _, it := range m.items[tChats] {
+		if it.group == project && it.state == "repo" {
+			k++
+		}
+	}
+	return k
 }
 
 func (m *Model) openSync() {
@@ -388,7 +415,7 @@ func (m Model) loadedMsg(msg loaded) (Model, tea.Cmd) {
 		m.set, m.done[tSettings] = v, true
 		m.rebuild(tSettings)
 	case *sto.Search:
-		m.items[tSearch], m.done[tSearch] = hitItems(v.Hits, m.tab), true
+		m.items[tSearch], m.done[tSearch] = hitItems(v.Hits, m.tab, m.L("tui_tools"), m.L("tui_notes")), true
 		m.rebuild(tSearch)
 	case *sto.Detail:
 		if m.read != nil {
@@ -464,6 +491,20 @@ func (m Model) keyMsg(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		m.move(10)
 	case "pgup":
 		m.move(-10)
+	case "home", "g":
+		m.cur().cur = step(m.cur().lines, -1, 1)
+	case "end", "G":
+		m.cur().cur = step(m.cur().lines, len(m.cur().lines), -1)
+	case "s":
+		m.alpha = !m.alpha
+		for t := range tSearch + 1 {
+			m.rebuild(t)
+		}
+	case "f":
+		if m.searching {
+			m.kind = kinds[(slices.Index(kinds, m.kind)+1)%len(kinds)]
+			m.rebuild(tSearch)
+		}
 	case "enter":
 		return m, m.open()
 	case "/":
@@ -557,6 +598,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.itemAct()
 		case "fold":
 			m.fold(false)
+		case "kind":
+			m.kind = kinds[t.i]
+			m.rebuild(tSearch)
 		case "open":
 			return m, m.open()
 		}
@@ -710,7 +754,9 @@ func tail(it *item, hit bool) ([]string, []int) {
 
 func (m Model) row(it *item, width int, on bool) string {
 	cols, ws := tail(it, m.searching)
-	if m.searching {
+	if m.searching && m.grouped { // the group title already names the project
+		cols, ws = []string{it.kind}, []int{8}
+	} else if m.searching {
 		cols, ws = append([]string{it.kind}, cols...), append([]int{8}, ws...)
 	}
 	for len(cols) > 0 && width-3-sum(ws)-4*len(ws) < 16 {
@@ -741,20 +787,20 @@ func (m Model) titleRow(l line, width int, on bool) string {
 	if l.folded {
 		mark = "▸ "
 	}
-	t := mark + l.group
+	right := fmt.Sprint(l.count)
 	if m.shown() == tChats {
-		t += "  ·  " + n(m.L("tui_n_chats"), l.count)
+		right = n(m.L("tui_n_chats"), l.count)
 		if l.here {
-			t += "  ·  " + m.L("tui_here")
+			right += "  ·  " + m.L("tui_here")
 		}
-	} else {
-		t += "  ·  " + fmt.Sprint(l.count)
 	}
-	t = ansi.Truncate(t, width-4, "…")
+	right += " "
+	left := ansi.Truncate(" "+mark+l.group, max(8, width-lipgloss.Width(right)-6), "…")
+	rule := strings.Repeat("─", max(1, width-lipgloss.Width(left)-lipgloss.Width(right)-2))
 	if on {
-		return sel.Render(" " + t + " " + strings.Repeat("─", max(0, width-lipgloss.Width(t)-2)))
+		return sel.Render(left + " " + rule + " " + right)
 	}
-	return grp.Render(" "+t) + " " + faint.Render(strings.Repeat("─", max(0, width-lipgloss.Width(t)-2)))
+	return grp.Render(left) + " " + faint.Render(rule) + " " + grp.Render(right)
 }
 
 // list draws the lines that fit in height, scrolled so the cursor shows,
@@ -802,7 +848,7 @@ func (m Model) list(width, height, ox, y int) []string {
 func (m Model) side(width, ox, y int) []string {
 	it := m.selected()
 	in := width - 4 // border and padding
-	if it == nil { // a group title: what it holds and how to open it
+	if it == nil {  // a group title: what it holds and how to open it
 		l := m.cur()
 		if l.cur < 0 || l.cur >= len(l.lines) {
 			return nil
@@ -810,8 +856,17 @@ func (m Model) side(width, ox, y int) []string {
 		g := l.lines[l.cur]
 		b := button.Render(m.L("tui_fold"))
 		m.fr.hits.add(ox+2, y+1+3, lipgloss.Width(b), target{"fold", 0})
-		return []string{bold.Render(ansi.Truncate(g.group, in, "…")), faint.Render(fmt.Sprint(g.count)), "",
+		out := []string{bold.Render(ansi.Truncate(g.group, in, "…")), faint.Render(fmt.Sprint(g.count)), "",
 			b + faint.Render("  ↵ / space"), "", faint.Render("c  " + m.L("tui_fold_all"))}
+		if k := m.cloudChats(g.group); m.shown() == tChats && k > 0 {
+			bb := button.Render(n(m.L("tui_bring_n"), k))
+			m.fr.hits.add(ox+2, y+1+len(out)+1, lipgloss.Width(bb), target{"item", 0})
+			out = append(out, "", bb+faint.Render("  a"))
+			if m.chats != nil && m.chats.Folders[g.group] == nil {
+				out = append(out, "", acc.Render("! ")+ansi.Wrap(m.L("folder_missing"), in-2, ""))
+			}
+		}
+		return out
 	}
 	field := func(k, v string) string {
 		label := ansi.Truncate(m.L(k), 12, "")
@@ -923,7 +978,7 @@ func (m Model) page(W, H int) string {
 	}
 	head := spread(brand.Render("braingent")+bold.Render(ansi.Truncate(r.title, W-30, "…")),
 		faint.Render(fmt.Sprintf("%d/%d ", min(r.top+H-3, len(r.lines)), len(r.lines))), W)
-	return strings.Join(append(append([]string{head, ""}, fit(body, H-3)...), faint.Render(m.L("tui_reader_keys"))), "\n")
+	return strings.Join(append(append([]string{head, ""}, fit(body, H-3)...), m.hints("j k", "tui_k_scroll", "space", "tui_k_page", "home end", "tui_k_ends", "esc", "tui_k_back")), "\n")
 }
 
 // render lays the reader's text out at width W, through Glamour. A chat's
@@ -961,8 +1016,52 @@ func (m Model) render(r *reader, W int) []string {
 	return out
 }
 
+// kinds are the search filter's choices, in the order f cycles them.
+var kinds = []string{"", "chat", "memory", "tool", "note"}
+
+var kindLabels = map[string]string{"": "tui_all", "chat": "tui_chats", "memory": "tui_memories", "tool": "tui_tools", "note": "tui_notes"}
+
+// kindOf is the filter a search hit answers to: skills and plugins are tools.
+func kindOf(it item) string {
+	if it.kind == "skill" || it.kind == "plugin" {
+		return "tool"
+	}
+	return it.kind
+}
+
+// chips is the search filter as a row of clickable choices.
+func (m Model) chips(ox, y int) string {
+	out := " "
+	for i, k := range kinds {
+		style := tabIdle
+		if k == m.kind {
+			style = tabActive
+		}
+		c := style.Render(m.L(kindLabels[k]))
+		m.fr.hits.add(ox+lipgloss.Width(out), y, lipgloss.Width(c), target{"kind", i})
+		out += c + " "
+	}
+	return out + faint.Render(" f")
+}
+
+// hints is a line of keys and what they do: the key in the accent, the
+// words faint, so the two never read as one.
+func (m Model) hints(pairs ...string) string {
+	var out []string
+	for i := 0; i+1 < len(pairs); i += 2 {
+		out = append(out, keyStyle.Render(pairs[i])+" "+faint.Render(m.L(pairs[i+1])))
+	}
+	return strings.Join(out, "   ")
+}
+
 func (m Model) footer(W int) string {
-	left := faint.Render(m.L("tui_keys"))
+	sort := "tui_sort_az"
+	if m.alpha {
+		sort = "tui_sort_new"
+	}
+	left := m.hints("j k", "tui_k_move", "↵", "tui_read", "/", "tui_search", "a", "tui_k_action",
+		"S", "act_sync", "space", "tui_k_fold", "c", "tui_k_fold_all", "s", sort, "b", "tui_k_group",
+		"tab", "tui_k_view", "q", "tui_k_quit")
 	switch {
 	case m.typing:
 		left = acc.Render("/ ") + m.query + acc.Render("█") + faint.Render("   ↵  esc")
@@ -973,7 +1072,8 @@ func (m Model) footer(W int) string {
 	case m.flash != "":
 		left = acc.Render(m.flash)
 	case m.searching:
-		left = acc.Render("/ "+m.query) + faint.Render("   ↵  esc")
+		left = acc.Render("/ "+m.query) + "   " + m.hints("↵", "tui_goto", "f", "tui_k_filter",
+			"space", "tui_k_fold", "s", sort, "esc", "tui_k_close")
 	}
 	return ansi.Truncate(left, W, "…")
 }
@@ -1009,6 +1109,9 @@ func (m Model) View() tea.View {
 		out := []string{m.header(W, ox, oy), ""}
 		out = append(out, m.card(W, ox, oy+len(out))...)
 		out = append(out, "")
+		if m.searching {
+			out = append(out, m.chips(ox, oy+len(out)), "")
+		}
 		listH, y := H-len(out)-2, oy+len(out)
 		if W >= 90 {
 			sideW := min(48, W*2/5)
