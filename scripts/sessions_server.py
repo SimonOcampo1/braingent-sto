@@ -2108,7 +2108,7 @@ def memory_graph(src=None, bodies=False) -> dict:
 
 
 FETCH_TTL = 60  # seconds: a network round trip per `sto status` is the whole cost
-# An unasked-for fetch gives up early: the Claude Code band runs `sto mod status`
+# An unasked-for fetch gives up early: the Claude Code band runs `sto data status`
 # with a 30 s budget, and a slow network must show up as a fetchError, not as
 # the band aborting. A forced fetch (an explicit sync) keeps `_git`'s default.
 FETCH_TIMEOUT = 15

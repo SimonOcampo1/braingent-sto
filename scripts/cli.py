@@ -860,7 +860,8 @@ def _data_search(q=""):
 
 
 DATA_VIEWS = {
-    "status": lambda o: _ui().status_data(cwd=o.get("cwd"), fetch=bool(o.get("fetch"))),
+    "status": lambda o: _ui().status_data(cwd=o.get("cwd"), fetch=bool(o.get("fetch")),
+                                              limits=bool(o.get("limits"))),
     "chats": lambda o: _data_chats(),
     "memories": lambda o: {"projects": srv.list_memory()},
     "tools": lambda o: {"skills": _ui().module_items("skills"),
@@ -871,8 +872,8 @@ DATA_VIEWS = {
 
 
 def cmd_data(*args):
-    """sto data <view> [--cwd DIR] [--fetch] [--q TEXT] — JSON for the UIs."""
-    rest, opts = _opts(args, "cwd", "fetch", "q")
+    """sto data <view> [--cwd DIR] [--fetch] [--limits] [--q TEXT] — JSON for the UIs."""
+    rest, opts = _opts(args, "cwd", "fetch", "limits", "q")
     view = rest[0] if rest else "status"
     try:
         out = (DATA_VIEWS[view](opts) if view in DATA_VIEWS

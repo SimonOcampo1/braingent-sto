@@ -200,18 +200,18 @@ macOS both servers log to `.sto-cache/` and `Ctrl+C` takes them down together.
 | `sto graph [--memory\|--open\|<note>]` | memory graph window (read any memory in full), repo graph, or a node's neighbours |
 | `sto update [--apply]` | bring OS updates down from upstream — never touches your knowledge |
 | `sto badge [--install\|--off]` | the `◆ STO` badge in Claude Code's status line |
-| `sto mod [status\|sync\|sync-memories\|pull]` | JSON for the `sto-band` mod below |
+| `sto data <view>` / `sto act <verb>` | JSON for the UIs: read a view (`status`, `chats`, `memories`, `tools`, `search`), or run an action and stream its progress |
 
 ### Inside Claude Code: the `sto-band` mod
 
-A band above the prompt with this project's chats to push and pull, whether
-this machine has a path for it, and the 5 h, weekly and context windows.
-Two buttons on the band, and the same as commands: **sync chats** (`/sto
-sync`) pulls, keeps and brings the project's chats, and pushes; **sync
-memories** (`/sto mem`) pulls and pushes, which is what moves the memories.
-With **auto** on (`/sto auto` toggles it, remembered across sessions) a
-session pulls when it opens and syncs the memories every 30 minutes. `/sto`
-alone refreshes the band.
+A band above the prompt with one state: arrows with the count waiting in
+the cloud (↓N) and on this machine (↑M), or "up to date". A single **Sync**
+button shows only when something is pending, and turns into a retry when the
+last sync failed. It moves this project's chats and the memories in one go.
+`auto: off` shows only when auto is off. Commands: `/sto` refreshes the band,
+`/sto sync` syncs, `/sto auto` toggles auto (remembered across sessions).
+The band reads everything from `sto data status`, so it never disagrees with
+the TUI.
 
 ```
 /plugin install sto-band --marketplace SimonOcampo1/braingent-sto

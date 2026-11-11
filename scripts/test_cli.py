@@ -826,8 +826,8 @@ def test_data_views_print_json_and_never_a_traceback():
     real = (ui.status_data, cli.cached_sessions, cli.mark_synced, cli.srv.list_memory,
             cli.srv.project_paths)
     try:
-        ui.status_data = lambda cwd=None, fetch=False: {"state": "uptodate", "cwd": cwd,
-                                                       "fetch": fetch}
+        ui.status_data = lambda cwd=None, fetch=False, limits=False: {
+            "state": "uptodate", "cwd": cwd, "fetch": fetch, "limits": limits}
         cli.cached_sessions = lambda **k: ([{"id": "a", "title": "t", "project": "p",
                                              "mtime": 1.0, "machine": None, "path": "/x"}], {})
         cli.mark_synced = lambda rows: [r.update(synced=False) or r for r in rows]
@@ -835,7 +835,9 @@ def test_data_views_print_json_and_never_a_traceback():
         cli.srv.project_paths = lambda: {"p": {cli.srv.LOCAL_MACHINE: "/work/p"}}
 
         s = json.loads(cli.main(["data", "status", "--cwd", "/w", "--fetch"])["message"])
-        assert s == {"state": "uptodate", "cwd": "/w", "fetch": True}
+        assert s == {"state": "uptodate", "cwd": "/w", "fetch": True, "limits": False}
+        s = json.loads(cli.main(["data", "status", "--limits"])["message"])
+        assert s["limits"] is True and s["fetch"] is False
         c = json.loads(cli.main(["data", "chats"])["message"])
         assert c["rows"][0]["state"] == "local"
         assert c["rows"][0]["machine"] == cli.srv.LOCAL_MACHINE

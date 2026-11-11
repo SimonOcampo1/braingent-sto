@@ -194,7 +194,7 @@ def accent_code():
         return "36"
 
 
-def status_data(cwd=None, fetch=False):
+def status_data(cwd=None, fetch=False, limits=False):
     """The one sync state every UI shows: the TUI header and the band read this
     and nothing else, so they cannot disagree about a number.
 
@@ -202,6 +202,9 @@ def status_data(cwd=None, fetch=False):
     brought (what `sto act sync --cwd` moves), and records `cwd` as the
     project's folder on this machine when none was saved: the band runs inside
     the project, so asking the user for it would be asking what we know.
+
+    Nothing here touches the network unless asked: `fetch` refreshes the cloud
+    and the upstream check, `limits` calls the usage API. The band has 30 s.
     """
     sy = srv.sync_status(fetch=fetch)
     up, down = sync_preview(sy)
@@ -219,10 +222,12 @@ def status_data(cwd=None, fetch=False):
             "parts": {"down": preview_parts(down), "up": preview_parts(up)},
             "chats": chats, "project": project,
             "fetchError": sy.get("fetchError"),
-            "update": update_state().get("available", 0),
-            "limits": srv.usage_snapshot(detail=False).get("limits") or [],
+            "update": (update_state() if fetch
+                       else srv.update_status(fetch=False)).get("available", 0),
+            "limits": (srv.usage_snapshot(detail=False).get("limits") or []) if limits else [],
             "machine": srv.LOCAL_MACHINE, "accent": accent_code(),
             "labels": {k: t(k) for k in DATA_LABELS}}
+
 
 def counters():
     """The big numbers on the home: sessions, projects, memories, skills…"""
