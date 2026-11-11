@@ -562,6 +562,46 @@ def test_the_vocabulary_speaks_of_this_machine_and_the_cloud():
         i18n.LANG = real
 
 
+def test_state_phrase_names_only_the_sides_that_have_something():
+    real = i18n.LANG
+    try:
+        i18n.LANG = "en"
+        assert ui.state_phrase(0, 0) == "up to date"
+        assert ui.state_phrase(51, 2) == "51 new in the cloud \u00b7 2 to send"
+        assert ui.state_phrase(0, 2) == "2 to send"
+    finally:
+        i18n.LANG = real
+
+
+def test_status_data_sums_the_cloud_and_this_projects_chats_and_saves_the_folder():
+    reales = _stub_home()
+    real_upd, real_todo = ui.update_state, ui.cli.project_todo
+    real_paths = (ui.srv.project_of_cwd, ui.srv.local_project_path, ui.srv.set_project_path)
+    saved = {}
+    try:
+        ui.update_state = lambda force=False: {"available": 2}
+        ui.cli.project_todo = lambda p: (["k1"], ["b1", "b2"])
+        ui.srv.project_of_cwd = lambda cwd, fallback="": "proj"
+        ui.srv.local_project_path = lambda p: None
+        ui.srv.set_project_path = lambda p, path: saved.update({p: path}) or {}
+
+        s = ui.status_data()
+        assert s["state"] == "pending" and s["down"] == 0 and s["up"] == 3
+        assert s["chats"] == {"down": 0, "up": 0} and s["project"] is None
+        assert s["update"] == 2 and "act_sync" in s["labels"]
+
+        s = ui.status_data(cwd="/work/proj")
+        assert s["up"] == 4 and s["down"] == 2
+        assert s["chats"] == {"down": 2, "up": 1}
+        assert saved == {"proj": "/work/proj"}
+        json.dumps(s)                       # the contract is JSON, all of it
+    finally:
+        _unstub_home(reales)
+        ui.update_state, ui.cli.project_todo = real_upd, real_todo
+        (ui.srv.project_of_cwd, ui.srv.local_project_path,
+         ui.srv.set_project_path) = real_paths
+
+
 if __name__ == "__main__":
     test_memory_detail_reads_the_markdown()
     test_parity_splits_local_only_repo_only_and_synced()
@@ -586,4 +626,6 @@ if __name__ == "__main__":
     test_search_all_labels_every_hit_with_its_kind()
     test_no_pictographs_in_the_source()
     test_the_vocabulary_speaks_of_this_machine_and_the_cloud()
+    test_state_phrase_names_only_the_sides_that_have_something()
+    test_status_data_sums_the_cloud_and_this_projects_chats_and_saves_the_folder()
     print("OK")
