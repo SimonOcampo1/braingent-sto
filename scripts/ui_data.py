@@ -178,7 +178,7 @@ DATA_LABELS = ("act_sync", "act_retry", "mod_syncing", "mod_auto_off", "mod_5h",
                "k_bring", "k_delete", "k_forget", "k_keep", "k_row_path",
                "folder_missing", "cloud_is_repo", "update_notice", "loading", "empty",
                "tui_chats", "tui_memories", "tui_tools", "tui_settings", "tui_n_chats",
-               "tui_here", "tui_to_bring", "tui_will_bring", "tui_will_send",
+               "tui_here", "tui_will_bring", "tui_will_send",
                "tui_confirm", "tui_project", "tui_folder", "tui_machine",
                "tui_when", "tui_search", "tui_plugins",
                "tui_k_move", "tui_k_action", "tui_k_fold", "tui_k_fold_all", "tui_k_sort",
@@ -214,22 +214,22 @@ def status_data(cwd=None, fetch=False, limits=False, all_chats=False):
     the project, so asking the user for it would be asking what we know.
 
     With `all_chats` (the TUI) it counts every project's chats to send, which
-    `sto act sync --all` moves, and sets the chats only in the cloud apart in
-    `toBring`: Sync never brings those, so they are not in the number.
+    `sto act sync --all` moves. The chats only in the cloud are not counted:
+    Sync never brings them, the TUI shows them on their project instead.
 
     Nothing here touches the network unless asked: `fetch` refreshes the cloud
     (origin only), `limits` calls the usage API. The band has 30 s.
     """
     sy = srv.sync_status(fetch=fetch)
     up, down = sync_preview(sy)
-    chats, project, to_bring = {"down": 0, "up": 0}, None, 0
+    chats, project = {"down": 0, "up": 0}, None
     if cwd:
         project = srv.project_of_cwd(cwd)
         if srv.local_project_path(project) is None:
             srv.set_project_path(project, cwd)
     if all_chats:
-        keep, bring = cli.project_todo(None)
-        chats, to_bring = {"down": 0, "up": len(keep)}, len(bring)
+        keep, _ = cli.project_todo(None)
+        chats = {"down": 0, "up": len(keep)}
     elif cwd:
         keep, bring = cli.project_todo(project)
         chats = {"down": len(bring), "up": len(keep)}
@@ -238,7 +238,7 @@ def status_data(cwd=None, fetch=False, limits=False, all_chats=False):
     return {"state": "pending" if n_up or n_down else "uptodate",
             "down": n_down, "up": n_up, "phrase": state_phrase(n_down, n_up),
             "parts": {"down": preview_parts(down), "up": preview_parts(up)},
-            "chats": chats, "project": project, "toBring": to_bring,
+            "chats": chats, "project": project,
             "fetchError": sy.get("fetchError"),
             # never fetches upstream: with --fetch the origin fetch already
             # spends half the band's 30 s; `sto update` refreshes the notice

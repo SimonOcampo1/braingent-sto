@@ -633,8 +633,7 @@ def test_status_data_for_the_tui_counts_every_chat_to_send_and_sets_the_cloud_on
         s = ui.status_data(all_chats=True)
         assert asked == [None]              # every project, not one
         assert s["up"] == 5 and s["down"] == 0   # 3 from the stubbed home + 2 chats
-        assert s["chats"] == {"down": 0, "up": 2} and s["toBring"] == 3
-        assert ui.status_data()["toBring"] == 0
+        assert s["chats"] == {"down": 0, "up": 2}   # the chats only in the cloud are not counted
 
         ui.srv.project_of_cwd = lambda cwd, fallback="": "proj"
         ui.srv.local_project_path = lambda p: "/work/proj"

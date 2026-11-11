@@ -15,9 +15,9 @@ import (
 
 func loadedModel(t *testing.T) Model {
 	t.Helper()
-	st := &sto.Status{State: "pending", Up: 3, Phrase: "3 to send", ToBring: 1, Machine: "pc",
+	st := &sto.Status{State: "pending", Up: 3, Phrase: "3 to send", Machine: "pc",
 		Labels: map[string]string{"act_sync": "Sync", "tui_memories": "Memories", "tui_n_chats": "{n} chats",
-			"tui_to_bring": "{n} chats in the cloud you can bring", "k_keep": "keep full chat"}}
+			"k_keep": "keep full chat"}}
 	st.Parts.Up = []string{"3 memories"}
 	chats := &sto.Chats{Rows: []sto.Chat{
 		{ID: "1", Title: "first", Project: "p", Mtime: 2, State: "local"},
@@ -52,9 +52,6 @@ func TestClicksLandOnWhatTheScreenShows(t *testing.T) {
 	m.tab = tChats
 	if m = click(t, m, "second"); m.selected().id != "2" {
 		t.Fatalf("selected %v after clicking its row", m.selected())
-	}
-	if m = click(t, m, "chats in the cloud"); m.only != "repo" || len(m.lists[tChats].lines) != 2 {
-		t.Fatalf("only = %q, lines = %d: the card line filters to chats in the cloud", m.only, len(m.lists[tChats].lines))
 	}
 	if m = click(t, m, "Sync "); !m.confirm {
 		t.Fatal("clicking Sync opens the summary")
@@ -246,5 +243,16 @@ func TestActionOnAGroupTitleBringsItsCloudChats(t *testing.T) {
 	cmd().(tea.BatchMsg)[0]()
 	if got, _ := os.ReadFile(log); strings.TrimSpace(string(got)) != "act bring-chats p" {
 		t.Fatalf("sto got %q", got)
+	}
+}
+
+func TestCloudChatsAreCountedOnTheirProjectNotOnTheCard(t *testing.T) {
+	m := loadedModel(t)
+	screen := ansi.Strip(m.View().Content)
+	if strings.Contains(screen, "in the cloud you can bring") {
+		t.Fatal("the card no longer carries the chats only in the cloud")
+	}
+	if r := ansi.Strip(m.titleRow(line{group: "p", count: 2}, 60, false)); !strings.Contains(r, "2 chats  ·  ↓1") {
+		t.Fatalf("the title of p counts its one chat in the cloud: %q", r)
 	}
 }
