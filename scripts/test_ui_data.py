@@ -541,6 +541,27 @@ def test_no_pictographs_in_the_source():
     assert not bad, "pictographs in tracked source:\n" + "\n".join(bad[:40])
 
 
+def test_the_vocabulary_speaks_of_this_machine_and_the_cloud():
+    real = i18n.LANG
+    try:
+        for lang in ("en", "es"):
+            i18n.LANG = lang
+            # no git words where a user reads states and verbs
+            for key in ("st_both", "st_local", "st_repo", "st_gone", "local_only",
+                        "in_repo_not_installed", "k_bring", "k_forget",
+                        "state_uptodate", "act_sync"):
+                low = i18n.t(key).lower()
+                assert not any(w in low for w in ("repo", "push", "pull", "fetch")), (lang, key)
+        i18n.LANG = "en"
+        assert i18n.t("st_repo") == "only in the cloud"
+        assert i18n.t("state_down", n=3) == "3 new in the cloud"
+        i18n.LANG = "es"
+        assert i18n.t("st_local") == "solo en esta máquina"
+        assert i18n.t("act_sync") == "Sincronizar"
+    finally:
+        i18n.LANG = real
+
+
 if __name__ == "__main__":
     test_memory_detail_reads_the_markdown()
     test_parity_splits_local_only_repo_only_and_synced()
@@ -564,4 +585,5 @@ if __name__ == "__main__":
     test_the_index_only_re_reads_what_moved()
     test_search_all_labels_every_hit_with_its_kind()
     test_no_pictographs_in_the_source()
+    test_the_vocabulary_speaks_of_this_machine_and_the_cloud()
     print("OK")
