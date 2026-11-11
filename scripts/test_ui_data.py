@@ -608,7 +608,7 @@ def test_status_data_sums_the_cloud_and_this_projects_chats_and_saves_the_folder
         s = ui.status_data()
         assert s["state"] == "pending" and s["down"] == 0 and s["up"] == 3
         assert s["chats"] == {"down": 0, "up": 0} and s["project"] is None
-        assert s["update"] == 2 and "act_sync" in s["labels"]
+        assert s["update"] == 2 and s["updateLog"] == [] and "act_sync" in s["labels"]
 
         s = ui.status_data(cwd="/work/proj")
         assert s["up"] == 4 and s["down"] == 2

@@ -236,6 +236,7 @@ def status_data(cwd=None, fetch=False, limits=False, all_chats=False):
     elif cwd:
         keep, bring = cli.project_todo(project)
         chats = {"down": len(bring), "up": len(keep)}
+    upd = srv.update_status(fetch=False)
     n_up = count_items(up) + chats["up"]
     n_down = count_items(down) + chats["down"]
     return {"state": "pending" if n_up or n_down else "uptodate",
@@ -245,7 +246,7 @@ def status_data(cwd=None, fetch=False, limits=False, all_chats=False):
             "fetchError": sy.get("fetchError"),
             # never fetches upstream: with --fetch the origin fetch already
             # spends half the band's 30 s; `sto update` refreshes the notice
-            "update": srv.update_status(fetch=False).get("available", 0),
+            "update": upd.get("available", 0), "updateLog": (upd.get("log") or [])[:14],
             "limits": (srv.usage_snapshot(detail=False).get("limits") or []) if limits else [],
             "machine": srv.LOCAL_MACHINE, "accent": accent_code(),
             "labels": {k: t(k) for k in DATA_LABELS}}

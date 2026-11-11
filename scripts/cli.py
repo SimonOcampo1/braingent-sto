@@ -941,19 +941,44 @@ def _data_detail(kind="", ref=""):
 def _data_settings():
     ui = _ui()
     return {"lang": i18n.LANG, "langs": i18n.LANGS, "accent": ui.accent_code(),
-            "accents": [{"code": c, "name": t(k)} for k, c in ui.ACCENTS]}
+            "accents": [{"code": c, "name": t(k)} for k, c in ui.ACCENTS],
+            "modules": srv.config_status(), "badge": srv.badge_status()["on"],
+            "look": srv.machine_look(srv.LOCAL_MACHINE),
+            "icons": list(srv.MACHINE_ICONS), "colors": list(srv.MACHINE_COLORS),
+            "cloud": ui._origin(), "engine": ui._upstream()}
 
 
-def _act_set(key="", value=""):
-    """sto act set lang <en|es> | accent <code>"""
+def _act_set(key="", value="", extra=""):
+    """sto act set lang <en|es> | accent <code> | module <id> on|off |
+    badge on|off | icon <name> | color <name>"""
     ui = _ui()
     if key == "lang" and value in i18n.LANGS:
         ui.set_lang(value)
     elif key == "accent" and value in {c for _, c in ui.ACCENTS}:
         ui.set_accent(value)
+    elif key == "module" and value in srv.CONFIG_MODULES and extra in ("on", "off"):
+        mods = [m for m in srv.get_sync_prefs() if m != value]
+        srv.set_sync_prefs(mods + [value] if extra == "on" else mods)
+    elif key == "badge" and value in ("on", "off"):
+        if err := srv.set_badge(value == "on").get("error"):
+            return {"error": err}
+    elif key in ("icon", "color") and value in (srv.MACHINE_ICONS if key == "icon" else srv.MACHINE_COLORS):
+        srv.set_machine_look(**{key: value})
     else:
-        return {"error": t("bad_setting", key=key, value=value)}
+        return {"error": t("bad_setting", key=key, value=" ".join(x for x in (value, extra) if x))}
     return {"done": True, "message": ""}
+
+
+def _act_set_folder(project, path):
+    """The folder `project` lives in on this machine; it has to exist."""
+    if not Path(path).expanduser().is_dir():
+        return {"error": t("no_such_folder", path=path)}
+    return _act_result(srv.set_project_path(project, path))
+
+
+def _act_update():
+    res = srv.update_apply(lambda step: _step(step))
+    return {"error": res["error"]} if res.get("error") else {"done": True, "message": t("update_restart")}
 
 
 def _ui():
@@ -980,6 +1005,7 @@ DATA_VIEWS = {
     "search": lambda o: _data_search(o.get("q")),
     "detail": lambda o: _data_detail(*o["args"][:2]),
     "settings": lambda o: _data_settings(),
+    "usage": lambda o: {"limits": srv.usage_snapshot(detail=False).get("limits") or []},
 }
 
 
@@ -1107,8 +1133,11 @@ ACTS = {
     "delete": lambda a, o: _act_delete(a, o.get("scope") or "here"),
     "keep": lambda a, o: _act_result(srv.keep_session(a[0])),
     "resume": lambda a, o: _act_result(srv.resume_session(a[0])),
-    "set-folder": lambda a, o: _act_result(srv.set_project_path(a[0], a[1])),
-    "set": lambda a, o: _act_set(*a[:2]),
+    "set-folder": lambda a, o: _act_set_folder(a[0], " ".join(a[1:])),
+    "set": lambda a, o: _act_set(*a[:3]),
+    "update": lambda a, o: _act_update(),
+    "graph": lambda a, o: (lambda r: {"error": r["error"]} if r.get("error")
+                           else {"done": True, "message": r.get("message", "")})(open_memory_graph()),
     "bring-chats": lambda a, o: _act_bring_chats(" ".join(a)),
 }
 
