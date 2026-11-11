@@ -1383,7 +1383,7 @@ def test_an_explicit_update_check_fetches_even_with_a_fresh_ref():
 
 
 def test_a_slow_network_cannot_outlast_the_claude_code_band():
-    """The bug: the band runs `sto mod status` with a 30 s budget, and the
+    """The bug: the band runs `sto data status` with a 30 s budget, and the
     status fetch used `_git`'s 120 s default. With GitHub slow, the fetch alone
     took ~55 s and the band printed "aborted: still running after...". The
     fetch must give up early and come back as a `fetchError` instead."""

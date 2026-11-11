@@ -549,7 +549,9 @@ def test_the_vocabulary_speaks_of_this_machine_and_the_cloud():
             # no git words where a user reads states and verbs
             for key in ("st_both", "st_local", "st_repo", "st_gone", "local_only",
                         "in_repo_not_installed", "k_bring", "k_forget",
-                        "state_uptodate", "act_sync"):
+                        "state_uptodate", "act_sync", "mod_pulled", "s_fetch", "s_merge",
+                        "s_push", "s_commit", "s_add", "s_chats", "s_sessions", "s_config",
+                        "s_memory", "s_apply", "s_import"):
                 low = i18n.t(key).lower()
                 assert not any(w in low for w in ("repo", "push", "pull", "fetch")), (lang, key)
         i18n.LANG = "en"
@@ -560,6 +562,22 @@ def test_the_vocabulary_speaks_of_this_machine_and_the_cloud():
         assert i18n.t("act_sync") == "Sincronizar"
     finally:
         i18n.LANG = real
+
+
+def test_status_data_stays_off_the_network_unless_asked():
+    reales = _stub_home()
+    boom = lambda *a, **k: 1 / 0
+    real = (ui.srv.usage_snapshot, ui.srv.update_status, ui.update_state)
+    try:
+        ui.srv.usage_snapshot = boom
+        ui.update_state = boom
+        seen = []
+        ui.srv.update_status = lambda fetch=True, force=False: seen.append(fetch) or {"available": 1}
+        s = ui.status_data()
+        assert s["limits"] == [] and s["update"] == 1 and seen == [False]
+    finally:
+        _unstub_home(reales)
+        ui.srv.usage_snapshot, ui.srv.update_status, ui.update_state = real
 
 
 def test_state_phrase_names_only_the_sides_that_have_something():
@@ -575,11 +593,11 @@ def test_state_phrase_names_only_the_sides_that_have_something():
 
 def test_status_data_sums_the_cloud_and_this_projects_chats_and_saves_the_folder():
     reales = _stub_home()
-    real_upd, real_todo = ui.update_state, ui.cli.project_todo
+    real_upd, real_todo = ui.srv.update_status, ui.cli.project_todo
     real_paths = (ui.srv.project_of_cwd, ui.srv.local_project_path, ui.srv.set_project_path)
     saved = {}
     try:
-        ui.update_state = lambda force=False: {"available": 2}
+        ui.srv.update_status = lambda fetch=True, force=False: {"available": 2}
         ui.cli.project_todo = lambda p: (["k1"], ["b1", "b2"])
         ui.srv.project_of_cwd = lambda cwd, fallback="": "proj"
         ui.srv.local_project_path = lambda p: None
@@ -597,7 +615,7 @@ def test_status_data_sums_the_cloud_and_this_projects_chats_and_saves_the_folder
         json.dumps(s)                       # the contract is JSON, all of it
     finally:
         _unstub_home(reales)
-        ui.update_state, ui.cli.project_todo = real_upd, real_todo
+        ui.srv.update_status, ui.cli.project_todo = real_upd, real_todo
         (ui.srv.project_of_cwd, ui.srv.local_project_path,
          ui.srv.set_project_path) = real_paths
 
@@ -628,4 +646,5 @@ if __name__ == "__main__":
     test_the_vocabulary_speaks_of_this_machine_and_the_cloud()
     test_state_phrase_names_only_the_sides_that_have_something()
     test_status_data_sums_the_cloud_and_this_projects_chats_and_saves_the_folder()
+    test_status_data_stays_off_the_network_unless_asked()
     print("OK")
