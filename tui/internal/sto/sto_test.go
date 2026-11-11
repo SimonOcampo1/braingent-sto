@@ -1,9 +1,11 @@
 package sto
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // fake writes a stand-in for `sto` that prints body and exits with code.
@@ -55,5 +57,17 @@ func TestActStreamsStepsAndReturnsTheFinalLine(t *testing.T) {
 {"error": "no connection"}`, 0).Act(func(string) {}, "sync")
 	if err == nil || err.Error() != "no connection" {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestDataCtxKillsTheEngineWhenCancelled(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "sto")
+	os.WriteFile(bin, []byte("#!/bin/sh\nexec sleep 5\n"), 0o755)
+	ctx, cancel := context.WithCancel(context.Background())
+	start := time.Now()
+	go func() { time.Sleep(50 * time.Millisecond); cancel() }()
+	var s Search
+	if err := (Client{Bin: bin}).DataCtx(ctx, &s, "search"); err == nil || time.Since(start) > 2*time.Second {
+		t.Fatalf("err = %v after %v", err, time.Since(start))
 	}
 }
