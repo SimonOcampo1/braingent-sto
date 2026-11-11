@@ -200,11 +200,17 @@ func TestHomeAndEndJumpToTheEnds(t *testing.T) {
 	}
 }
 
-func TestTheGroupCountSitsAtTheRightEdge(t *testing.T) {
+func TestGroupTitlesLineTheirColumnsUp(t *testing.T) {
 	m := loadedModel(t)
-	r := ansi.Strip(m.titleRow(line{group: "proj", count: 12}, 60, false))
-	if ansi.StringWidth(r) != 60 || !strings.HasSuffix(strings.TrimRight(r, " "), "12 chats") {
-		t.Fatalf("%q (width %d)", r, ansi.StringWidth(r))
+	a := ansi.Strip(m.titleRow(line{group: "proj", count: 12}, 60, false))
+	b := ansi.Strip(m.titleRow(line{group: "a-much-longer-project", count: 3, here: true}, 60, false))
+	if ansi.StringWidth(a) != 60 || ansi.StringWidth(b) != 60 {
+		t.Fatalf("widths %d %d", ansi.StringWidth(a), ansi.StringWidth(b))
+	}
+	// the counts end on the same column whatever the name, and no rule runs between
+	end := func(r, sub string) int { return ansi.StringWidth(r[:strings.Index(r, sub)+len(sub)]) }
+	if end(a, "12 chats") != end(b, "3 chats") || strings.Contains(a+b, "─") {
+		t.Fatalf("\n%q\n%q", a, b)
 	}
 }
 
@@ -252,7 +258,7 @@ func TestCloudChatsAreCountedOnTheirProjectNotOnTheCard(t *testing.T) {
 	if strings.Contains(screen, "in the cloud you can bring") {
 		t.Fatal("the card no longer carries the chats only in the cloud")
 	}
-	if r := ansi.Strip(m.titleRow(line{group: "p", count: 2}, 60, false)); !strings.Contains(r, "2 chats  ·  ↓1") {
+	if r := ansi.Strip(m.titleRow(line{group: "p", count: 2}, 60, false)); !strings.Contains(r, "2 chats") || !strings.HasSuffix(strings.TrimRight(r, " "), "↑1 ↓1") {
 		t.Fatalf("the title of p counts its one chat in the cloud: %q", r)
 	}
 }

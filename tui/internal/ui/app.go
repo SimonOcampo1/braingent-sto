@@ -278,7 +278,7 @@ func (m *Model) selected() *item { return m.cur().selected() }
 func (m *Model) itemAct() tea.Cmd {
 	it := m.selected()
 	if it == nil { // a group title of Chats: bring its chats only in the cloud
-		if g := m.title(); g != "" && m.shown() == tChats && m.cloudChats(g) > 0 {
+		if g := m.title(); g != "" && m.shown() == tChats && m.chatsIn(g, "repo") > 0 {
 			return m.act(m.L("loading"), "bring-chats", g)
 		}
 		return nil
@@ -340,11 +340,12 @@ func (m *Model) title() string {
 	return l.lines[l.cur].group
 }
 
-// cloudChats counts the chats of project that are only in the cloud.
-func (m Model) cloudChats(project string) int {
+// chatsIn counts the chats of project in state: "repo" for only in the
+// cloud, "local" for only on this machine.
+func (m Model) chatsIn(project, state string) int {
 	k := 0
 	for _, it := range m.items[tChats] {
-		if it.group == project && it.state == "repo" {
+		if it.group == project && it.state == state {
 			k++
 		}
 	}
@@ -766,23 +767,25 @@ func (m Model) titleRow(l line, width int, on bool) string {
 	if l.folded {
 		mark = "▸ "
 	}
-	right := fmt.Sprint(l.count)
+	count, moves := fmt.Sprint(l.count), ""
 	if m.shown() == tChats {
-		right = n(m.L("tui_n_chats"), l.count)
-		if k := m.cloudChats(l.group); k > 0 {
-			right += fmt.Sprintf("  ·  ↓%d", k)
-		}
-		if l.here {
-			right += "  ·  " + m.L("tui_here")
-		}
+		count = n(m.L("tui_n_chats"), l.count)
+		// ↑ to send, ↓ to bring: the only colour on the line
+		moves = strings.TrimSpace(arrows(0, m.chatsIn(l.group, "local")) + " " + arrows(m.chatsIn(l.group, "repo"), 0))
 	}
-	right += " "
-	left := ansi.Truncate(" "+mark+l.group, max(8, width-lipgloss.Width(right)-6), "…")
-	rule := strings.Repeat("─", max(1, width-lipgloss.Width(left)-lipgloss.Width(right)-2))
+	// fixed columns at the right, so every title's numbers line up
+	right := fmt.Sprintf("%10s  %-11s", count, moves)
+	here := ""
+	if l.here {
+		here = "  ⌂ " + m.L("tui_here")
+	}
+	name := ansi.Truncate(l.group, max(4, width-lipgloss.Width(right)-lipgloss.Width(here)-5), "…")
+	gap := strings.Repeat(" ", max(1, width-3-lipgloss.Width(name+here)-lipgloss.Width(right)))
 	if on {
-		return sel.Render(left + " " + rule + " " + right)
+		return sel.Render(" " + mark + name + here + gap + right)
 	}
-	return grp.Render(left) + " " + faint.Render(rule) + " " + grp.Render(right)
+	return faint.Render(" "+mark) + bold.Render(name) + faint.Render(here) + gap +
+		faint.Render(fmt.Sprintf("%10s  ", count)) + acc.Render(fmt.Sprintf("%-11s", moves))
 }
 
 // list draws the lines that fit in height, scrolled so the cursor shows,
@@ -840,7 +843,7 @@ func (m Model) side(width, ox, y int) []string {
 		m.fr.hits.add(ox+2, y+1+3, lipgloss.Width(b), target{"fold", 0})
 		out := []string{bold.Render(ansi.Truncate(g.group, in, "…")), faint.Render(fmt.Sprint(g.count)), "",
 			b + faint.Render("  ↵ / space"), "", faint.Render("c  " + m.L("tui_fold_all"))}
-		if k := m.cloudChats(g.group); m.shown() == tChats && k > 0 {
+		if k := m.chatsIn(g.group, "repo"); m.shown() == tChats && k > 0 {
 			bb := button.Render(n(m.L("tui_bring_n"), k))
 			m.fr.hits.add(ox+2, y+1+len(out)+1, lipgloss.Width(bb), target{"item", 0})
 			out = append(out, "", bb+faint.Render("  a"))
