@@ -213,13 +213,14 @@ def status_data(cwd=None, fetch=False, limits=False, all_chats=False):
     sy = srv.sync_status(fetch=fetch)
     up, down = sync_preview(sy)
     chats, project, to_bring = {"down": 0, "up": 0}, None, 0
+    if cwd:
+        project = srv.project_of_cwd(cwd)
+        if srv.local_project_path(project) is None:
+            srv.set_project_path(project, cwd)
     if all_chats:
         keep, bring = cli.project_todo(None)
         chats, to_bring = {"down": 0, "up": len(keep)}, len(bring)
     elif cwd:
-        project = srv.project_of_cwd(cwd)
-        if srv.local_project_path(project) is None:
-            srv.set_project_path(project, cwd)
         keep, bring = cli.project_todo(project)
         chats = {"down": len(bring), "up": len(keep)}
     n_up = count_items(up) + chats["up"]
