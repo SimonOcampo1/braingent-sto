@@ -2026,6 +2026,67 @@ def forget(target, apply=False, claude_dir=None, repo_config=None, repo_memory=N
     return rel, None
 
 
+# a transcript touched this recently is a conversation still running
+BUSY_SECONDS = 120
+
+
+def delete_session(sid, everywhere=False, projects_dir=None, knowledge_dir=None):
+    """Delete one conversation: its transcript here (and the sidecar folder
+    Claude Code keeps beside it), and with `everywhere` every copy the repo
+    carries, trimmed or kept in full. None on success, else the reason.
+
+    Only an exact id: a prefix that deletes two chats is not a typo worth
+    allowing. The cloud side reaches the remote on the next sync, which
+    stages removals; another machine that still has the chat keeps it.
+    """
+    import shutil as sh
+    if not sid or "/" in sid or "\\" in sid or sid.startswith("."):
+        return f"not a chat id: {sid}"
+    pd = projects_dir or dx.PROJECTS_DIR
+    here = [p for p in pd.glob(f"*/{sid}.jsonl") if p.is_file()]
+    if any(time.time() - p.stat().st_mtime < BUSY_SECONDS for p in here):
+        return f"{sid} is still being written; close that conversation first"
+    cloud = [c["path"] for c in _repo_copies(knowledge_dir, sid) if c["id"] == sid] if everywhere else []
+    if not here and not cloud:
+        return f"no chat {sid} here" + (" or in the cloud" if everywhere else "")
+    for p in here:
+        p.unlink()
+        if (p.parent / sid).is_dir():
+            sh.rmtree(p.parent / sid)
+    for p in cloud:
+        p.unlink(missing_ok=True)
+    reg = pd.parent / BROUGHT
+    brought = brought_sessions(pd.parent)
+    if brought.pop(sid, None) is not None:
+        reg.write_text(json.dumps(brought), encoding="utf-8")
+    return None
+
+
+def delete_memory(project, slug, knowledge_memory=None):
+    """Delete one memory everywhere: every local copy of the project (all
+    its folders here) and every machine's copy in the repo. None on success,
+    else the reason.
+
+    There is no "only here" for a memory: the export mirrors this machine's
+    folder into the repo and the import brings the other machines' back, so
+    a deletion on one side alone is undone by the next sync.
+    """
+    if not slug or not project or any(x in (project + slug) for x in ("/", "\\", "..")):
+        return f"not a memory: {project}/{slug}"
+    mem = knowledge_memory if knowledge_memory is not None else KNOWLEDGE_MEMORY
+    gone = 0
+    for d in _memory_dirs().get(project, []):
+        f = d / f"{slug}.md"
+        if f.is_file():
+            f.unlink()
+            gone += 1
+            rebuild_index(d)
+    for f in (mem / project).glob(f"*/{slug}.md"):
+        f.unlink()
+        gone += 1
+    return None if gone else f"no memory {slug} in {project}"
+
+
 WIKILINK = re.compile(r"\[\[([^\]|#]+)")
 
 
