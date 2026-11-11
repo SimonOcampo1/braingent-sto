@@ -907,6 +907,72 @@ def _no_args(cmd):
     raise TypeError(f"{cmd} takes no arguments")
 
 
+def _opts(args, *names):
+    """(positional, {name: value}) for `--name value` flags; a flag in `names`
+    with no value after it (like `--fetch`) is True."""
+    args, opts = list(args), {}
+    for name in names:
+        flag = "--" + name
+        if flag in args:
+            i = args.index(flag)
+            nxt = args[i + 1] if i + 1 < len(args) else None
+            if nxt is None or nxt.startswith("--"):
+                opts[name] = True
+                del args[i]
+            else:
+                opts[name] = nxt
+                del args[i:i + 2]
+    return args, opts
+
+
+def _data_chats():
+    rows, _ = cached_sessions()
+    mark_synced(rows)
+    state = {"keep": "local", "bring": "repo", None: "both"}
+    here = srv.LOCAL_MACHINE
+    paths = srv.project_paths()
+    return {"rows": [{"id": r["id"], "title": r["title"], "project": r["project"],
+                      "machine": r.get("machine") or here, "mtime": r["mtime"],
+                      "state": state[session_todo(r)]} for r in rows],
+            "folders": {p: (paths.get(p) or {}).get(here)
+                        for p in sorted({r["project"] for r in rows})}}
+
+
+def _ui():
+    """`ui_data`, imported on first use: it imports this module at its top,
+    so importing it back at ours would be a cycle."""
+    import ui_data
+    return ui_data
+
+
+def _data_search(q=""):
+    return {"hits": [{k: h[k] for k in ("kind", "label", "sub", "ref")}
+                     for h in _ui().search_all(q or "")]}
+
+
+DATA_VIEWS = {
+    "status": lambda o: _ui().status_data(cwd=o.get("cwd"), fetch=bool(o.get("fetch"))),
+    "chats": lambda o: _data_chats(),
+    "memories": lambda o: {"projects": srv.list_memory()},
+    "tools": lambda o: {"skills": _ui().module_items("skills"),
+                        "plugins": _ui().module_items("plugins"),
+                        "modules": srv.config_status()},
+    "search": lambda o: _data_search(o.get("q")),
+}
+
+
+def cmd_data(*args):
+    """sto data <view> [--cwd DIR] [--fetch] [--q TEXT] — JSON for the UIs."""
+    rest, opts = _opts(args, "cwd", "fetch", "q")
+    view = rest[0] if rest else "status"
+    try:
+        out = (DATA_VIEWS[view](opts) if view in DATA_VIEWS
+               else {"error": t("cli_commands", names=", ".join(DATA_VIEWS))})
+    except Exception as e:  # a UI parses stdout: never a traceback
+        out = {"error": f"{type(e).__name__}: {e}"}
+    return {"message": json.dumps(out, ensure_ascii=False, default=str)}
+
+
 CLI = {
     "push": srv.sync_push,
     "pull": srv.sync_pull,
@@ -927,6 +993,7 @@ CLI = {
     "resume": cmd_resume,
     "ui": cmd_ui,
     "mod": cmd_mod,
+    "data": cmd_data,
 }
 
 
