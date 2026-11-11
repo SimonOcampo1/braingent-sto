@@ -781,16 +781,55 @@ def cmd_resume(sid=""):
                          n=res["lines"]) + "\n  " + c(res["command"], CYAN)}
 
 
-def cmd_ui(*args):
-    """`sto ui` — the terminal UI.
+TUI_CACHE = Path.home() / ".cache" / "braingent"
+EXE = ".exe" if os.name == "nt" else ""
 
-    It imports `cli` and `sessions_server` directly: no HTTP in between and no
-    second copy of any rule. `textual` is what it needs; when it is missing,
+
+def _tui_tree():
+    """The git hash of this checkout's `tui/`: it changes exactly when the Go
+    TUI does, so it names the binary built from it. Empty outside git."""
+    r = subprocess.run(["git", "-C", str(Path(__file__).parent.parent), "rev-parse",
+                        "HEAD:tui"], capture_output=True, text=True)
+    return r.stdout.strip() if r.returncode == 0 else ""
+
+
+def _go_tui():
+    """The Go TUI for this version, built once with `go` when it is missing,
+    the binaries of older versions swept. None when it cannot be had.
+
+    ponytail: built from HEAD's hash, so uncommitted edits under tui/ need a
+    plain `go build`; and no download yet, that waits for the release Action.
+    """
+    tree = _tui_tree()
+    if not tree:
+        return None
+    exe = TUI_CACHE / f"braingent-tui-{tree}{EXE}"
+    if exe.exists():
+        return exe
+    if not shutil.which("go"):
+        return None
+    TUI_CACHE.mkdir(parents=True, exist_ok=True)
+    for old in TUI_CACHE.glob("braingent-tui-*"):
+        old.unlink(missing_ok=True)
+    print(t("tui_building"), flush=True)
+    subprocess.run(["go", "build", "-o", str(exe), "."], cwd=Path(__file__).parent.parent / "tui")
+    return exe if exe.exists() else None
+
+
+def cmd_ui(*args):
+    """`sto ui` — the terminal UI: the Go TUI, or the Textual one where Go
+    cannot be had.
+
+    Textual imports `cli` and `sessions_server` directly; when it is missing,
     `uv` runs it in a throwaway environment so nothing lands in the user's
     Python.
     """
     if args:
         return _no_args("ui")
+    exe = _go_tui()
+    if exe:
+        subprocess.run([str(exe)])
+        return {"message": ""}
     try:
         import textual  # noqa: F401
     except ImportError:

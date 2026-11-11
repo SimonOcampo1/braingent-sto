@@ -584,6 +584,36 @@ def test_graph_open_launches_a_chromeless_window():
     _con_html(caso)
 
 
+def test_ui_opens_the_go_tui_building_it_once_per_version():
+    import tempfile
+    real = (cli.TUI_CACHE, cli._tui_tree, cli.shutil.which, cli.subprocess.run)
+    runs = []
+
+    def run(cmd, **k):
+        runs.append([str(c) for c in cmd])
+        if cmd[0] == "go":                  # the build leaves the binary behind
+            Path(cmd[cmd.index("-o") + 1]).write_text("bin")
+        return type("R", (), {"returncode": 0})()
+    try:
+        cli.TUI_CACHE = Path(tempfile.mkdtemp())
+        (cli.TUI_CACHE / "braingent-tui-old").write_text("stale")
+        cli._tui_tree = lambda: "abc123"
+        cli.shutil.which = lambda name: "/usr/bin/go" if name == "go" else None
+        cli.subprocess.run = run
+        exe = str(cli.TUI_CACHE / ("braingent-tui-abc123" + cli.EXE))
+
+        assert cli.cmd_ui() == {"message": ""}
+        assert runs[0][:3] == ["go", "build", "-o"] and runs[1] == [exe]
+        assert not (cli.TUI_CACHE / "braingent-tui-old").exists()
+
+        runs.clear()
+        cli.shutil.which = lambda name: None   # built already: go is not needed
+        cli.cmd_ui()
+        assert runs == [[exe]]
+    finally:
+        (cli.TUI_CACHE, cli._tui_tree, cli.shutil.which, cli.subprocess.run) = real
+
+
 def test_ui_says_what_is_missing_instead_of_opening_nothing():
     """Textual is the only front-end now, so a machine without it (and without
     `uv` to borrow it) has to be told what to install.
@@ -593,14 +623,15 @@ def test_ui_says_what_is_missing_instead_of_opening_nothing():
     returns an empty message and leaves the user staring at a prompt.
     """
     import sys
-    real_which = cli.shutil.which
+    real_which, real_tree = cli.shutil.which, cli._tui_tree
     try:
+        cli._tui_tree = lambda: ""          # no Go TUI to be had either
         cli.shutil.which = lambda name: None
         sys.modules["textual"] = None      # import textual -> ImportError
         res = cli.cmd_ui()
         assert "textual" in res["error"], res
     finally:
-        cli.shutil.which = real_which
+        cli.shutil.which, cli._tui_tree = real_which, real_tree
         sys.modules.pop("textual", None)
 
 
@@ -938,6 +969,7 @@ if __name__ == "__main__":
     test_graph_open_launches_a_chromeless_window()
     test_graph_open_falls_back_to_the_browser_without_chromium()
     test_ui_says_what_is_missing_instead_of_opening_nothing()
+    test_ui_opens_the_go_tui_building_it_once_per_version()
     test_ui_takes_no_flag_at_all()
     test_graph_open_without_the_html()
     test_cached_sessions_hides_subagent_sessions_by_default()
