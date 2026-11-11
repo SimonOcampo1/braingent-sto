@@ -614,6 +614,34 @@ def test_ui_opens_the_go_tui_building_it_once_per_version():
         (cli.TUI_CACHE, cli._tui_tree, cli.shutil.which, cli.subprocess.run) = real
 
 
+def test_ui_downloads_the_build_of_its_version_where_go_is_missing():
+    import tempfile
+    real = (cli.TUI_CACHE, cli._tui_tree, cli.shutil.which, cli.subprocess.run, cli._download, cli._platform)
+    runs, got = [], []
+    try:
+        cli.TUI_CACHE = Path(tempfile.mkdtemp())
+        cli._tui_tree = lambda: "abcdef1234567890"
+        cli.shutil.which = lambda name: None
+        cli._platform = lambda: ("linux", "arm64")
+        cli._download = lambda url, dest: got.append(url) or Path(dest).write_bytes(b"bin")
+        cli.subprocess.run = lambda cmd, **k: runs.append([str(c) for c in cmd])
+        exe = cli.TUI_CACHE / ("braingent-tui-abcdef1234567890" + cli.EXE)
+
+        assert cli.cmd_ui() == {"message": ""}
+        assert got == [cli.TUI_RELEASES + "/tui-abcdef123456/braingent-tui-linux-arm64" + cli.EXE], got
+        assert runs == [[str(exe)]] and os.access(exe, os.X_OK)
+
+        # no network, no go: nothing half-written is left to run next time
+        exe.unlink()
+        def fail(url, dest):
+            Path(dest).write_bytes(b"half")
+            raise OSError("offline")
+        cli._download = fail
+        assert cli._go_tui() is None and not list(cli.TUI_CACHE.iterdir())
+    finally:
+        (cli.TUI_CACHE, cli._tui_tree, cli.shutil.which, cli.subprocess.run, cli._download, cli._platform) = real
+
+
 def test_ui_says_what_is_missing_instead_of_opening_nothing():
     """Textual is the only front-end now, so a machine without it (and without
     `uv` to borrow it) has to be told what to install.
@@ -1135,6 +1163,7 @@ if __name__ == "__main__":
     test_graph_open_falls_back_to_the_browser_without_chromium()
     test_ui_says_what_is_missing_instead_of_opening_nothing()
     test_ui_opens_the_go_tui_building_it_once_per_version()
+    test_ui_downloads_the_build_of_its_version_where_go_is_missing()
     test_ui_takes_no_flag_at_all()
     test_graph_open_without_the_html()
     test_cached_sessions_hides_subagent_sessions_by_default()
