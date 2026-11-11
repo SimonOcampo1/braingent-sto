@@ -622,6 +622,23 @@ def test_status_data_sums_the_cloud_and_this_projects_chats_and_saves_the_folder
          ui.srv.set_project_path) = real_paths
 
 
+def test_status_data_for_the_tui_counts_every_chat_to_send_and_sets_the_cloud_ones_apart():
+    reales = _stub_home()
+    real_upd, real_todo = ui.srv.update_status, ui.cli.project_todo
+    asked = []
+    try:
+        ui.srv.update_status = lambda fetch=True, force=False: {"available": 0}
+        ui.cli.project_todo = lambda p: asked.append(p) or (["k1", "k2"], ["b1", "b2", "b3"])
+        s = ui.status_data(all_chats=True)
+        assert asked == [None]              # every project, not one
+        assert s["up"] == 5 and s["down"] == 0   # 3 from the stubbed home + 2 chats
+        assert s["chats"] == {"down": 0, "up": 2} and s["toBring"] == 3
+        assert ui.status_data()["toBring"] == 0
+    finally:
+        _unstub_home(reales)
+        ui.srv.update_status, ui.cli.project_todo = real_upd, real_todo
+
+
 if __name__ == "__main__":
     test_memory_detail_reads_the_markdown()
     test_parity_splits_local_only_repo_only_and_synced()
@@ -649,4 +666,5 @@ if __name__ == "__main__":
     test_state_phrase_names_only_the_sides_that_have_something()
     test_status_data_sums_the_cloud_and_this_projects_chats_and_saves_the_folder()
     test_status_data_stays_off_the_network_unless_asked()
+    test_status_data_for_the_tui_counts_every_chat_to_send_and_sets_the_cloud_ones_apart()
     print("OK")

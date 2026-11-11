@@ -197,10 +197,11 @@ def session_todo(row):
 
 
 def project_todo(project):
-    """(keep ids, bring ids) for one project's conversations."""
+    """(keep ids, bring ids) for one project's conversations, or every
+    project's with `None`."""
     rows, _ = cached_sessions()
     mark_synced(rows)
-    mine = [r for r in rows if r["project"] == project]
+    mine = [r for r in rows if project is None or r["project"] == project]
     return ([r["id"] for r in mine if session_todo(r) == "keep"],
             [r["id"] for r in mine if session_todo(r) == "bring"])
 
@@ -861,7 +862,8 @@ def _data_search(q=""):
 
 DATA_VIEWS = {
     "status": lambda o: _ui().status_data(cwd=o.get("cwd"), fetch=bool(o.get("fetch")),
-                                              limits=bool(o.get("limits"))),
+                                              limits=bool(o.get("limits")),
+                                              all_chats=bool(o.get("all"))),
     "chats": lambda o: _data_chats(),
     "memories": lambda o: {"projects": srv.list_memory()},
     "tools": lambda o: {"skills": _ui().module_items("skills"),
@@ -872,8 +874,8 @@ DATA_VIEWS = {
 
 
 def cmd_data(*args):
-    """sto data <view> [--cwd DIR] [--fetch] [--limits] [--q TEXT] — JSON for the UIs."""
-    rest, opts = _opts(args, "cwd", "fetch", "limits", "q")
+    """sto data <view> [--cwd DIR] [--all] [--fetch] [--limits] [--q TEXT] — JSON for the UIs."""
+    rest, opts = _opts(args, "cwd", "all", "fetch", "limits", "q")
     view = rest[0] if rest else "status"
     try:
         out = (DATA_VIEWS[view](opts) if view in DATA_VIEWS
@@ -892,12 +894,22 @@ def _step(key):
     _emit({"step": t(key)})
 
 
-def _act_sync(cwd=None):
+def _act_sync(cwd=None, all_chats=False):
+    """Pull, move chats, push. With `cwd`, that project's chats both ways (the
+    band). With `all_chats`, every project's chats up and none down (the TUI:
+    old chats only in the cloud are brought by hand, never in bulk)."""
     res = srv.sync_pull(_step)
     if res.get("error"):
         return {"error": res["error"]}
     note = ""
-    if cwd:
+    if all_chats:
+        keep, _ = project_todo(None)
+        if keep:
+            _step("s_chats")
+        fail = sum("error" in srv.keep_session(s) for s in keep)
+        if keep:
+            note = " · " + t("sync_project_done", ok=len(keep) - fail, fail=fail)
+    elif cwd:
         project = srv.project_of_cwd(cwd)
         if srv.local_project_path(project) is None:
             srv.set_project_path(project, cwd)
@@ -936,7 +948,7 @@ def _act_result(res):
 
 
 ACTS = {
-    "sync": lambda a, o: _act_sync(o.get("cwd")),
+    "sync": lambda a, o: _act_sync(o.get("cwd"), bool(o.get("all"))),
     "pull": lambda a, o: (lambda r: {"error": r["error"]} if r.get("error")
                           else {"done": True, "message": t("mod_pulled")})(srv.sync_pull(_step)),
     "bring": lambda a, o: _act_files(srv.bring, a[0], bool(o.get("dry"))),
@@ -949,9 +961,9 @@ ACTS = {
 
 
 def cmd_act(*args):
-    """sto act <verb> [args] [--cwd DIR] [--dry] — JSON lines for the UIs: steps,
-    then exactly one final `done` or `error` line."""
-    rest, opts = _opts(args, "cwd", "dry")
+    """sto act <verb> [args] [--cwd DIR] [--all] [--dry] — JSON lines for the UIs:
+    steps, then exactly one final `done` or `error` line."""
+    rest, opts = _opts(args, "cwd", "all", "dry")
     verb = rest[0] if rest else ""
     try:
         out = (ACTS[verb](rest[1:], opts) if verb in ACTS

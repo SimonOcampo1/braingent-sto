@@ -194,7 +194,7 @@ def accent_code():
         return "36"
 
 
-def status_data(cwd=None, fetch=False, limits=False):
+def status_data(cwd=None, fetch=False, limits=False, all_chats=False):
     """The one sync state every UI shows: the TUI header and the band read this
     and nothing else, so they cannot disagree about a number.
 
@@ -203,13 +203,20 @@ def status_data(cwd=None, fetch=False, limits=False):
     project's folder on this machine when none was saved: the band runs inside
     the project, so asking the user for it would be asking what we know.
 
+    With `all_chats` (the TUI) it counts every project's chats to send, which
+    `sto act sync --all` moves, and sets the chats only in the cloud apart in
+    `toBring`: Sync never brings those, so they are not in the number.
+
     Nothing here touches the network unless asked: `fetch` refreshes the cloud
     (origin only), `limits` calls the usage API. The band has 30 s.
     """
     sy = srv.sync_status(fetch=fetch)
     up, down = sync_preview(sy)
-    chats, project = {"down": 0, "up": 0}, None
-    if cwd:
+    chats, project, to_bring = {"down": 0, "up": 0}, None, 0
+    if all_chats:
+        keep, bring = cli.project_todo(None)
+        chats, to_bring = {"down": 0, "up": len(keep)}, len(bring)
+    elif cwd:
         project = srv.project_of_cwd(cwd)
         if srv.local_project_path(project) is None:
             srv.set_project_path(project, cwd)
@@ -220,7 +227,7 @@ def status_data(cwd=None, fetch=False, limits=False):
     return {"state": "pending" if n_up or n_down else "uptodate",
             "down": n_down, "up": n_up, "phrase": state_phrase(n_down, n_up),
             "parts": {"down": preview_parts(down), "up": preview_parts(up)},
-            "chats": chats, "project": project,
+            "chats": chats, "project": project, "toBring": to_bring,
             "fetchError": sy.get("fetchError"),
             # never fetches upstream: with --fetch the origin fetch already
             # spends half the band's 30 s; `sto update` refreshes the notice
