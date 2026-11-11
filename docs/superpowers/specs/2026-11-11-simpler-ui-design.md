@@ -211,3 +211,33 @@ braingent  ! couldn't sync: no connection  [retry]
 - Exact `sto data` / `sto act` JSON field names.
 - Whether `bubblezone` supports Bubble Tea v2 (decides step 3's first task).
 - Release Action details (tag naming, binary naming per OS/arch).
+
+## 8. Prototype verdict (2026-11-11)
+
+Three layouts of the Chats screen were tried on real data (`sto data`), then a
+fourth that merges two. Code: branch `prototype/go-tui`, `tui-prototype/main.go`
+(throwaway; run `cd tui-prototype && go run .` from a project folder).
+
+The winner is **D: section 3's layout plus a state card**:
+
+- Header as section 3 (tabs with counts, arrows, `Sync`, machine).
+- One blank line, then a bordered **state card** across the width: the phrase
+  plus the `Sync` button, the breakdown (`↑ 1 memories` ...) on one line, a dim
+  line `N chats in the cloud you can bring  →` (jumps to Chats filtered by ↓),
+  and the update notice when there is one.
+- One blank line, then the grouped list with the sidebar on the right.
+- **Margins:** 1 line above and below, 2+ columns on each side, content width
+  capped at 150 columns and centered. Without them it read as cramped and
+  overwhelming.
+- **Group titles** say what they are: `my-agentic-os  ·  128 chats  ·  you are
+  here ────`; only the project of the current folder carries `you are here`.
+- Rows: 4 columns of air between the title and the machine.
+
+**The header number counts only what Sync moves.** On real data the Chats tab
+had 175 chats not in sync (171 ↓ old chats only in the cloud, mostly pruned by
+Claude Code or from the other machine; 4 ↑). Sync must not bring 171 old chats
+into `~/.claude`, so: the number and `Sync` count memories, config, skills and
+the ↑ chats to send; the ↓ chats are the separate dim line in the card and are
+brought by hand (one, or a whole project). `status_data` needs that mode for the
+TUI (today, without `--cwd`, it counts no chats at all; with it, only that
+project's).
