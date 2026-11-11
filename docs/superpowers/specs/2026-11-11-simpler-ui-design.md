@@ -220,7 +220,8 @@ fourth that merges two. Code: branch `prototype/go-tui`, `tui-prototype/main.go`
 
 The winner is **D: section 3's layout plus a state card**:
 
-- Header as section 3 (tabs with counts, arrows, `Sync`, machine).
+- Header as section 3 (tabs with counts, arrows, machine) but **without the
+  `Sync` button**: it lives only in the card, twice was redundant.
 - One blank line, then a bordered **state card** across the width: the phrase
   plus the `Sync` button, the breakdown (`↑ 1 memories` ...) on one line, a dim
   line `N chats in the cloud you can bring  →` (jumps to Chats filtered by ↓),
