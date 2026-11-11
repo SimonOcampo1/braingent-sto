@@ -575,6 +575,8 @@ def test_status_data_stays_off_the_network_unless_asked():
         ui.srv.update_status = lambda fetch=True, force=False: seen.append(fetch) or {"available": 1}
         s = ui.status_data()
         assert s["limits"] == [] and s["update"] == 1 and seen == [False]
+        ui.status_data(fetch=True)          # what the band asks: origin only
+        assert seen == [False, False]
     finally:
         _unstub_home(reales)
         ui.srv.usage_snapshot, ui.srv.update_status, ui.update_state = real

@@ -204,7 +204,7 @@ def status_data(cwd=None, fetch=False, limits=False):
     the project, so asking the user for it would be asking what we know.
 
     Nothing here touches the network unless asked: `fetch` refreshes the cloud
-    and the upstream check, `limits` calls the usage API. The band has 30 s.
+    (origin only), `limits` calls the usage API. The band has 30 s.
     """
     sy = srv.sync_status(fetch=fetch)
     up, down = sync_preview(sy)
@@ -222,8 +222,9 @@ def status_data(cwd=None, fetch=False, limits=False):
             "parts": {"down": preview_parts(down), "up": preview_parts(up)},
             "chats": chats, "project": project,
             "fetchError": sy.get("fetchError"),
-            "update": (update_state() if fetch
-                       else srv.update_status(fetch=False)).get("available", 0),
+            # never fetches upstream: with --fetch the origin fetch already
+            # spends half the band's 30 s; `sto update` refreshes the notice
+            "update": srv.update_status(fetch=False).get("available", 0),
             "limits": (srv.usage_snapshot(detail=False).get("limits") or []) if limits else [],
             "machine": srv.LOCAL_MACHINE, "accent": accent_code(),
             "labels": {k: t(k) for k in DATA_LABELS}}
