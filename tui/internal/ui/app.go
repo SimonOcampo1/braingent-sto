@@ -118,16 +118,19 @@ type Model struct {
 
 	read *reader
 
-	confirm bool            // the Sync summary is open
-	marked  map[string]bool // delete targets (kind:name) picked with x
-	del     *deletion       // the question of where to delete, while it is open
-	busy    string          // progress of a running act; keys wait while it is set
-	flash   string
-	failed  bool
-	spin    int // the frame of the spinner beside busy
-	ch      chan tea.Msg
-	folded  [5]map[string]bool
-	fr      *frame
+	confirm  bool            // the Sync summary is open
+	marked   map[string]bool // delete targets (kind:name) picked with x
+	ask      *folderAsk      // the folder of a project, being typed
+	updating bool            // the question before applying a new braingent version
+	limits   []sto.Limit
+	del      *deletion // the question of where to delete, while it is open
+	busy     string    // progress of a running act; keys wait while it is set
+	flash    string
+	failed   bool
+	spin     int // the frame of the spinner beside busy
+	ch       chan tea.Msg
+	folded   [5]map[string]bool
+	fr       *frame
 }
 
 // New is a TUI reading c, run from the folder cwd.
@@ -154,6 +157,8 @@ func (m Model) load(view string, args ...string) tea.Cmd {
 			v = &sto.Tools{}
 		case "settings":
 			v = &sto.Settings{}
+		case "usage": // its own call: the usage API is slow, the status is not
+			v = &sto.Usage{}
 		case "search":
 			v = &sto.Search{}
 		case "detail":
@@ -164,7 +169,7 @@ func (m Model) load(view string, args ...string) tea.Cmd {
 }
 
 func (m Model) loadAll() tea.Cmd {
-	return tea.Batch(m.load("status"), m.load("chats"), m.load("memories"), m.load("tools"), m.load("settings"))
+	return tea.Batch(m.load("status"), m.load("chats"), m.load("memories"), m.load("tools"), m.load("settings"), m.load("usage"))
 }
 
 func (m Model) Init() tea.Cmd { return m.loadAll() }
@@ -187,16 +192,76 @@ func (m *Model) settingItems() []item {
 	if m.set == nil {
 		return nil
 	}
-	accent := m.set.Accent
-	for _, a := range m.set.Accents {
-		if a.Code == m.set.Accent {
-			accent = a.Name
+	prefs, here, mods, cloud := m.L("sec_prefs"), m.L("tui_machine"), m.L("sec_modules"), m.L("sec_remote")
+	its := []item{
+		{kind: "setting", id: "lang", title: m.L("language"), group: prefs},
+		{kind: "setting", id: "accent", title: m.L("accent_color"), group: prefs},
+		{kind: "setting", id: "icon", title: m.L("machine_icon"), group: here},
+		{kind: "setting", id: "color", title: m.L("machine_color"), group: here},
+		{kind: "setting", id: "badge", title: m.L("badge_row"), group: here},
+	}
+	for _, md := range m.set.Modules {
+		its = append(its, item{kind: "setting", id: "module:" + md.ID, title: md.ID, group: mods})
+	}
+	its = append(its, item{kind: "setting", id: "cloud", title: m.L("cloud_is_repo"), group: cloud, desc: m.set.Cloud})
+	for i := range its {
+		if _, cur, labels := m.choices(its[i].id); len(labels) > 0 {
+			its[i].sub = cur
 		}
 	}
-	return []item{
-		{kind: "setting", id: "lang", title: m.L("language"), sub: m.set.Lang},
-		{kind: "setting", id: "accent", title: m.L("accent_color"), sub: accent},
+	return its
+}
+
+// choices is what a setting can be: the values `sto act set` takes, the
+// current one shown, and how each value reads. Empty for one that is only
+// shown (the cloud's URL).
+func (m Model) choices(id string) (opts []string, cur string, labels []string) {
+	s := m.set
+	onOff := func(on bool) ([]string, string, []string) {
+		cur := m.L("off")
+		if on {
+			cur = m.L("on")
+		}
+		return []string{"on", "off"}, cur, []string{m.L("on"), m.L("off")}
 	}
+	switch {
+	case id == "lang":
+		return s.Langs, s.Lang, s.Langs
+	case id == "accent":
+		for _, a := range s.Accents {
+			opts, labels = append(opts, a.Code), append(labels, a.Name)
+			if a.Code == s.Accent {
+				cur = a.Name
+			}
+		}
+		return opts, cur, labels
+	case id == "icon":
+		return s.Icons, s.Look.Icon, s.Icons
+	case id == "color":
+		return s.Colors, s.Look.Color, s.Colors
+	case id == "badge":
+		return onOff(s.Badge)
+	case strings.HasPrefix(id, "module:"):
+		for _, md := range s.Modules {
+			if "module:"+md.ID == id {
+				return onOff(md.Enabled)
+			}
+		}
+	}
+	return nil, "", nil
+}
+
+// changeSetting asks `sto act set` for the setting's next value.
+func (m *Model) changeSetting(id string) tea.Cmd {
+	opts, cur, labels := m.choices(id)
+	if len(opts) == 0 {
+		return nil
+	}
+	next := opts[(slices.Index(labels, cur)+1)%len(opts)]
+	if mod, ok := strings.CutPrefix(id, "module:"); ok {
+		return m.act(m.L("loading"), "set", "module", mod, next)
+	}
+	return m.act(m.L("loading"), "set", id, next)
 }
 
 // rebuild lays tab t out again, keeping the cursor on the same item.
@@ -208,7 +273,7 @@ func (m *Model) rebuild(t int) {
 			here = m.st.Project
 		}
 	case tSettings:
-		its, grouped = m.settingItems(), false
+		its, grouped = m.settingItems(), true
 	case tSearch:
 		if m.kind != "" {
 			its = slices.DeleteFunc(slices.Clone(its), func(it item) bool { return kindOf(it) != m.kind })
@@ -310,22 +375,10 @@ func (m *Model) itemAct() tea.Cmd {
 		return m.act(m.L("loading"), "keep", it.id)
 	case it.kind == "chat" && it.state == "repo":
 		return m.act(m.L("loading"), "resume", it.id)
+	case (it.kind == "skill" || it.kind == "plugin") && it.state == "repo":
+		return m.act(m.L("loading"), "bring", delTarget(it))
 	case it.kind == "setting" && m.set != nil:
-		var opts []string
-		cur := m.set.Lang
-		if it.id == "lang" {
-			opts = m.set.Langs
-		} else {
-			cur = m.set.Accent
-			for _, a := range m.set.Accents {
-				opts = append(opts, a.Code)
-			}
-		}
-		if len(opts) == 0 {
-			return nil
-		}
-		next := opts[(slices.Index(opts, cur)+1)%len(opts)]
-		return m.act(m.L("loading"), "set", it.id, next)
+		return m.changeSetting(it.id)
 	}
 	return nil
 }
@@ -409,6 +462,29 @@ func (m *Model) search() tea.Cmd {
 		return run
 	}
 	return tea.Batch(run, tick())
+}
+
+// folderAsk is the folder of a project being typed in the footer.
+type folderAsk struct{ project, value string }
+
+// askFolder starts typing the folder of the project under the cursor, from
+// the one it has or from where the TUI runs.
+func (m *Model) askFolder() {
+	if m.shown() != tChats || m.chats == nil {
+		return
+	}
+	p := m.title()
+	if it := m.selected(); it != nil {
+		p = it.group
+	}
+	if p == "" {
+		return
+	}
+	v := m.cwd
+	if f := m.chats.Folders[p]; f != nil {
+		v = *f
+	}
+	m.ask = &folderAsk{project: p, value: v}
 }
 
 // deletion is what d is about to delete, waiting for where: this machine
@@ -541,6 +617,8 @@ func (m Model) loadedMsg(msg loaded) (Model, tea.Cmd) {
 	case *sto.Settings:
 		m.set, m.done[tSettings] = v, true
 		m.rebuild(tSettings)
+	case *sto.Usage:
+		m.limits = v.Limits
 	case *sto.Detail:
 		if m.read != nil {
 			m.read.title, m.read.md, m.read.turns = v.Title, v.Markdown, v.Turns
@@ -553,6 +631,30 @@ func (m Model) keyMsg(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	k := msg.String()
 	m.flash = ""
 	switch {
+	case m.ask != nil:
+		switch k {
+		case "esc":
+			m.ask = nil
+		case "enter":
+			a := m.ask
+			m.ask = nil
+			return m, m.act(m.L("loading"), "set-folder", a.project, a.value)
+		case "backspace":
+			if r := []rune(m.ask.value); len(r) > 0 {
+				m.ask.value = string(r[:len(r)-1])
+			}
+		case "ctrl+u":
+			m.ask.value = ""
+		default:
+			m.ask.value += msg.Text
+		}
+		return m, nil
+	case m.updating:
+		m.updating = false
+		if k == "enter" {
+			return m, m.act(m.L("update_available"), "update")
+		}
+		return m, nil
 	case m.del != nil:
 		switch k {
 		case "1":
@@ -627,9 +729,9 @@ func (m Model) keyMsg(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		m.move(10)
 	case "pgup":
 		m.move(-10)
-	case "home", "g":
+	case "home":
 		m.cur().cur = step(m.cur().lines, -1, 1)
-	case "end", "G":
+	case "end":
 		m.cur().cur = step(m.cur().lines, len(m.cur().lines), -1)
 	case "s":
 		m.alpha = !m.alpha
@@ -654,6 +756,12 @@ func (m Model) keyMsg(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		for t := range tSettings {
 			m.rebuild(t)
 		}
+	case "w":
+		m.askFolder()
+	case "u":
+		m.updating = m.st != nil && m.st.Update > 0
+	case "g":
+		return m, m.act(m.L("loading"), "graph")
 	case "x":
 		m.mark()
 	case "d":
@@ -756,6 +864,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.itemAct()
 		case "fold":
 			m.fold(false)
+		case "folder":
+			m.askFolder()
 		case "kind":
 			m.kind = kinds[t.i]
 			m.rebuild(tSearch)
@@ -868,7 +978,7 @@ func (m Model) card(W, ox, y int) []string {
 		body = append(body, ansi.Truncate(strings.Join(parts, "   "), inW, "…"))
 	}
 	if m.st.Update > 0 {
-		body = append(body, ansi.Truncate(acc.Render(n(m.L("update_notice"), m.st.Update))+faint.Render("  → sto update"), inW, "…"))
+		body = append(body, ansi.Truncate(acc.Render(n(m.L("update_notice"), m.st.Update))+faint.Render("  → u"), inW, "…"))
 	}
 	inner := strings.Join(body, "\n")
 	if btn != "" {
@@ -1061,6 +1171,7 @@ func (m Model) side(width, ox, y int) []string {
 			field("tui_machine", it.sub), field("tui_when", ago(it.mtime)), "")
 		if missing {
 			out = append(out, acc.Render("! ")+ansi.Wrap(m.L("folder_missing"), in-2, ""), "")
+			btn(m.L("tui_choose_folder")+"  w", target{"folder", 0})
 		}
 		btn("↵ "+m.L("tui_read"), target{"open", 0})
 		if key := map[string]string{"local": "k_keep", "repo": "k_bring"}[it.state]; key != "" {
@@ -1070,15 +1181,12 @@ func (m Model) side(width, ox, y int) []string {
 		out = append(out, field("tui_project", it.group), field("tui_when", ago(it.mtime)), "", wrap(it.desc), "")
 		btn("↵ "+m.L("tui_read"), target{"open", 0})
 	case it.kind == "setting" && m.set != nil:
-		choices := m.set.Langs
-		cur := m.set.Lang
-		if it.id == "accent" {
-			choices, cur = nil, it.sub
-			for _, a := range m.set.Accents {
-				choices = append(choices, a.Name)
-			}
+		_, cur, labels := m.choices(it.id)
+		if len(labels) == 0 { // shown, not changed: the cloud's URL
+			out = append(out, wrap(it.desc))
+			break
 		}
-		for _, c := range choices {
+		for _, c := range labels {
 			if c == cur {
 				out = append(out, acc.Render("● ")+c)
 			} else {
@@ -1262,8 +1370,14 @@ func (m Model) footer(W int) string {
 	}
 	left := m.hints("j k", "tui_k_move", "↵", "tui_read", "/", "tui_search", "a", "tui_k_action",
 		"S", "act_sync", "x", "tui_k_mark", "d", "tui_k_delete", "space", "tui_k_fold", "c", "tui_k_fold_all", "s", sort, "b", "tui_k_group",
-		"tab", "tui_k_view", "q", "tui_k_quit")
+		"w", "tui_k_folder", "g", "tui_k_graph", "tab", "tui_k_view", "q", "tui_k_quit")
+	if m.st != nil && m.st.Update > 0 { // the one key worth reading first when it applies
+		left = m.hints("u", "tui_k_update") + "   " + left
+	}
 	switch {
+	case m.ask != nil:
+		left = faint.Render(m.L("tui_folder_of")+" "+m.ask.project+": ") + m.ask.value + acc.Render("█") +
+			"   " + m.hints("↵", "tui_k_save", "esc", "tui_k_close")
 	case m.typing:
 		left = acc.Render("/ ") + m.query + acc.Render("█")
 		if m.searchBusy {
@@ -1280,7 +1394,32 @@ func (m Model) footer(W int) string {
 		left = acc.Render("/ "+m.query) + "   " + m.hints("↵", "tui_goto", "f", "tui_k_filter",
 			"space", "tui_k_fold", "s", sort, "esc", "tui_k_close")
 	}
-	return ansi.Truncate(left, W, "…")
+	right := m.usage()
+	return spread(ansi.Truncate(left, max(10, W-lipgloss.Width(right)-3), "…"), faint.Render(right), W)
+}
+
+// usage is the plan's limits as the band shows them: "5h 34% · wk 61%".
+func (m Model) usage() string {
+	var parts []string
+	for _, l := range m.limits {
+		switch l.Kind {
+		case "session":
+			parts = append(parts, fmt.Sprintf("%s %d%%", m.L("mod_5h"), l.Percent))
+		case "weekly_all":
+			parts = append(parts, fmt.Sprintf("%s %d%%", m.L("mod_week"), l.Percent))
+		}
+	}
+	return strings.Join(parts, " · ")
+}
+
+// updateBox asks before applying a new braingent version, showing what it brings.
+func (m Model) updateBox(W, H int) string {
+	lines := []string{bold.Render(m.L("update_available") + fmt.Sprintf(" · %d", m.st.Update)), ""}
+	for _, l := range m.st.UpdateLog {
+		lines = append(lines, faint.Render(ansi.Truncate(l, 70, "…")))
+	}
+	lines = append(lines, "", m.hints("↵", "tui_k_apply", "esc", "tui_k_close"))
+	return lipgloss.Place(W, H, lipgloss.Center, lipgloss.Center, popup.Render(strings.Join(lines, "\n")))
 }
 
 func fit(lines []string, h int) []string {
@@ -1310,6 +1449,8 @@ func (m Model) View() tea.View {
 		content = m.page(W, H)
 	case m.del != nil:
 		content = m.deleteBox(W, H, ox, oy)
+	case m.updating:
+		content = m.updateBox(W, H)
 	case m.confirm && m.st != nil:
 		content = m.summary(W, H, ox, oy)
 	default:
