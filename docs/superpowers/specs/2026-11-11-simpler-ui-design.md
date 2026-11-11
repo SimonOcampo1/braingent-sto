@@ -54,20 +54,22 @@ whose patterns the owner prefers.
 - Commit-level `ahead/behind` is no longer shown anywhere; it is implementation
   and is already counted in the phrase.
 
-**Four item states**, each with a fixed symbol and the same words everywhere:
+**Four item states**, each with a fixed symbol and the same words everywhere. Symbols are
+arrows, geometric shapes and Latin-1 only: `test_no_pictographs_in_the_source` forbids
+U+2600-27BF (check marks, warning signs).
 
 | today | new |
 |---|---|
-| in both | `✓ synced` |
+| in both | `● synced` |
 | only here / local only | `↑ only on this machine` (goes up on Sync) |
 | only in the repo / in repo, not installed | `↓ only in the cloud` -> action `bring` |
-| dropped in the repo | `✗ deleted in the cloud` -> `delete here` or `send again` |
+| dropped in the repo | `× deleted in the cloud` -> `delete here` or `send again` |
 
 **Item verbs:** `bring`, `delete from this machine`, `remove from the cloud`,
 `keep full chat` (explained: "so another machine can resume it").
 
 **Paths:** "path" becomes *"Project folder on this machine"*. `no path`
-becomes `⚠ this project has no folder here — without it you can't resume its
+becomes `! this project has no folder here — without it you can't resume its
 chats` with the action `choose folder`.
 
 All strings live in `scripts/i18n.py`, English and Spanish, as today. The Go
@@ -103,7 +105,7 @@ same functions and cannot disagree.
  braingent   Chats 120   Memories 48   Tools 31   Settings          ↓51 ↑2  [Sync]  ⌂ sto-pc
  ─────────────────────────────────────────────────────────────────────────────────────────────
  my-agentic-os · 42 ────────────────────────────┬─ Fix sync timeout ──────────────────────────
- › Fix sync timeout        sto-pc     2h ago     │ ✓ synced
+ › Fix sync timeout        sto-pc     2h ago     │ ● synced
    TUI redesign            sto-nb     yesterday  │ Project          my-agentic-os
                                                  │ Folder here      ~/repos/my-agentic-os
  gitboard · 7 ──────────────────────────────────│ Machine          sto-pc · 34 prompts
@@ -147,7 +149,7 @@ same functions and cannot disagree.
 braingent  ↓51 ↑2  [Sync]               5h 34% · wk 61% · ctx 12%
 braingent  up to date                   5h 34% · wk 61% · ctx 12%
 braingent  syncing… bringing chats
-braingent  ⚠ couldn't sync: no connection  [retry]
+braingent  ! couldn't sync: no connection  [retry]
 ```
 
 - **One state, one button.** The number is the global pending count (same as
