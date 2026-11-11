@@ -17,7 +17,7 @@ var (
 	panel                                   = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(muted).Padding(0, 1)
 	tabIdle                                 = lipgloss.NewStyle().Foreground(muted).Padding(0, 1)
 	brand, acc, tabActive, button, sel, grp lipgloss.Style
-	popup                                   lipgloss.Style
+	popup, bigButton                        lipgloss.Style
 )
 
 func init() { setAccent("36") }
@@ -35,5 +35,7 @@ func setAccent(code string) {
 	tabActive = lipgloss.NewStyle().Bold(true).Foreground(ink).Background(a).Padding(0, 1)
 	button = tabActive
 	sel = lipgloss.NewStyle().Foreground(ink).Background(a)
+	bigButton = lipgloss.NewStyle().Bold(true).Foreground(ink).Background(a).Padding(0, 4).
+		Align(lipgloss.Center).AlignVertical(lipgloss.Center)
 	popup = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(a).Padding(1, 2)
 }

@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -128,10 +129,63 @@ func TestChangingASettingAsksForTheNextChoice(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("enter on a setting changes it")
 	}
-	if msg := cmd(); msg.(actDone).err != nil {
+	if msg := cmd().(tea.BatchMsg)[0](); msg.(actDone).err != nil { // [1] is the spinner
 		t.Fatal(msg.(actDone).err)
 	}
 	if got, _ := os.ReadFile(log); strings.TrimSpace(string(got)) != "act set lang en" {
 		t.Fatalf("sto got %q", got)
+	}
+}
+
+func TestTheReaderTellsYourTurnsFromClaudes(t *testing.T) {
+	m, _ := press(loadedModel(t), "enter")
+	m.st.Labels["tui_you"], m.st.Labels["tui_claude"] = "you", "Claude"
+	next, _ := m.Update(loaded{"detail", &sto.Detail{Title: "first", Turns: []sto.Turn{
+		{Who: "user", Markdown: "why is it slow"}, {Who: "claude", Markdown: "because of the index"}}}, nil})
+	var mine, theirs string
+	for _, l := range strings.Split(ansi.Strip(next.(Model).View().Content), "\n") {
+		if strings.Contains(l, "why is it slow") {
+			mine = l
+		}
+		if strings.Contains(l, "because of the index") {
+			theirs = l
+		}
+	}
+	// each turn carries its own bar down its left edge, and they differ
+	if !strings.Contains(mine, "▌") || strings.Contains(theirs, "▌") || !strings.Contains(theirs, "│") {
+		t.Fatalf("mine = %q\ntheirs = %q", mine, theirs)
+	}
+}
+
+func TestGroupsFoldOneByOneOrAllAtOnce(t *testing.T) {
+	m := loadedModel(t)
+	m.items[tChats] = append(m.items[tChats], item{kind: "chat", id: "3", title: "third", group: "q", mtime: 0.5})
+	m.rebuild(tChats)
+	if m, _ = press(m, "c"); len(m.lists[tChats].lines) != 2 { // title p, title q
+		t.Fatalf("c folds every group: %v", describe(m.lists[tChats].lines))
+	}
+	m, _ = press(m, "space") // the cursor is on the first title
+	if got := fmt.Sprint(describe(m.lists[tChats].lines)); got != "[title p 2 false first second spacer title q 1 false folded]" {
+		t.Fatalf("space opens the group under the cursor: %v", got)
+	}
+	if m, _ = press(m, "c"); len(m.lists[tChats].lines) != 2 {
+		t.Fatal("c folds them all again while one is open")
+	}
+	if m, _ = press(m, "c"); len(m.lists[tChats].lines) != 6 {
+		t.Fatalf("c opens them all when every one is folded: %v", describe(m.lists[tChats].lines))
+	}
+}
+
+func TestTheSpinnerTurnsWhileAnActRuns(t *testing.T) {
+	m := loadedModel(t)
+	m.busy = "bringing chats"
+	before := m.footer(80)
+	next, cmd := m.Update(tickMsg{})
+	if after := next.(Model).footer(80); after == before || cmd == nil || !strings.Contains(ansi.Strip(after), "bringing chats") {
+		t.Fatalf("before %q, after %q, cmd %v", before, after, cmd)
+	}
+	m.busy = ""
+	if _, cmd := m.Update(tickMsg{}); cmd != nil {
+		t.Fatal("the spinner stops when the act ends")
 	}
 }

@@ -864,6 +864,11 @@ def test_data_detail_turns_a_chat_or_a_memory_into_markdown():
         assert d["title"] == "Fix it"
         md = d["markdown"]
         assert md.index("why?") < md.index("Bash") < md.index("because"), md
+        # the reader tells who spoke: a tool call belongs to Claude's turn
+        assert [x["who"] for x in d["turns"]] == ["user", "claude"], d["turns"]
+        assert d["turns"][0]["markdown"] == "why?"
+        claude = d["turns"][1]["markdown"]
+        assert claude.index("Bash") < claude.index("because"), claude
 
         cli.srv.KNOWLEDGE_MEMORY = Path(tempfile.mkdtemp())
         f = cli.srv.KNOWLEDGE_MEMORY / "my proj" / "pc" / "a-note.md"

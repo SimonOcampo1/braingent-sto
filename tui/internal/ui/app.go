@@ -36,6 +36,15 @@ type loaded struct {
 
 type stepMsg string
 
+type tickMsg struct{}
+
+// spinner turns beside the footer's progress while an act runs.
+var spinner = []string{"◐", "◓", "◑", "◒"}
+
+func tick() tea.Cmd {
+	return tea.Tick(120*time.Millisecond, func(time.Time) tea.Msg { return tickMsg{} })
+}
+
 type actDone struct {
 	msg string
 	err error
@@ -57,6 +66,7 @@ type list struct {
 // reader is a chat, a memory or a note open full screen.
 type reader struct {
 	title, md, err string
+	turns          []sto.Turn
 	lines          []string
 	width, top     int
 }
@@ -91,7 +101,9 @@ type Model struct {
 	busy    string // progress of a running act; keys wait while it is set
 	flash   string
 	failed  bool
+	spin    int // the frame of the spinner beside busy
 	ch      chan tea.Msg
+	folded  [5]map[string]bool
 	fr      *frame
 }
 
@@ -145,7 +157,7 @@ func (m *Model) act(busy string, args ...string) tea.Cmd {
 		msg, err := c.Act(func(s string) { ch <- stepMsg(s) }, args...)
 		ch <- actDone{msg, err}
 	}()
-	return listen(ch)
+	return tea.Batch(listen(ch), tick())
 }
 
 func (m *Model) settingItems() []item {
@@ -181,12 +193,51 @@ func (m *Model) rebuild(t int) {
 		grouped = false
 	}
 	l := &m.lists[t]
-	id := ""
-	if it := l.selected(); it != nil {
-		id = it.id
+	key := l.key()
+	l.lines, l.cur = arrange(its, here, grouped, m.folded[t]), -1
+	l.pick(key)
+}
+
+// key names the line under the cursor across rebuilds: an item's id, or
+// its group title's name behind a NUL no id carries.
+func (l *list) key() string {
+	if l.cur < 0 || l.cur >= len(l.lines) {
+		return ""
 	}
-	l.lines, l.cur = arrange(its, here, grouped), -1
-	l.pick(id)
+	if it := l.lines[l.cur].it; it != nil {
+		return it.id
+	}
+	return "\x00" + l.lines[l.cur].group
+}
+
+// fold opens or closes the group under the cursor; all folds every group,
+// or opens them all when every one is folded already.
+func (m *Model) fold(all bool) {
+	t := m.shown()
+	if t == tSearch || t == tSettings || !m.grouped {
+		return
+	}
+	if m.folded[t] == nil {
+		m.folded[t] = map[string]bool{}
+	}
+	f, l := m.folded[t], &m.lists[t]
+	if all {
+		open := false
+		for _, it := range m.items[t] {
+			open = open || !f[it.group]
+		}
+		for _, it := range m.items[t] {
+			f[it.group] = open
+		}
+	} else if l.cur >= 0 && l.cur < len(l.lines) {
+		g := l.lines[l.cur].group
+		if it := l.lines[l.cur].it; it != nil {
+			g = it.group
+		}
+		f[g] = !f[g]
+		l.cur = slices.IndexFunc(l.lines, func(ln line) bool { return ln.it == nil && ln.group == g })
+	}
+	m.rebuild(t)
 }
 
 func (l *list) selected() *item {
@@ -196,15 +247,18 @@ func (l *list) selected() *item {
 	return nil
 }
 
-// pick puts the cursor on the item with id, or on the first item.
-func (l *list) pick(id string) {
-	for i, ln := range l.lines {
-		if ln.it != nil && ln.it.id == id {
-			l.cur = i
+// pick puts the cursor on the line with key, or on the first item, or on
+// the first title when every group is folded.
+func (l *list) pick(key string) {
+	l.cur = -1
+	for i := range l.lines {
+		if l.cur = i; l.key() == key {
 			return
 		}
 	}
-	l.cur = step(l.lines, -1, 1)
+	if l.cur = slices.IndexFunc(l.lines, func(ln line) bool { return ln.it != nil }); l.cur < 0 {
+		l.cur = step(l.lines, -1, 1)
+	}
 }
 
 // shown is the list on screen: the search results, or the tab's.
@@ -255,7 +309,8 @@ func (m *Model) itemAct() tea.Cmd {
 // opens in the reader, a setting changes.
 func (m *Model) open() tea.Cmd {
 	it := m.selected()
-	if it == nil {
+	if it == nil { // a group title
+		m.fold(false)
 		return nil
 	}
 	if m.searching && it.tab >= 0 {
@@ -337,7 +392,7 @@ func (m Model) loadedMsg(msg loaded) (Model, tea.Cmd) {
 		m.rebuild(tSearch)
 	case *sto.Detail:
 		if m.read != nil {
-			m.read.title, m.read.md = v.Title, v.Markdown
+			m.read.title, m.read.md, m.read.turns = v.Title, v.Markdown, v.Turns
 		}
 	}
 	return m, nil
@@ -413,6 +468,10 @@ func (m Model) keyMsg(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		return m, m.open()
 	case "/":
 		m.searching, m.typing, m.query = true, true, ""
+	case "space", " ":
+		m.fold(false)
+	case "c":
+		m.fold(true)
 	case "b":
 		m.grouped = !m.grouped
 		for t := range tSettings {
@@ -439,6 +498,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.w, m.h = msg.Width, msg.Height
 	case loaded:
 		return m.loadedMsg(msg)
+	case tickMsg:
+		if m.busy != "" {
+			m.spin++
+			return m, tick()
+		}
 	case stepMsg:
 		m.busy = string(msg)
 		return m, listen(m.ch)
@@ -481,7 +545,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "tab":
 			m.tab, m.searching, m.typing = t.i, false, false
 		case "row":
-			m.cur().cur = t.i
+			if m.cur().cur = t.i; m.selected() == nil {
+				m.fold(false)
+			}
 		case "sync":
 			m.openSync()
 		case "bring":
@@ -489,6 +555,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.rebuild(tChats)
 		case "item":
 			return m, m.itemAct()
+		case "fold":
+			m.fold(false)
 		case "open":
 			return m, m.open()
 		}
@@ -576,13 +644,14 @@ func (m Model) card(W, ox, y int) []string {
 	if m.st == nil {
 		return []string{faint.Render(" " + strings.Join(append([]string{m.L("loading")}, m.errs...), "  "))}
 	}
-	first := bold.Render(m.st.Phrase)
+	// the Sync button is a block at the card's right, as tall as the card,
+	// its key under the word: it is the one thing on the screen to press
+	var btn string
 	if m.st.State == "pending" {
-		b := button.Render(m.L("act_sync"))
-		m.fr.hits.add(ox+2+lipgloss.Width(first)+3, y+1, lipgloss.Width(b), target{"sync", 0})
-		first += "   " + b
+		btn = bigButton.Render(m.L("act_sync") + "\n" + "S")
 	}
-	body := []string{first}
+	inW := W - 4 - lipgloss.Width(btn) - 2*min(1, lipgloss.Width(btn))
+	body := []string{bold.Render(m.st.Phrase)}
 	var parts []string
 	for _, p := range m.st.Parts.Down {
 		parts = append(parts, acc.Render("↓ ")+p)
@@ -594,17 +663,27 @@ func (m Model) card(W, ox, y int) []string {
 		parts = append(parts, acc.Render("↑ ")+n(m.L("tui_n_chats"), v))
 	}
 	if len(parts) > 0 {
-		body = append(body, ansi.Truncate(strings.Join(parts, "   "), W-4, "…"))
+		body = append(body, ansi.Truncate(strings.Join(parts, "   "), inW, "…"))
 	}
 	if v := m.st.ToBring; v > 0 {
-		t := n(m.L("tui_to_bring"), v) + "  →"
+		t := ansi.Truncate(n(m.L("tui_to_bring"), v)+"  →", inW, "…")
 		m.fr.hits.add(ox+2, y+1+len(body), lipgloss.Width(t), target{"bring", 0})
 		body = append(body, faint.Render(t))
 	}
 	if m.st.Update > 0 {
-		body = append(body, acc.Render(n(m.L("update_notice"), m.st.Update))+faint.Render("  → sto update"))
+		body = append(body, ansi.Truncate(acc.Render(n(m.L("update_notice"), m.st.Update))+faint.Render("  → sto update"), inW, "…"))
 	}
-	return strings.Split(panel.Width(W).Render(strings.Join(body, "\n")), "\n")
+	inner := strings.Join(body, "\n")
+	if btn != "" {
+		h := max(len(body), 3)
+		btn = bigButton.Height(h).Render(m.L("act_sync") + "\n" + "S")
+		bx := ox + 2 + inW + 2
+		for r := range h {
+			m.fr.hits.add(bx, y+1+r, lipgloss.Width(btn), target{"sync", 0})
+		}
+		inner = lipgloss.JoinHorizontal(lipgloss.Top, lipgloss.NewStyle().Width(inW).Height(h).Render(inner), "  ", btn)
+	}
+	return strings.Split(panel.Width(W).Render(inner), "\n")
 }
 
 // tail is the item's columns after the title, each with its width; they
@@ -657,8 +736,12 @@ func sum(xs []int) (s int) {
 	return
 }
 
-func (m Model) titleRow(l line, width int) string {
-	t := l.group
+func (m Model) titleRow(l line, width int, on bool) string {
+	mark := "▾ "
+	if l.folded {
+		mark = "▸ "
+	}
+	t := mark + l.group
 	if m.shown() == tChats {
 		t += "  ·  " + n(m.L("tui_n_chats"), l.count)
 		if l.here {
@@ -668,6 +751,9 @@ func (m Model) titleRow(l line, width int) string {
 		t += "  ·  " + fmt.Sprint(l.count)
 	}
 	t = ansi.Truncate(t, width-4, "…")
+	if on {
+		return sel.Render(" " + t + " " + strings.Repeat("─", max(0, width-lipgloss.Width(t)-2)))
+	}
 	return grp.Render(" "+t) + " " + faint.Render(strings.Repeat("─", max(0, width-lipgloss.Width(t)-2)))
 }
 
@@ -703,7 +789,8 @@ func (m Model) list(width, height, ox, y int) []string {
 			m.fr.hits.add(ox, y+len(out), width, target{"row", i})
 			out = append(out, m.row(ln.it, width, i == l.cur))
 		case ln.group != "":
-			out = append(out, m.titleRow(ln, width))
+			m.fr.hits.add(ox, y+len(out), width, target{"row", i})
+			out = append(out, m.titleRow(ln, width, i == l.cur))
 		default:
 			out = append(out, "")
 		}
@@ -714,10 +801,18 @@ func (m Model) list(width, height, ox, y int) []string {
 // side explains the selected item and holds its actions as buttons.
 func (m Model) side(width, ox, y int) []string {
 	it := m.selected()
-	if it == nil {
-		return nil
-	}
 	in := width - 4 // border and padding
+	if it == nil { // a group title: what it holds and how to open it
+		l := m.cur()
+		if l.cur < 0 || l.cur >= len(l.lines) {
+			return nil
+		}
+		g := l.lines[l.cur]
+		b := button.Render(m.L("tui_fold"))
+		m.fr.hits.add(ox+2, y+1+3, lipgloss.Width(b), target{"fold", 0})
+		return []string{bold.Render(ansi.Truncate(g.group, in, "…")), faint.Render(fmt.Sprint(g.count)), "",
+			b + faint.Render("  ↵ / space"), "", faint.Render("c  " + m.L("tui_fold_all"))}
+	}
 	field := func(k, v string) string {
 		label := ansi.Truncate(m.L(k), 12, "")
 		return faint.Render(label+strings.Repeat(" ", 13-lipgloss.Width(label))) + ansi.Truncate(v, max(4, in-13), "…")
@@ -734,7 +829,7 @@ func (m Model) side(width, ox, y int) []string {
 	switch {
 	case m.searching:
 		out = append(out, faint.Render(it.kind+"  ·  "+it.sub))
-		btn("↵", target{"open", 0})
+		btn("↵ "+m.L("tui_goto"), target{"open", 0})
 	case it.kind == "chat":
 		folder, missing := "—", true
 		if f := m.chats.Folders[it.group]; f != nil {
@@ -745,13 +840,13 @@ func (m Model) side(width, ox, y int) []string {
 		if missing {
 			out = append(out, acc.Render("! ")+ansi.Wrap(m.L("folder_missing"), in-2, ""), "")
 		}
-		btn("↵", target{"open", 0})
+		btn("↵ "+m.L("tui_read"), target{"open", 0})
 		if key := map[string]string{"local": "k_keep", "repo": "k_bring"}[it.state]; key != "" {
 			btn(m.L(key), target{"item", 0})
 		}
 	case it.kind == "memory":
 		out = append(out, field("tui_project", it.group), field("tui_when", ago(it.mtime)), "", wrap(it.desc), "")
-		btn("↵", target{"open", 0})
+		btn("↵ "+m.L("tui_read"), target{"open", 0})
 	case it.kind == "setting" && m.set != nil:
 		choices := m.set.Langs
 		cur := m.set.Lang
@@ -819,17 +914,9 @@ func (m Model) page(W, H int) string {
 	switch {
 	case r.err != "":
 		body = []string{errStyle.Render(" ! " + r.err)}
-	case r.md != "":
+	case r.md != "" || len(r.turns) > 0:
 		if r.width != W {
-			r.width, r.lines = W, nil
-			gr, err := glamour.NewTermRenderer(glamour.WithStandardStyle("dark"), glamour.WithWordWrap(max(20, W-4)))
-			out := r.md
-			if err == nil {
-				if s, err := gr.Render(r.md); err == nil {
-					out = s
-				}
-			}
-			r.lines = strings.Split(strings.TrimRight(out, "\n"), "\n")
+			r.width, r.lines = W, m.render(r, W)
 		}
 		r.top = max(0, min(r.top, len(r.lines)-(H-3)))
 		body = r.lines[r.top:min(len(r.lines), r.top+H-3)]
@@ -839,13 +926,48 @@ func (m Model) page(W, H int) string {
 	return strings.Join(append(append([]string{head, ""}, fit(body, H-3)...), faint.Render(m.L("tui_reader_keys"))), "\n")
 }
 
+// render lays the reader's text out at width W, through Glamour. A chat's
+// turns each get a bar down their left edge: the accent's ▌ for yours, a
+// faint │ for Claude's, under the name of who spoke.
+func (m Model) render(r *reader, W int) []string {
+	w := W - 4
+	if len(r.turns) > 0 {
+		w = W - 8 // the bar and Glamour's own margin
+	}
+	gr, err := glamour.NewTermRenderer(glamour.WithStandardStyle("dark"), glamour.WithWordWrap(max(20, w)))
+	md := func(text string) []string {
+		if err == nil {
+			if s, err := gr.Render(text); err == nil {
+				text = strings.Trim(s, "\n")
+			}
+		}
+		return strings.Split(text, "\n")
+	}
+	if len(r.turns) == 0 {
+		return md(r.md)
+	}
+	var out []string
+	for _, t := range r.turns {
+		bar, who := faint.Render("│ "), bold.Render(m.L("tui_claude"))
+		if t.Who == "user" {
+			bar, who = acc.Render("▌ "), acc.Bold(true).Render(m.L("tui_you"))
+		}
+		out = append(out, bar+who)
+		for _, l := range md(t.Markdown) {
+			out = append(out, bar+l)
+		}
+		out = append(out, "")
+	}
+	return out
+}
+
 func (m Model) footer(W int) string {
 	left := faint.Render(m.L("tui_keys"))
 	switch {
 	case m.typing:
 		left = acc.Render("/ ") + m.query + acc.Render("█") + faint.Render("   ↵  esc")
 	case m.busy != "":
-		left = acc.Render(m.busy)
+		left = acc.Render(spinner[m.spin%len(spinner)] + " " + m.busy)
 	case m.flash != "" && m.failed:
 		left = errStyle.Render("! " + m.flash)
 	case m.flash != "":
