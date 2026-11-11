@@ -121,10 +121,18 @@ type Search struct {
 	Hits []Hit `json:"hits"`
 }
 
-// Detail is `sto data detail <kind> <id>`: what the reader shows.
+// Turn is one turn of a chat: Who is "user" or "claude".
+type Turn struct {
+	Who      string `json:"who"`
+	Markdown string `json:"markdown"`
+}
+
+// Detail is `sto data detail <kind> <id>`: what the reader shows. A chat
+// comes in Turns too, so the reader can tell who spoke.
 type Detail struct {
 	Title    string `json:"title"`
 	Markdown string `json:"markdown"`
+	Turns    []Turn `json:"turns"`
 }
 
 // engineErr is the `{"error": ...}` every sto answer may be instead.

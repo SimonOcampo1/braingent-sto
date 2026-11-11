@@ -887,21 +887,27 @@ def _data_chats():
                         for p in sorted({r["project"] for r in rows})}}
 
 
-def _chat_md(row):
-    """One transcript as markdown for the TUI's reader: who spoke, in bold,
-    and the tool calls quoted so they read as asides."""
-    out = []
+def _chat_turns(row):
+    """One transcript as turns for the TUI's reader, each `{who, markdown}`:
+    `user` or `claude`. Tool calls, images and errors are quoted inside
+    Claude's turn, so they read as asides of the one who made them."""
+    turns = []
     for it in srv.session_timeline(Path(row["path"]))["timeline"]:
         role = it["role"]
-        if role in ("user", "assistant"):
-            out.append(f"**{t('cli_you' if role == 'user' else 'cli_claude').lstrip('> ')}**\n\n{it['text']}")
-        elif role == "tool":
-            out.append(f"> \u203a {it['tool']}  {it.get('detail', '')[:120]}")
-        elif role == "image":
-            out.append("> " + t("cli_image"))
-        elif role == "error":
-            out.append(f"> \u00d7 {it['text'][:400]}")
-    return "\n\n".join(out)
+        if role == "user":
+            turns.append({"who": "user", "markdown": it["text"]})
+            continue
+        text = {"assistant": lambda: it["text"],
+                "tool": lambda: f"> \u203a {it['tool']}  {it.get('detail', '')[:120]}",
+                "image": lambda: "> " + t("cli_image"),
+                "error": lambda: f"> \u00d7 {it['text'][:400]}"}.get(role, lambda: "")()
+        if not text:
+            continue
+        if turns and turns[-1]["who"] == "claude":
+            turns[-1]["markdown"] += "\n\n" + text
+        else:
+            turns.append({"who": "claude", "markdown": text})
+    return turns
 
 
 def _inside(path, root):
@@ -914,7 +920,11 @@ def _data_detail(kind="", ref=""):
     """sto data detail chat <id> | memory <project>/<machine>/<slug> | note <path>"""
     if kind == "chat":
         row, err = resolve_id(ref, cached_sessions()[0]) if ref else (None, t("cli_use_show"))
-        return {"error": err} if err else {"title": row["title"], "markdown": _chat_md(row)}
+        if err:
+            return {"error": err}
+        turns = _chat_turns(row)
+        return {"title": row["title"], "turns": turns,
+                "markdown": "\n\n".join(x["markdown"] for x in turns)}
     if kind == "memory":
         parts = ref.rsplit("/", 2)
         f = len(parts) == 3 and _inside(srv.KNOWLEDGE_MEMORY / parts[0] / parts[1]

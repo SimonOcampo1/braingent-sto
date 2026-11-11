@@ -15,6 +15,9 @@ func describe(ls []line) []string {
 			out = append(out, l.it.title)
 		case l.group != "":
 			out = append(out, fmt.Sprintf("title %s %d %v", l.group, l.count, l.here))
+			if l.folded {
+				out[len(out)-1] += " folded"
+			}
 		default:
 			out = append(out, "spacer")
 		}
@@ -29,12 +32,12 @@ func TestArrangeGroupsNewestFirst(t *testing.T) {
 		{title: "mid a", group: "a", mtime: 3},
 		{title: "old b", group: "b", mtime: 2},
 	}
-	got := fmt.Sprint(describe(arrange(its, "a", true)))
+	got := fmt.Sprint(describe(arrange(its, "a", true, nil)))
 	want := fmt.Sprint([]string{"title b 2 false", "new b", "old b", "spacer", "title a 2 true", "mid a", "old a"})
 	if got != want {
 		t.Fatalf("grouped = %v\nwant      %v", got, want)
 	}
-	got = fmt.Sprint(describe(arrange(its, "a", false)))
+	got = fmt.Sprint(describe(arrange(its, "a", false, nil)))
 	if want := fmt.Sprint([]string{"new b", "mid a", "old b", "old a"}); got != want {
 		t.Fatalf("flat = %v, want %v", got, want)
 	}
@@ -42,19 +45,27 @@ func TestArrangeGroupsNewestFirst(t *testing.T) {
 
 func TestArrangeKeepsTheGivenOrderWhenNothingHasATime(t *testing.T) {
 	its := []item{{title: "x", group: "Skills"}, {title: "y", group: "Skills"}, {title: "p", group: "Plugins"}}
-	got := fmt.Sprint(describe(arrange(its, "", true)))
+	got := fmt.Sprint(describe(arrange(its, "", true, nil)))
 	if want := fmt.Sprint([]string{"title Skills 2 false", "x", "y", "spacer", "title Plugins 1 false", "p"}); got != want {
 		t.Fatalf("got %v, want %v", got, want)
 	}
 }
 
-func TestStepSkipsTitlesAndSpacers(t *testing.T) {
-	ls := arrange([]item{{title: "x", group: "a", mtime: 2}, {title: "y", group: "b", mtime: 1}}, "", true)
+func TestStepStopsOnItemsAndTitlesButNotSpacers(t *testing.T) {
+	ls := arrange([]item{{title: "x", group: "a", mtime: 2}, {title: "y", group: "b", mtime: 1}}, "", true, nil)
 	// title a, x, spacer, title b, y
-	for _, c := range []struct{ from, dir, want int }{{-1, 1, 1}, {1, 1, 4}, {4, 1, 4}, {1, -1, 1}} {
+	for _, c := range []struct{ from, dir, want int }{{-1, 1, 0}, {1, 1, 3}, {4, 1, 4}, {3, -1, 1}, {0, -1, 0}} {
 		if got := step(ls, c.from, c.dir); got != c.want {
 			t.Errorf("step(%d, %d) = %d, want %d", c.from, c.dir, got, c.want)
 		}
+	}
+}
+
+func TestAFoldedGroupKeepsItsTitleAndHidesItsItems(t *testing.T) {
+	its := []item{{title: "x", group: "a", mtime: 2}, {title: "y", group: "b", mtime: 1}}
+	got := fmt.Sprint(describe(arrange(its, "", true, map[string]bool{"a": true})))
+	if want := fmt.Sprint([]string{"title a 1 false folded", "title b 1 false", "y"}); got != want {
+		t.Fatalf("got %v, want %v", got, want)
 	}
 }
 

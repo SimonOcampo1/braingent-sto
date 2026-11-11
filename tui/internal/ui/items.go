@@ -23,18 +23,21 @@ type item struct {
 }
 
 // line is one row of a list: an item, a group title (group set, it nil) or
-// the blank spacer between groups (both empty). Only items are selected.
+// the blank spacer between groups (both empty). Items and titles are
+// selected; a title opens and closes its group.
 type line struct {
-	it    *item
-	group string
-	count int
-	here  bool // the title of the project of the folder the TUI runs in
+	it     *item
+	group  string
+	count  int
+	here   bool // the title of the project of the folder the TUI runs in
+	folded bool // the title of a group whose items are hidden
 }
 
 // arrange orders items newest first, keeping the given order among equal
 // times; grouped, it puts each group under a title, the group with the
-// newest item first, a spacer between groups.
-func arrange(its []item, here string, grouped bool) []line {
+// newest item first, a spacer between groups, and leaves the items of the
+// folded groups out.
+func arrange(its []item, here string, grouped bool, folded map[string]bool) []line {
 	its = append([]item(nil), its...)
 	latest, count, first := map[string]float64{}, map[string]int{}, map[string]int{}
 	for i, it := range its {
@@ -58,21 +61,23 @@ func arrange(its []item, here string, grouped bool) []line {
 	for i := range its {
 		g := its[i].group
 		if grouped && (i == 0 || its[i-1].group != g) {
-			if i > 0 {
+			if i > 0 && !folded[its[i-1].group] { // folded titles stack, a list of what there is
 				out = append(out, line{})
 			}
-			out = append(out, line{group: g, count: count[g], here: g == here})
+			out = append(out, line{group: g, count: count[g], here: g == here, folded: folded[g]})
 		}
-		out = append(out, line{it: &its[i]})
+		if !grouped || !folded[g] {
+			out = append(out, line{it: &its[i]})
+		}
 	}
 	return out
 }
 
-// step moves from index i by dir to the next item, skipping titles and
+// step moves from index i by dir to the next item or title, skipping
 // spacers; at either end it stays on i.
 func step(ls []line, i, dir int) int {
 	for j := i + dir; j >= 0 && j < len(ls); j += dir {
-		if ls[j].it != nil {
+		if ls[j].it != nil || ls[j].group != "" {
 			return j
 		}
 	}
