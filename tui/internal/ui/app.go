@@ -672,11 +672,11 @@ func (m Model) card(W, ox, y int) []string {
 	if m.st == nil {
 		return []string{faint.Render(" " + strings.Join(append([]string{m.L("loading")}, m.errs...), "  "))}
 	}
-	// the Sync button is a block at the card's right, as tall as the card,
-	// its key under the word: it is the one thing on the screen to press
+	// the Sync button is a block at the card's right, as tall as the card:
+	// it is the one thing on the screen to press (its key, S, is in the footer)
 	var btn string
 	if m.st.State == "pending" {
-		btn = bigButton.Render(m.L("act_sync") + "\n" + "S")
+		btn = bigButton.Render(m.L("act_sync"))
 	}
 	inW := W - 4 - lipgloss.Width(btn) - 2*min(1, lipgloss.Width(btn))
 	body := []string{bold.Render(m.st.Phrase)}
@@ -699,7 +699,7 @@ func (m Model) card(W, ox, y int) []string {
 	inner := strings.Join(body, "\n")
 	if btn != "" {
 		h := max(len(body), 3)
-		btn = bigButton.Height(h).Render(m.L("act_sync") + "\n" + "S")
+		btn = bigButton.Height(h).Render(m.L("act_sync"))
 		bx := ox + 2 + inW + 2
 		for r := range h {
 			m.fr.hits.add(bx, y+1+r, lipgloss.Width(btn), target{"sync", 0})
