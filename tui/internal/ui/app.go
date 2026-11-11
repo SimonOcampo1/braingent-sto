@@ -6,10 +6,12 @@ package ui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/glamour/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
@@ -21,6 +23,7 @@ const (
 	tMemories
 	tTools
 	tSettings
+	tSearch // not a tab: the results of `/`, shown in place of the tab's list
 )
 
 var tabKeys = [4]string{"tui_chats", "tui_memories", "tui_tools", "tui_settings"}
@@ -39,11 +42,23 @@ type actDone struct {
 }
 
 // frame is what View learns about the screen and Update needs back: where
-// each clickable thing is, and how far the list is scrolled. View has a
+// each clickable thing is, and how far each list is scrolled. View has a
 // value receiver, so it lives behind a pointer.
 type frame struct {
 	hits hits
-	top  int
+	top  [5]int
+}
+
+type list struct {
+	lines []line
+	cur   int
+}
+
+// reader is a chat, a memory or a note open full screen.
+type reader struct {
+	title, md, err string
+	lines          []string
+	width, top     int
 }
 
 // Model is the whole TUI state.
@@ -55,13 +70,22 @@ type Model struct {
 	tab    int
 	st     *sto.Status
 	chats  *sto.Chats
+	set    *sto.Settings
+	tools  *sto.Tools
+	items  [5][]item
+	done   [5]bool // the list has loaded, even if it came back empty
+	lists  [5]list
 	counts [4]int // -1 until loaded; Settings has none
 	errs   []string
 
 	grouped bool
 	only    string // "repo" after the card's "chats you can bring" line; esc clears it
-	lines   []line
-	cur     int
+
+	searching bool // the results of `/` replace the tab's list
+	typing    bool // the query is being written
+	query     string
+
+	read *reader
 
 	confirm bool   // the Sync summary is open
 	busy    string // progress of a running act; keys wait while it is set
@@ -78,40 +102,45 @@ func New(c sto.Client, cwd string) Model {
 
 func (m Model) L(key string) string { return m.st.L(key) }
 
-func (m Model) load(view string) tea.Cmd {
+func n(label string, v int) string { return strings.ReplaceAll(label, "{n}", fmt.Sprint(v)) }
+
+func (m Model) load(view string, args ...string) tea.Cmd {
 	c, cwd := m.c, m.cwd
 	return func() tea.Msg {
 		var v any
-		var err error
 		switch view {
 		case "status":
-			s := &sto.Status{}
-			err, v = c.Data(s, "status", "--all", "--cwd", cwd), s
+			v, args = &sto.Status{}, []string{"--all", "--cwd", cwd}
 		case "chats":
-			s := &sto.Chats{}
-			err, v = c.Data(s, "chats"), s
+			v = &sto.Chats{}
 		case "memories":
-			s := &sto.Memories{}
-			err, v = c.Data(s, "memories"), s
+			v = &sto.Memories{}
 		case "tools":
-			s := &sto.Tools{}
-			err, v = c.Data(s, "tools"), s
+			v = &sto.Tools{}
+		case "settings":
+			v = &sto.Settings{}
+		case "search":
+			v = &sto.Search{}
+		case "detail":
+			v = &sto.Detail{}
 		}
-		return loaded{view, v, err}
+		return loaded{view, v, c.Data(v, view, args...)}
 	}
 }
 
-func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.load("status"), m.load("chats"), m.load("memories"), m.load("tools"))
+func (m Model) loadAll() tea.Cmd {
+	return tea.Batch(m.load("status"), m.load("chats"), m.load("memories"), m.load("tools"), m.load("settings"))
 }
+
+func (m Model) Init() tea.Cmd { return m.loadAll() }
 
 func listen(ch chan tea.Msg) tea.Cmd { return func() tea.Msg { return <-ch } }
 
 // act runs `sto act args...`, its progress arriving as stepMsg and its end
-// as actDone.
-func (m *Model) act(args ...string) tea.Cmd {
+// as actDone; busy is what the footer says meanwhile.
+func (m *Model) act(busy string, args ...string) tea.Cmd {
 	c, ch := m.c, make(chan tea.Msg, 16)
-	m.ch, m.busy, m.flash = ch, m.L("mod_syncing"), ""
+	m.ch, m.busy, m.flash = ch, busy, ""
 	go func() {
 		msg, err := c.Act(func(s string) { ch <- stepMsg(s) }, args...)
 		ch <- actDone{msg, err}
@@ -119,58 +148,131 @@ func (m *Model) act(args ...string) tea.Cmd {
 	return listen(ch)
 }
 
-// rebuild lays the chats out again, keeping the cursor on the same chat.
-func (m *Model) rebuild() {
-	if m.chats == nil {
-		return
+func (m *Model) settingItems() []item {
+	if m.set == nil {
+		return nil
 	}
-	id := ""
-	if c := m.selected(); c != nil {
-		id = c.ID
-	}
-	rows := m.chats.Rows
-	if m.only != "" {
-		rows = nil
-		for _, r := range m.chats.Rows {
-			if r.State == m.only {
-				rows = append(rows, r)
-			}
+	accent := m.set.Accent
+	for _, a := range m.set.Accents {
+		if a.Code == m.set.Accent {
+			accent = a.Name
 		}
 	}
-	here := ""
-	if m.st != nil {
-		here = m.st.Project
-	}
-	m.lines, m.cur = arrange(rows, here, m.grouped), -1
-	for i, l := range m.lines {
-		if l.chat != nil && l.chat.ID == id {
-			m.cur = i
-		}
-	}
-	if m.cur < 0 {
-		m.cur = step(m.lines, -1, 1)
+	return []item{
+		{kind: "setting", id: "lang", title: m.L("language"), sub: m.set.Lang},
+		{kind: "setting", id: "accent", title: m.L("accent_color"), sub: accent},
 	}
 }
 
-func (m *Model) selected() *sto.Chat {
-	if m.cur >= 0 && m.cur < len(m.lines) {
-		return m.lines[m.cur].chat
+// rebuild lays tab t out again, keeping the cursor on the same item.
+func (m *Model) rebuild(t int) {
+	its, here, grouped := m.items[t], "", m.grouped
+	switch t {
+	case tChats:
+		if m.st != nil {
+			here = m.st.Project
+		}
+		if m.only != "" {
+			its = slices.DeleteFunc(slices.Clone(its), func(it item) bool { return it.state != m.only })
+		}
+	case tSettings:
+		its, grouped = m.settingItems(), false
+	case tSearch:
+		grouped = false
+	}
+	l := &m.lists[t]
+	id := ""
+	if it := l.selected(); it != nil {
+		id = it.id
+	}
+	l.lines, l.cur = arrange(its, here, grouped), -1
+	l.pick(id)
+}
+
+func (l *list) selected() *item {
+	if l.cur >= 0 && l.cur < len(l.lines) {
+		return l.lines[l.cur].it
 	}
 	return nil
 }
 
-// itemAct is the one thing the selected chat can do from here: keep a chat
-// only on this machine, bring one only in the cloud.
+// pick puts the cursor on the item with id, or on the first item.
+func (l *list) pick(id string) {
+	for i, ln := range l.lines {
+		if ln.it != nil && ln.it.id == id {
+			l.cur = i
+			return
+		}
+	}
+	l.cur = step(l.lines, -1, 1)
+}
+
+// shown is the list on screen: the search results, or the tab's.
+func (m *Model) shown() int {
+	if m.searching {
+		return tSearch
+	}
+	return m.tab
+}
+
+func (m *Model) cur() *list { return &m.lists[m.shown()] }
+
+func (m *Model) selected() *item { return m.cur().selected() }
+
+// itemAct is the one thing the selected item can do from here: keep a chat
+// only on this machine, bring one only in the cloud, change a setting.
 func (m *Model) itemAct() tea.Cmd {
-	c := m.selected()
-	if c == nil {
+	it := m.selected()
+	if it == nil {
 		return nil
 	}
-	switch c.State {
-	case "local":
-		return m.act("keep", c.ID)
-	case "repo":
-		return m.act("resume", c.ID)
+	switch {
+	case it.kind == "chat" && it.state == "local":
+		return m.act(m.L("loading"), "keep", it.id)
+	case it.kind == "chat" && it.state == "repo":
+		return m.act(m.L("loading"), "resume", it.id)
+	case it.kind == "setting" && m.set != nil:
+		var opts []string
+		cur := m.set.Lang
+		if it.id == "lang" {
+			opts = m.set.Langs
+		} else {
+			cur = m.set.Accent
+			for _, a := range m.set.Accents {
+				opts = append(opts, a.Code)
+			}
+		}
+		if len(opts) == 0 {
+			return nil
+		}
+		next := opts[(slices.Index(opts, cur)+1)%len(opts)]
+		return m.act(m.L("loading"), "set", it.id, next)
+	}
+	return nil
+}
+
+// open is Enter: a search hit jumps to its tab, a chat, memory or note
+// opens in the reader, a setting changes.
+func (m *Model) open() tea.Cmd {
+	it := m.selected()
+	if it == nil {
+		return nil
+	}
+	if m.searching && it.tab >= 0 {
+		m.searching, m.tab = false, it.tab
+		if it.tab == tChats {
+			m.only = ""
+			m.rebuild(tChats)
+		}
+		m.lists[it.tab].pick(it.id)
+		return nil
+	}
+	switch it.kind {
+	case "chat", "memory", "note":
+		m.read = &reader{title: it.title}
+		return m.load("detail", it.kind, it.id)
+	case "setting":
+		return m.itemAct()
 	}
 	return nil
 }
@@ -181,31 +283,162 @@ func (m *Model) openSync() {
 	}
 }
 
+func (m *Model) move(d int) {
+	if m.read != nil {
+		m.read.top = max(0, m.read.top+d)
+		return
+	}
+	l := m.cur()
+	for range max(d, -d) {
+		l.cur = step(l.lines, l.cur, max(-1, min(1, d)))
+	}
+}
+
+func (m *Model) relabelTools() {
+	if m.tools == nil {
+		return
+	}
+	m.items[tTools] = toolItems(m.tools, m.L("tab_skills"), m.L("tui_plugins"))
+	m.counts[tTools], m.done[tTools] = len(m.items[tTools]), true
+	m.rebuild(tTools)
+}
+
+func (m Model) loadedMsg(msg loaded) (Model, tea.Cmd) {
+	if msg.err != nil {
+		if msg.view == "detail" && m.read != nil {
+			m.read.err = msg.err.Error()
+		} else {
+			m.errs = append(m.errs, msg.view+": "+msg.err.Error())
+		}
+		return m, nil
+	}
+	switch v := msg.v.(type) {
+	case *sto.Status:
+		m.st = v
+		setAccent(v.Accent)
+		m.relabelTools() // its group titles are labels
+		m.rebuild(tChats)
+		m.rebuild(tSettings)
+	case *sto.Chats:
+		m.chats, m.counts[tChats], m.items[tChats], m.done[tChats] = v, len(v.Rows), chatItems(v), true
+		m.rebuild(tChats)
+	case *sto.Memories:
+		m.items[tMemories] = memoryItems(v)
+		m.counts[tMemories], m.done[tMemories] = len(m.items[tMemories]), true
+		m.rebuild(tMemories)
+	case *sto.Tools:
+		m.tools = v
+		m.relabelTools()
+	case *sto.Settings:
+		m.set, m.done[tSettings] = v, true
+		m.rebuild(tSettings)
+	case *sto.Search:
+		m.items[tSearch], m.done[tSearch] = hitItems(v.Hits, m.tab), true
+		m.rebuild(tSearch)
+	case *sto.Detail:
+		if m.read != nil {
+			m.read.title, m.read.md = v.Title, v.Markdown
+		}
+	}
+	return m, nil
+}
+
+func (m Model) keyMsg(msg tea.KeyPressMsg) (Model, tea.Cmd) {
+	k := msg.String()
+	m.flash = ""
+	switch {
+	case m.confirm:
+		m.confirm = false
+		if k == "enter" {
+			return m, m.act(m.L("mod_syncing"), "sync", "--all")
+		}
+		return m, nil
+	case m.typing:
+		switch k {
+		case "esc":
+			m.typing, m.searching = false, false
+		case "enter":
+			m.typing = false
+			if strings.TrimSpace(m.query) != "" {
+				m.items[tSearch], m.done[tSearch] = nil, false
+				m.rebuild(tSearch)
+				return m, m.load("search", "--q", m.query)
+			}
+			m.searching = false
+		case "backspace":
+			if r := []rune(m.query); len(r) > 0 {
+				m.query = string(r[:len(r)-1])
+			}
+		default:
+			if msg.Text != "" {
+				m.query += msg.Text
+			}
+		}
+		return m, nil
+	case m.read != nil:
+		switch k {
+		case "esc", "q", "left", "h":
+			m.read = nil
+		case "j", "down":
+			m.move(1)
+		case "k", "up":
+			m.move(-1)
+		case "space", "pgdown", "f":
+			m.move(max(1, m.h-6))
+		case "b", "pgup":
+			m.move(-max(1, m.h-6))
+		case "g", "home":
+			m.read.top = 0
+		case "G", "end":
+			m.read.top = len(m.read.lines)
+		}
+		return m, nil
+	}
+	switch k {
+	case "q":
+		return m, tea.Quit
+	case "tab":
+		m.tab, m.searching = (m.tab+1)%len(tabKeys), false
+	case "shift+tab":
+		m.tab, m.searching = (m.tab+len(tabKeys)-1)%len(tabKeys), false
+	case "j", "down":
+		m.move(1)
+	case "k", "up":
+		m.move(-1)
+	case "pgdown":
+		m.move(10)
+	case "pgup":
+		m.move(-10)
+	case "enter":
+		return m, m.open()
+	case "/":
+		m.searching, m.typing, m.query = true, true, ""
+	case "b":
+		m.grouped = !m.grouped
+		for t := range tSettings {
+			m.rebuild(t)
+		}
+	case "a":
+		return m, m.itemAct()
+	case "S":
+		m.openSync()
+	case "esc":
+		if m.searching {
+			m.searching = false
+		} else if m.only != "" {
+			m.only = ""
+			m.rebuild(tChats)
+		}
+	}
+	return m, nil
+}
+
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.w, m.h = msg.Width, msg.Height
 	case loaded:
-		if msg.err != nil {
-			m.errs = append(m.errs, msg.view+": "+msg.err.Error())
-			break
-		}
-		switch v := msg.v.(type) {
-		case *sto.Status:
-			m.st = v
-			setAccent(v.Accent)
-		case *sto.Chats:
-			m.chats, m.counts[tChats] = v, len(v.Rows)
-		case *sto.Memories:
-			n := 0
-			for _, p := range v.Projects {
-				n += p.Count
-			}
-			m.counts[tMemories] = n
-		case *sto.Tools:
-			m.counts[tTools] = len(v.Skills) + len(v.Plugins)
-		}
-		m.rebuild()
+		return m.loadedMsg(msg)
 	case stepMsg:
 		m.busy = string(msg)
 		return m, listen(m.ch)
@@ -214,7 +447,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.flash = msg.err.Error()
 		}
-		return m, tea.Batch(m.load("status"), m.load("chats"))
+		return m, m.loadAll()
 	case tea.KeyPressMsg:
 		if msg.String() == "ctrl+c" {
 			return m, tea.Quit
@@ -222,66 +455,42 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.busy != "" {
 			break
 		}
-		m.flash = ""
-		if m.confirm {
-			m.confirm = false
-			if msg.String() == "enter" {
-				return m, m.act("sync", "--all")
-			}
-			break
-		}
-		switch msg.String() {
-		case "q":
-			return m, tea.Quit
-		case "tab":
-			m.tab = (m.tab + 1) % len(tabKeys)
-		case "shift+tab":
-			m.tab = (m.tab + len(tabKeys) - 1) % len(tabKeys)
-		case "j", "down":
-			m.cur = step(m.lines, m.cur, 1)
-		case "k", "up":
-			m.cur = step(m.lines, m.cur, -1)
-		case "b":
-			m.grouped = !m.grouped
-			m.rebuild()
-		case "a":
-			return m, m.itemAct()
-		case "S":
-			m.openSync()
-		case "esc":
-			m.only = ""
-			m.rebuild()
-		}
+		return m.keyMsg(msg)
 	case tea.MouseWheelMsg:
+		d := 1
 		if msg.Button == tea.MouseWheelUp {
-			m.cur = step(m.lines, m.cur, -1)
-		} else {
-			m.cur = step(m.lines, m.cur, 1)
+			d = -1
 		}
+		if m.read != nil {
+			d *= 3
+		}
+		m.move(d)
 	case tea.MouseClickMsg:
-		if m.busy != "" {
+		if m.busy != "" || m.read != nil {
 			break
 		}
 		t, ok := m.fr.hits.at(msg.X, msg.Y)
 		if m.confirm {
 			m.confirm = false
 			if ok && t.kind == "confirm" {
-				return m, m.act("sync", "--all")
+				return m, m.act(m.L("mod_syncing"), "sync", "--all")
 			}
 			break
 		}
 		switch t.kind {
 		case "tab":
-			m.tab = t.i
+			m.tab, m.searching, m.typing = t.i, false, false
 		case "row":
-			m.tab, m.cur = tChats, t.i
+			m.cur().cur = t.i
 		case "sync":
 			m.openSync()
 		case "bring":
-			m.tab, m.only = tChats, "repo"
-			m.rebuild()
+			m.tab, m.only, m.searching = tChats, "repo", false
+			m.rebuild(tChats)
 		case "item":
 			return m, m.itemAct()
+		case "open":
+			return m, m.open()
 		}
 	}
 	return m, nil
@@ -290,6 +499,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // ---------- view ----------
 
 func ago(ts float64) string {
+	if ts == 0 {
+		return ""
+	}
 	t := time.Unix(int64(ts), 0)
 	d := time.Since(t)
 	switch {
@@ -309,14 +521,18 @@ func sym(state string) string {
 		return acc.Render("↑")
 	case "repo":
 		return acc.Render("↓")
+	case "gone":
+		return acc.Render("×")
+	case "both":
+		return faint.Render("●")
 	}
-	return faint.Render("●")
+	return " "
 }
 
 func (m Model) stateWords(state string) string {
-	key := map[string]string{"local": "st_local", "repo": "st_repo"}[state]
+	key := map[string]string{"local": "st_local", "repo": "st_repo", "gone": "st_gone", "both": "st_both"}[state]
 	if key == "" {
-		key = "st_both"
+		return ""
 	}
 	return sym(state) + " " + m.L(key)
 }
@@ -334,7 +550,7 @@ func (m Model) header(W, ox, oy int) string {
 			label += fmt.Sprint(" ", m.counts[i])
 		}
 		style := tabIdle
-		if i == m.tab {
+		if i == m.tab && !m.searching {
 			style = tabActive
 		}
 		cell := style.Render(label)
@@ -374,72 +590,120 @@ func (m Model) card(W, ox, y int) []string {
 	for _, p := range m.st.Parts.Up {
 		parts = append(parts, acc.Render("↑ ")+p)
 	}
-	if n := m.st.Chats.Up; n > 0 {
-		parts = append(parts, acc.Render("↑ ")+strings.ReplaceAll(m.L("tui_n_chats"), "{n}", fmt.Sprint(n)))
+	if v := m.st.Chats.Up; v > 0 {
+		parts = append(parts, acc.Render("↑ ")+n(m.L("tui_n_chats"), v))
 	}
 	if len(parts) > 0 {
 		body = append(body, ansi.Truncate(strings.Join(parts, "   "), W-4, "…"))
 	}
-	if n := m.st.ToBring; n > 0 {
-		t := strings.ReplaceAll(m.L("tui_to_bring"), "{n}", fmt.Sprint(n)) + "  →"
+	if v := m.st.ToBring; v > 0 {
+		t := n(m.L("tui_to_bring"), v) + "  →"
 		m.fr.hits.add(ox+2, y+1+len(body), lipgloss.Width(t), target{"bring", 0})
 		body = append(body, faint.Render(t))
 	}
 	if m.st.Update > 0 {
-		body = append(body, acc.Render(strings.ReplaceAll(m.L("update_notice"), "{n}", fmt.Sprint(m.st.Update)))+faint.Render("  → sto update"))
+		body = append(body, acc.Render(n(m.L("update_notice"), m.st.Update))+faint.Render("  → sto update"))
 	}
 	return strings.Split(panel.Width(W).Render(strings.Join(body, "\n")), "\n")
 }
 
-func (m Model) chatRow(c *sto.Chat, width int, on bool) string {
-	tail := ""
-	if width >= 40 {
-		tail = fmt.Sprintf("  %9s", ago(c.Mtime))
+// tail is the item's columns after the title, each with its width; they
+// are dropped from the left when the list is narrow.
+func tail(it *item, hit bool) ([]string, []int) {
+	switch it.kind {
+	case "chat":
+		if hit { // a search hit: its project, not its machine
+			return []string{it.sub}, []int{18}
+		}
+		return []string{it.sub, ago(it.mtime)}, []int{12, 9}
+	case "memory":
+		if it.mtime == 0 {
+			return []string{it.sub}, []int{18}
+		}
+		return []string{it.sub, ago(it.mtime)}, []int{10, 9}
+	case "setting":
+		return []string{it.sub}, []int{14}
+	case "note":
+		return []string{it.sub}, []int{18}
 	}
-	if width >= 60 {
-		tail = fmt.Sprintf("    %-12s", ansi.Truncate(c.Machine, 12, "…")) + tail
+	return []string{it.sub}, []int{18}
+}
+
+func (m Model) row(it *item, width int, on bool) string {
+	cols, ws := tail(it, m.searching)
+	if m.searching {
+		cols, ws = append([]string{it.kind}, cols...), append([]int{8}, ws...)
 	}
-	tw := max(4, width-3-lipgloss.Width(tail))
-	title := ansi.Truncate(c.Title, tw, "…")
-	row := " " + sym(c.State) + " " + title + strings.Repeat(" ", max(0, tw-lipgloss.Width(title))) + faint.Render(tail)
+	for len(cols) > 0 && width-3-sum(ws)-4*len(ws) < 16 {
+		cols, ws = cols[1:], ws[1:]
+	}
+	t := ""
+	for i, c := range cols {
+		t += "    " + fmt.Sprintf("%*s", ws[i], ansi.Truncate(c, ws[i], "…"))
+	}
+	tw := max(4, width-3-lipgloss.Width(t))
+	title := ansi.Truncate(it.title, tw, "…")
+	r := " " + sym(it.state) + " " + title + strings.Repeat(" ", max(0, tw-lipgloss.Width(title))) + faint.Render(t)
 	if on {
-		return sel.Render(ansi.Strip(row))
+		return sel.Render(ansi.Strip(r))
 	}
-	return row
+	return r
+}
+
+func sum(xs []int) (s int) {
+	for _, x := range xs {
+		s += x
+	}
+	return
 }
 
 func (m Model) titleRow(l line, width int) string {
-	t := l.project + "  ·  " + strings.ReplaceAll(m.L("tui_n_chats"), "{n}", fmt.Sprint(l.count))
-	if l.here {
-		t += "  ·  " + m.L("tui_here")
+	t := l.group
+	if m.shown() == tChats {
+		t += "  ·  " + n(m.L("tui_n_chats"), l.count)
+		if l.here {
+			t += "  ·  " + m.L("tui_here")
+		}
+	} else {
+		t += "  ·  " + fmt.Sprint(l.count)
 	}
 	t = ansi.Truncate(t, width-4, "…")
 	return grp.Render(" "+t) + " " + faint.Render(strings.Repeat("─", max(0, width-lipgloss.Width(t)-2)))
 }
 
 // list draws the lines that fit in height, scrolled so the cursor shows,
-// recording each chat row for clicks.
+// recording each item row for clicks.
 func (m Model) list(width, height, ox, y int) []string {
-	top := m.fr.top
-	if m.cur < top {
-		top = m.cur
-		if top > 0 && m.lines[top-1].project != "" { // keep its group title in sight
+	t := m.shown()
+	l := m.lists[t]
+	if len(l.lines) == 0 {
+		msg := m.L("loading")
+		if m.done[t] {
+			msg = m.L("empty")
+		}
+		return []string{faint.Render(" " + msg)}
+	}
+	top := m.fr.top[t]
+	if l.cur < top {
+		top = l.cur
+		if top > 0 && l.lines[top-1].group != "" { // keep its group title in sight
 			top--
 		}
 	}
-	if m.cur >= top+height {
-		top = m.cur - height + 1
+	if l.cur >= top+height {
+		top = l.cur - height + 1
 	}
-	m.fr.top = max(0, top)
+	top = max(0, min(top, len(l.lines)-1))
+	m.fr.top[t] = top
 	var out []string
-	for i := m.fr.top; i < len(m.lines) && len(out) < height; i++ {
-		l := m.lines[i]
+	for i := top; i < len(l.lines) && len(out) < height; i++ {
+		ln := l.lines[i]
 		switch {
-		case l.chat != nil:
+		case ln.it != nil:
 			m.fr.hits.add(ox, y+len(out), width, target{"row", i})
-			out = append(out, m.chatRow(l.chat, width, i == m.cur))
-		case l.project != "":
-			out = append(out, m.titleRow(l, width))
+			out = append(out, m.row(ln.it, width, i == l.cur))
+		case ln.group != "":
+			out = append(out, m.titleRow(ln, width))
 		default:
 			out = append(out, "")
 		}
@@ -447,32 +711,78 @@ func (m Model) list(width, height, ox, y int) []string {
 	return out
 }
 
-// side explains the selected chat and holds its one action.
+// side explains the selected item and holds its actions as buttons.
 func (m Model) side(width, ox, y int) []string {
-	c := m.selected()
-	if c == nil || m.chats == nil {
+	it := m.selected()
+	if it == nil {
 		return nil
 	}
 	in := width - 4 // border and padding
-	folder, missing := "—", true
-	if f := m.chats.Folders[c.Project]; f != nil {
-		folder, missing = *f, false
-	}
 	field := func(k, v string) string {
 		label := ansi.Truncate(m.L(k), 12, "")
 		return faint.Render(label+strings.Repeat(" ", 13-lipgloss.Width(label))) + ansi.Truncate(v, max(4, in-13), "…")
 	}
-	out := []string{bold.Render(ansi.Truncate(c.Title, in, "…")), m.stateWords(c.State), "",
-		field("tui_project", c.Project), field("tui_folder", folder),
-		field("tui_machine", c.Machine), field("tui_when", ago(c.Mtime)), ""}
-	if missing {
-		out = append(out, acc.Render("! ")+ansi.Wrap(m.L("folder_missing"), in-2, ""), "")
+	wrap := func(s string) string { return ansi.Wrap(s, in, "") }
+	out := []string{bold.Render(ansi.Truncate(it.title, in, "…"))}
+	if w := m.stateWords(it.state); w != "" {
+		out = append(out, w)
 	}
-	key := map[string]string{"local": "k_keep", "repo": "k_bring"}[c.State]
-	if key != "" {
-		b := button.Render(m.L(key))
-		m.fr.hits.add(ox+2, y+1+len(strings.Split(strings.Join(out, "\n"), "\n")), lipgloss.Width(b), target{"item", 0})
-		out = append(out, b+faint.Render("  a"))
+	out = append(out, "")
+	var buttons []target
+	var labels []string
+	btn := func(label string, t target) { labels, buttons = append(labels, label), append(buttons, t) }
+	switch {
+	case m.searching:
+		out = append(out, faint.Render(it.kind+"  ·  "+it.sub))
+		btn("↵", target{"open", 0})
+	case it.kind == "chat":
+		folder, missing := "—", true
+		if f := m.chats.Folders[it.group]; f != nil {
+			folder, missing = *f, false
+		}
+		out = append(out, field("tui_project", it.group), field("tui_folder", folder),
+			field("tui_machine", it.sub), field("tui_when", ago(it.mtime)), "")
+		if missing {
+			out = append(out, acc.Render("! ")+ansi.Wrap(m.L("folder_missing"), in-2, ""), "")
+		}
+		btn("↵", target{"open", 0})
+		if key := map[string]string{"local": "k_keep", "repo": "k_bring"}[it.state]; key != "" {
+			btn(m.L(key), target{"item", 0})
+		}
+	case it.kind == "memory":
+		out = append(out, field("tui_project", it.group), field("tui_when", ago(it.mtime)), "", wrap(it.desc), "")
+		btn("↵", target{"open", 0})
+	case it.kind == "setting" && m.set != nil:
+		choices := m.set.Langs
+		cur := m.set.Lang
+		if it.id == "accent" {
+			choices, cur = nil, it.sub
+			for _, a := range m.set.Accents {
+				choices = append(choices, a.Name)
+			}
+		}
+		for _, c := range choices {
+			if c == cur {
+				out = append(out, acc.Render("● ")+c)
+			} else {
+				out = append(out, faint.Render("  "+c))
+			}
+		}
+		out = append(out, "")
+		btn(m.L("tui_change"), target{"item", 0})
+	default:
+		out = append(out, wrap(strings.Trim(it.desc, `"`)))
+	}
+	if len(buttons) > 0 {
+		row, x := "", 0
+		by := y + 1 + len(strings.Split(strings.Join(out, "\n"), "\n"))
+		for i, label := range labels {
+			b := button.Render(label)
+			m.fr.hits.add(ox+2+x, by, lipgloss.Width(b), buttons[i])
+			row += b + " "
+			x += lipgloss.Width(b) + 1
+		}
+		out = append(out, row)
 	}
 	return out
 }
@@ -487,7 +797,7 @@ func (m Model) summary(W, H, ox, oy int) string {
 		lines = append(lines, faint.Render(m.L("tui_will_send")+"  ")+p)
 	}
 	if s.Chats.Up > 0 {
-		lines = append(lines, faint.Render(m.L("tui_will_send")+"  ")+strings.ReplaceAll(m.L("tui_n_chats"), "{n}", fmt.Sprint(s.Chats.Up)))
+		lines = append(lines, faint.Render(m.L("tui_will_send")+"  ")+n(m.L("tui_n_chats"), s.Chats.Up))
 	}
 	if len(lines) == 2 {
 		lines = append(lines, s.Phrase)
@@ -502,15 +812,46 @@ func (m Model) summary(W, H, ox, oy int) string {
 	return lipgloss.Place(W, H, lipgloss.Center, lipgloss.Center, box)
 }
 
+// page is the reader: the markdown rendered once per width, scrolled.
+func (m Model) page(W, H int) string {
+	r := m.read
+	body := []string{faint.Render(" " + m.L("loading"))}
+	switch {
+	case r.err != "":
+		body = []string{errStyle.Render(" ! " + r.err)}
+	case r.md != "":
+		if r.width != W {
+			r.width, r.lines = W, nil
+			gr, err := glamour.NewTermRenderer(glamour.WithStandardStyle("dark"), glamour.WithWordWrap(max(20, W-4)))
+			out := r.md
+			if err == nil {
+				if s, err := gr.Render(r.md); err == nil {
+					out = s
+				}
+			}
+			r.lines = strings.Split(strings.TrimRight(out, "\n"), "\n")
+		}
+		r.top = max(0, min(r.top, len(r.lines)-(H-3)))
+		body = r.lines[r.top:min(len(r.lines), r.top+H-3)]
+	}
+	head := spread(brand.Render("braingent")+bold.Render(ansi.Truncate(r.title, W-30, "…")),
+		faint.Render(fmt.Sprintf("%d/%d ", min(r.top+H-3, len(r.lines)), len(r.lines))), W)
+	return strings.Join(append(append([]string{head, ""}, fit(body, H-3)...), faint.Render(m.L("tui_reader_keys"))), "\n")
+}
+
 func (m Model) footer(W int) string {
 	left := faint.Render(m.L("tui_keys"))
 	switch {
+	case m.typing:
+		left = acc.Render("/ ") + m.query + acc.Render("█") + faint.Render("   ↵  esc")
 	case m.busy != "":
 		left = acc.Render(m.busy)
 	case m.flash != "" && m.failed:
 		left = errStyle.Render("! " + m.flash)
 	case m.flash != "":
 		left = acc.Render(m.flash)
+	case m.searching:
+		left = acc.Render("/ "+m.query) + faint.Render("   ↵  esc")
 	}
 	return ansi.Truncate(left, W, "…")
 }
@@ -536,25 +877,27 @@ func (m Model) View() tea.View {
 		v.SetContent(m.L("loading"))
 		return v
 	}
-	out := []string{m.header(W, ox, oy), ""}
-	out = append(out, m.card(W, ox, oy+len(out))...)
-	out = append(out, "")
-	listH, y := H-len(out)-2, oy+len(out)
-	if m.tab != tChats || m.chats == nil {
-		out = append(out, fit([]string{faint.Render(" " + m.L(map[bool]string{true: "empty", false: "loading"}[m.chats != nil]))}, listH)...)
-	} else if W >= 90 {
-		sideW := min(48, W*2/5)
-		listW := W - sideW - 2
-		list := strings.Join(fit(m.list(listW, listH, ox, y), listH), "\n")
-		side := panel.Width(sideW).Height(listH).MaxHeight(listH).Render(strings.Join(m.side(sideW, ox+listW+2, y), "\n"))
-		out = append(out, strings.Split(lipgloss.JoinHorizontal(lipgloss.Top, lipgloss.NewStyle().Width(listW).Render(list), "  ", side), "\n")...)
-	} else {
-		out = append(out, fit(m.list(W, listH, ox, y), listH)...)
-	}
-	out = append(fit(out, H-1), m.footer(W))
-	content := strings.Join(out, "\n")
-	if m.confirm && m.st != nil {
+	var content string
+	switch {
+	case m.read != nil:
+		content = m.page(W, H)
+	case m.confirm && m.st != nil:
 		content = m.summary(W, H, ox, oy)
+	default:
+		out := []string{m.header(W, ox, oy), ""}
+		out = append(out, m.card(W, ox, oy+len(out))...)
+		out = append(out, "")
+		listH, y := H-len(out)-2, oy+len(out)
+		if W >= 90 {
+			sideW := min(48, W*2/5)
+			listW := W - sideW - 2
+			list := strings.Join(fit(m.list(listW, listH, ox, y), listH), "\n")
+			side := panel.Width(sideW).Height(listH).MaxHeight(listH).Render(strings.Join(m.side(sideW, ox+listW+2, y), "\n"))
+			out = append(out, strings.Split(lipgloss.JoinHorizontal(lipgloss.Top, lipgloss.NewStyle().Width(listW).Render(list), "  ", side), "\n")...)
+		} else {
+			out = append(out, fit(m.list(W, listH, ox, y), listH)...)
+		}
+		content = strings.Join(append(fit(out, H-1), m.footer(W)), "\n")
 	}
 	v.SetContent(lipgloss.NewStyle().MarginTop(oy).MarginLeft(ox).Render(content))
 	return v

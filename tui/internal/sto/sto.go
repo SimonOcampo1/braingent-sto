@@ -61,17 +61,70 @@ type Chats struct {
 	Folders map[string]*string `json:"folders"`
 }
 
-// Memories is `sto data memories`, only as far as the header needs it.
-type Memories struct {
-	Projects []struct {
-		Count int `json:"count"`
-	} `json:"projects"`
+// Memory is one memory of `sto data memories`.
+type Memory struct {
+	Slug        string  `json:"slug"`
+	Type        string  `json:"type"`
+	Machine     string  `json:"machine"`
+	Mtime       float64 `json:"mtime"`
+	Description string  `json:"description"`
 }
 
-// Tools is `sto data tools`, only as far as the header needs it.
+// MemoryProject is one project's memories.
+type MemoryProject struct {
+	Project  string   `json:"project"`
+	Count    int      `json:"count"`
+	Memories []Memory `json:"memories"`
+}
+
+// Memories is `sto data memories`, by project.
+type Memories struct {
+	Projects []MemoryProject `json:"projects"`
+}
+
+// Tool is a skill or a plugin; Where is "both", "local", "repo" or "gone".
+type Tool struct {
+	What  string `json:"what"`
+	ID    string `json:"id"`
+	Label string `json:"label"`
+	Desc  string `json:"desc"`
+	Where string `json:"where"`
+}
+
+// Tools is `sto data tools`.
 type Tools struct {
-	Skills  []json.RawMessage `json:"skills"`
-	Plugins []json.RawMessage `json:"plugins"`
+	Skills  []Tool `json:"skills"`
+	Plugins []Tool `json:"plugins"`
+}
+
+// Settings is `sto data settings`.
+type Settings struct {
+	Lang    string   `json:"lang"`
+	Langs   []string `json:"langs"`
+	Accent  string   `json:"accent"`
+	Accents []struct {
+		Code string `json:"code"`
+		Name string `json:"name"`
+	} `json:"accents"`
+}
+
+// Hit is one result of `sto data search`; Ref says where it lives, by kind.
+type Hit struct {
+	Kind  string         `json:"kind"`
+	Label string         `json:"label"`
+	Sub   string         `json:"sub"`
+	Ref   map[string]any `json:"ref"`
+}
+
+// Search is `sto data search --q`.
+type Search struct {
+	Hits []Hit `json:"hits"`
+}
+
+// Detail is `sto data detail <kind> <id>`: what the reader shows.
+type Detail struct {
+	Title    string `json:"title"`
+	Markdown string `json:"markdown"`
 }
 
 // engineErr is the `{"error": ...}` every sto answer may be instead.
