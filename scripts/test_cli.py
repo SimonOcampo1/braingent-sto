@@ -854,6 +854,53 @@ def test_data_views_print_json_and_never_a_traceback():
          cli.srv.project_paths) = real
 
 
+def test_act_streams_steps_and_ends_in_exactly_one_final_line():
+    import contextlib, io
+    real = (cli.srv.sync_pull, cli.srv.sync_push, cli.project_todo,
+            cli.srv.keep_session, cli.srv.resume_session, cli.srv.project_of_cwd,
+            cli.srv.local_project_path, cli.srv.forget)
+
+    def run(*argv):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            final = cli.main(["act", *argv])["message"]
+        return [json.loads(l) for l in buf.getvalue().splitlines()], json.loads(final)
+
+    try:
+        def pull(progress=None):
+            progress("s_fetch")
+            return {"ok": True}
+        cli.srv.sync_pull = pull
+        cli.srv.sync_push = lambda progress=None: {"ok": True}
+        cli.project_todo = lambda p: (["k1"], ["b1"])
+        cli.srv.keep_session = lambda sid: {"ok": True}
+        cli.srv.resume_session = lambda sid: {"ok": True}
+        cli.srv.project_of_cwd = lambda cwd, fallback="": "p"
+        cli.srv.local_project_path = lambda p: "/work/p"
+
+        steps, final = run("sync", "--cwd", "/work/p")
+        assert [s["step"] for s in steps] == [i18n.t("s_fetch"), i18n.t("s_chats")]
+        assert final["done"] is True
+
+        cli.srv.sync_push = lambda progress=None: {"error": "no network"}
+        _, final = run("sync")
+        assert final == {"error": "no network"}
+
+        cli.srv.forget = lambda target, apply=False: (["knowledge/config/skills/skills/x"], None)
+        _, final = run("forget", "skill:x", "--dry")
+        assert final["paths"] == ["knowledge/config/skills/skills/x"]
+
+        _, final = run("bogus")
+        assert "error" in final
+        cli.srv.sync_pull = lambda progress=None: 1 / 0
+        _, final = run("pull")
+        assert "ZeroDivisionError" in final["error"]
+    finally:
+        (cli.srv.sync_pull, cli.srv.sync_push, cli.project_todo,
+         cli.srv.keep_session, cli.srv.resume_session, cli.srv.project_of_cwd,
+         cli.srv.local_project_path, cli.srv.forget) = real
+
+
 if __name__ == "__main__":
     test_cached_sessions_reuses_entry_and_reparses_on_change()
     test_cached_sessions_drops_deleted_and_survives_corrupt_cache()
@@ -894,4 +941,5 @@ if __name__ == "__main__":
     test_session_todo_and_the_mod_json()
     test_a_chat_of_ours_that_only_the_repo_has_can_be_brought()
     test_data_views_print_json_and_never_a_traceback()
+    test_act_streams_steps_and_ends_in_exactly_one_final_line()
     print("OK")
