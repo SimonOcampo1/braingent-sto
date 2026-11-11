@@ -746,9 +746,13 @@ func (m Model) row(it *item, width int, on bool) string {
 	for i, c := range cols {
 		t += "    " + fmt.Sprintf("%*s", ws[i], ansi.Truncate(c, ws[i], "…"))
 	}
-	tw := max(4, width-3-lipgloss.Width(t))
+	lead := " "
+	if m.grouped && m.shown() != tSettings { // a row sits indented under its group's title
+		lead = "   "
+	}
+	tw := max(4, width-len(lead)-2-lipgloss.Width(t))
 	title := ansi.Truncate(it.title, tw, "…")
-	r := " " + sym(it.state) + " " + title + strings.Repeat(" ", max(0, tw-lipgloss.Width(title))) + faint.Render(t)
+	r := lead + sym(it.state) + " " + title + strings.Repeat(" ", max(0, tw-lipgloss.Width(title))) + faint.Render(t)
 	if on {
 		return sel.Render(ansi.Strip(r))
 	}
