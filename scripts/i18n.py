@@ -112,6 +112,14 @@ STRINGS = {
         "s_chats": "moviendo chats",
         "update_notice": "hay una versión nueva de braingent ({n} cambios)",
         "cloud_is_repo": "La nube es tu repo privado de GitHub",
+        # the Go TUI: it gets these through `sto data status`
+        "tui_chats": "Chats", "tui_memories": "Memorias", "tui_tools": "Herramientas",
+        "tui_settings": "Ajustes", "tui_n_chats": "{n} chats", "tui_here": "estás acá",
+        "tui_to_bring": "{n} chats en la nube que podés traer",
+        "tui_will_bring": "Vas a traer", "tui_will_send": "Vas a enviar",
+        "tui_confirm": "↵ confirmar  esc cancelar", "tui_resume": "Retomar acá",
+        "tui_project": "Proyecto", "tui_folder": "Carpeta acá", "tui_machine": "Máquina",
+        "tui_when": "Cuándo", "tui_keys": "↵ abrir  r retomar  b agrupar  tab vista  S sincronizar  q salir",
         "forget_title": "Sacar {what} del repo",
         "mem_links": "Enlaces", # → sale de esta memoria · ← apunta a ella
         "bring_title": "Traer {what} del repo a esta máquina",
@@ -342,6 +350,14 @@ STRINGS = {
         "s_chats": "moving chats",
         "update_notice": "a new braingent version is out ({n} changes)",
         "cloud_is_repo": "The cloud is your private GitHub repo",
+        # the Go TUI: it gets these through `sto data status`
+        "tui_chats": "Chats", "tui_memories": "Memories", "tui_tools": "Tools",
+        "tui_settings": "Settings", "tui_n_chats": "{n} chats", "tui_here": "you are here",
+        "tui_to_bring": "{n} chats in the cloud you can bring",
+        "tui_will_bring": "You will bring", "tui_will_send": "You will send",
+        "tui_confirm": "↵ confirm  esc cancel", "tui_resume": "Resume here",
+        "tui_project": "Project", "tui_folder": "Folder here", "tui_machine": "Machine",
+        "tui_when": "When", "tui_keys": "↵ open  r resume  b group  tab view  S sync  q quit",
         "forget_title": "Drop {what} from the repo",
         "mem_links": "Links",  # → out of this memory · ← into it
         "bring_title": "Bring {what} from the repo to this machine",
