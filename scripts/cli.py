@@ -973,6 +973,84 @@ def cmd_data(*args):
     return {"message": json.dumps(out, ensure_ascii=False, default=str)}
 
 
+def _emit(obj):
+    """One progress line for whoever reads `sto act` as it runs."""
+    print(json.dumps(obj, ensure_ascii=False), flush=True)
+
+
+def _step(key):
+    _emit({"step": t(key)})
+
+
+def _act_sync(cwd=None):
+    res = srv.sync_pull(_step)
+    if res.get("error"):
+        return {"error": res["error"]}
+    note = ""
+    if cwd:
+        project = srv.project_of_cwd(cwd)
+        if srv.local_project_path(project) is None:
+            srv.set_project_path(project, cwd)
+        keep, bring = project_todo(project)
+        if keep or bring:
+            _step("s_chats")
+        fail = sum("error" in srv.keep_session(s) for s in keep)
+        fail += sum("error" in srv.resume_session(s) for s in bring)
+        n = len(keep) + len(bring)
+        if n:
+            note = " · " + t("sync_project_done", ok=n - fail, fail=fail)
+    res = srv.sync_push(_step)
+    if res.get("error"):
+        return {"error": res["error"]}
+    return {"done": True, "message": t("sync_done") + note}
+
+
+def _act_files(fn, target, dry=False):
+    paths, err = fn(target, apply=not dry)
+    return {"error": err} if err else {"done": True, "message": "", "paths": list(paths)}
+
+
+def _act_delete(target):
+    kind, _, name = target.partition(":")
+    if kind == "skill":
+        err = srv.delete_skill("personal:" + name)
+    elif kind == "plugin":
+        err = srv.plugin_cmd("uninstall", name).get("error")
+    else:
+        err = t("not_deletable", id=kind)
+    return {"error": err} if err else {"done": True, "message": t("deleted", id=name)}
+
+
+def _act_result(res):
+    return {"error": res["error"]} if res.get("error") else {"done": True, "message": ""}
+
+
+ACTS = {
+    "sync": lambda a, o: _act_sync(o.get("cwd")),
+    "pull": lambda a, o: (lambda r: {"error": r["error"]} if r.get("error")
+                          else {"done": True, "message": t("mod_pulled")})(srv.sync_pull(_step)),
+    "bring": lambda a, o: _act_files(srv.bring, a[0], bool(o.get("dry"))),
+    "forget": lambda a, o: _act_files(srv.forget, a[0], bool(o.get("dry"))),
+    "delete": lambda a, o: _act_delete(a[0]),
+    "keep": lambda a, o: _act_result(srv.keep_session(a[0])),
+    "resume": lambda a, o: _act_result(srv.resume_session(a[0])),
+    "set-folder": lambda a, o: _act_result(srv.set_project_path(a[0], a[1])),
+}
+
+
+def cmd_act(*args):
+    """sto act <verb> [args] [--cwd DIR] [--dry] — JSON lines for the UIs: steps,
+    then exactly one final `done` or `error` line."""
+    rest, opts = _opts(args, "cwd", "dry")
+    verb = rest[0] if rest else ""
+    try:
+        out = (ACTS[verb](rest[1:], opts) if verb in ACTS
+               else {"error": t("cli_commands", names=", ".join(ACTS))})
+    except Exception as e:  # a UI parses stdout: never a traceback
+        out = {"error": f"{type(e).__name__}: {e}"}
+    return {"message": json.dumps(out, ensure_ascii=False, default=str)}
+
+
 CLI = {
     "push": srv.sync_push,
     "pull": srv.sync_pull,
@@ -994,6 +1072,7 @@ CLI = {
     "ui": cmd_ui,
     "mod": cmd_mod,
     "data": cmd_data,
+    "act": cmd_act,
 }
 
 
