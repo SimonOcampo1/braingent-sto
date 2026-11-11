@@ -262,3 +262,14 @@ func TestCloudChatsAreCountedOnTheirProjectNotOnTheCard(t *testing.T) {
 		t.Fatalf("the title of p counts its one chat in the cloud: %q", r)
 	}
 }
+
+func TestRowsSitIndentedUnderTheirGroup(t *testing.T) {
+	m := loadedModel(t)
+	it := &item{kind: "chat", title: "x", state: "both"}
+	grouped, _ := press(m, "j")
+	flat, _ := press(m, "b")
+	g, f := ansi.Strip(grouped.row(it, 60, false)), ansi.Strip(flat.row(it, 60, false))
+	if !strings.HasPrefix(g, "   ● x") || !strings.HasPrefix(f, " ● x") {
+		t.Fatalf("grouped %q\nflat    %q", g, f)
+	}
+}
