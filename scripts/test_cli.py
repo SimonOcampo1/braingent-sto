@@ -824,6 +824,36 @@ def test_session_todo_and_the_mod_json():
     assert "error" in res or {"up", "down", "pathSaved", "labels"} <= set(res)
 
 
+def test_data_views_print_json_and_never_a_traceback():
+    import ui_data as ui
+    real = (ui.status_data, cli.cached_sessions, cli.mark_synced, cli.srv.list_memory,
+            cli.srv.project_paths)
+    try:
+        ui.status_data = lambda cwd=None, fetch=False: {"state": "uptodate", "cwd": cwd,
+                                                       "fetch": fetch}
+        cli.cached_sessions = lambda **k: ([{"id": "a", "title": "t", "project": "p",
+                                             "mtime": 1.0, "machine": None, "path": "/x"}], {})
+        cli.mark_synced = lambda rows: [r.update(synced=False) or r for r in rows]
+        cli.srv.list_memory = lambda: [{"project": "p", "memories": []}]
+        cli.srv.project_paths = lambda: {"p": {cli.srv.LOCAL_MACHINE: "/work/p"}}
+
+        s = json.loads(cli.main(["data", "status", "--cwd", "/w", "--fetch"])["message"])
+        assert s == {"state": "uptodate", "cwd": "/w", "fetch": True}
+        c = json.loads(cli.main(["data", "chats"])["message"])
+        assert c["rows"][0]["state"] == "local"
+        assert c["rows"][0]["machine"] == cli.srv.LOCAL_MACHINE
+        assert c["folders"] == {"p": "/work/p"}
+        m = json.loads(cli.main(["data", "memories"])["message"])
+        assert m["projects"][0]["project"] == "p"
+
+        ui.status_data = lambda **k: 1 / 0
+        assert "ZeroDivisionError" in json.loads(cli.main(["data", "status"])["message"])["error"]
+        assert "error" in json.loads(cli.main(["data", "bogus"])["message"])
+    finally:
+        (ui.status_data, cli.cached_sessions, cli.mark_synced, cli.srv.list_memory,
+         cli.srv.project_paths) = real
+
+
 if __name__ == "__main__":
     test_cached_sessions_reuses_entry_and_reparses_on_change()
     test_cached_sessions_drops_deleted_and_survives_corrupt_cache()
@@ -863,4 +893,5 @@ if __name__ == "__main__":
     test_the_graph_html_survives_a_memory_that_quotes_markup()
     test_session_todo_and_the_mod_json()
     test_a_chat_of_ours_that_only_the_repo_has_can_be_brought()
+    test_data_views_print_json_and_never_a_traceback()
     print("OK")
