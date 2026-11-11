@@ -942,6 +942,72 @@ def test_act_delete_takes_many_targets_here_or_everywhere():
             setattr(cli.srv, n, f)
 
 
+def test_settings_cover_sync_modules_badge_and_this_machines_look():
+    import contextlib, io
+    names = ("config_status", "get_sync_prefs", "set_sync_prefs", "badge_status", "set_badge",
+             "machine_look", "set_machine_look", "set_project_path")
+    real = {n: getattr(cli.srv, n) for n in names}
+    real_ui = (cli._ui()._origin, cli._ui()._upstream)
+    state = {"mods": ["skills"], "badge": False, "look": {"icon": "desktop", "color": "cyan"}, "paths": {}}
+
+    def run(*argv):
+        with contextlib.redirect_stdout(io.StringIO()):
+            return json.loads(cli.main(list(argv))["message"])
+    try:
+        cli.srv.config_status = lambda: [{"id": m, "enabled": m in state["mods"]} for m in ("skills", "hooks")]
+        cli.srv.get_sync_prefs = lambda: list(state["mods"])
+        cli.srv.set_sync_prefs = lambda mods: state.update(mods=mods) or mods
+        cli.srv.badge_status = lambda: {"on": state["badge"]}
+        cli.srv.set_badge = lambda on: state.update(badge=on) or {}
+        cli.srv.machine_look = lambda m: dict(state["look"])
+        cli.srv.set_machine_look = lambda **k: state["look"].update(k) or state["look"]
+        cli.srv.set_project_path = lambda p, path: state["paths"].update({p: path}) or {}
+        cli._ui()._origin = lambda: "git@github.com:me/brain.git"
+        cli._ui()._upstream = lambda: "https://github.com/x/braingent-sto"
+
+        s = run("data", "settings")
+        assert s["modules"] == [{"id": "skills", "enabled": True}, {"id": "hooks", "enabled": False}]
+        assert s["badge"] is False and s["look"] == {"icon": "desktop", "color": "cyan"}
+        assert "laptop" in s["icons"] and "green" in s["colors"]
+        assert s["cloud"] == "git@github.com:me/brain.git"
+
+        assert run("act", "set", "module", "hooks", "on")["done"] and state["mods"] == ["skills", "hooks"]
+        assert run("act", "set", "module", "skills", "off")["done"] and state["mods"] == ["hooks"]
+        assert run("act", "set", "badge", "on")["done"] and state["badge"] is True
+        assert run("act", "set", "icon", "laptop")["done"] and state["look"]["icon"] == "laptop"
+        assert run("act", "set", "color", "green")["done"] and state["look"]["color"] == "green"
+        for bad in (["module", "nope", "on"], ["badge", "maybe"], ["icon", "toaster"], ["color", "pink"]):
+            assert "error" in run("act", "set", *bad), bad
+
+        here = tempfile.mkdtemp()
+        assert run("act", "set-folder", "p", here)["done"] and state["paths"] == {"p": here}
+        assert "error" in run("act", "set-folder", "p", here + "/missing")   # a folder that is not there
+    finally:
+        for n, f in real.items():
+            setattr(cli.srv, n, f)
+        cli._ui()._origin, cli._ui()._upstream = real_ui
+
+
+def test_update_graph_and_usage_reach_the_engine():
+    import contextlib, io
+    real = (cli.srv.update_apply, cli.open_memory_graph, cli.srv.usage_snapshot)
+
+    def run(*argv):
+        with contextlib.redirect_stdout(io.StringIO()):
+            return json.loads(cli.main(list(argv))["message"])
+    try:
+        cli.srv.update_apply = lambda progress=None: {"ok": True, "message": "merged"}
+        assert run("act", "update")["done"] is True
+        cli.srv.update_apply = lambda progress=None: {"error": "dirty tree"}
+        assert run("act", "update") == {"error": "dirty tree"}
+        cli.open_memory_graph = lambda: {"message": "opened"}
+        assert run("act", "graph")["done"] is True
+        cli.srv.usage_snapshot = lambda detail=False: {"limits": [{"kind": "session", "percent": 34}]}
+        assert run("data", "usage") == {"limits": [{"kind": "session", "percent": 34}]}
+    finally:
+        cli.srv.update_apply, cli.open_memory_graph, cli.srv.usage_snapshot = real
+
+
 def test_data_views_print_json_and_never_a_traceback():
     import ui_data as ui
     real = (ui.status_data, cli.cached_sessions, cli.mark_synced, cli.srv.list_memory,
@@ -1084,4 +1150,6 @@ if __name__ == "__main__":
     test_data_detail_turns_a_chat_or_a_memory_into_markdown()
     test_settings_are_read_and_set_through_data_and_act()
     test_act_delete_takes_many_targets_here_or_everywhere()
+    test_settings_cover_sync_modules_badge_and_this_machines_look()
+    test_update_graph_and_usage_reach_the_engine()
     print("OK")
