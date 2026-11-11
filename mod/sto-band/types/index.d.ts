@@ -1,11 +1,9 @@
-/** What `sto mod status` prints, or the reason it could not. */
+/** What `sto data status` prints (the fields the band reads). */
 export type StoStatus = {
-  project: string
-  up: number
+  state: 'uptodate' | 'pending'
   down: number
-  pathSaved: boolean
-  ahead: number
-  behind: number
+  up: number
+  phrase: string
   fetchError: string | null
   accent: string
   labels: Record<string, string>
