@@ -643,29 +643,21 @@ def test_ui_downloads_the_build_of_its_version_where_go_is_missing():
 
 
 def test_ui_says_what_is_missing_instead_of_opening_nothing():
-    """Textual is the only front-end now, so a machine without it (and without
-    `uv` to borrow it) has to be told what to install.
-
-    Before, this case fell back to a stdlib TUI. That TUI is gone, and the
-    failure mode worth guarding against is the silent one: a `sto ui` that
-    returns an empty message and leaves the user staring at a prompt.
-    """
-    import sys
-    real_which, real_tree = cli.shutil.which, cli._tui_tree
+    """With no Go TUI to build or download, `sto ui` says what to do. The
+    failure worth guarding against is the silent one: an empty message and a
+    user staring at a prompt."""
+    real_go = cli._go_tui
     try:
-        cli._tui_tree = lambda: ""          # no Go TUI to be had either
-        cli.shutil.which = lambda name: None
-        sys.modules["textual"] = None      # import textual -> ImportError
+        cli._go_tui = lambda: None
         res = cli.cmd_ui()
-        assert "textual" in res["error"], res
+        assert res["error"] == cli.t("tui_missing"), res
     finally:
-        cli.shutil.which, cli._tui_tree = real_which, real_tree
-        sys.modules.pop("textual", None)
+        cli._go_tui = real_go
 
 
 def test_ui_takes_no_flag_at_all():
-    """`--textual` is not a flavour any more, it is the whole thing: passing it
-    has to be the same arity error as any other unknown argument."""
+    """`--textual` is not a flavour any more: passing it has to be the same
+    arity error as any other unknown argument."""
     for flag in ("--textual", "--web"):
         try:
             cli.cmd_ui(flag)

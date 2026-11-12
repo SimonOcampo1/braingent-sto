@@ -1,10 +1,10 @@
 # braingent-sto
 
-An orchestration layer over Claude Code: engine first (sessions + sync + vault), UI after. Backend: `scripts/sessions_server.py` (pure stdlib). App: `app/` (React). Knowledge: `vault/` (read `vault/CLAUDE.md` for the conventions).
+An orchestration layer over Claude Code: engine first (sessions + sync + vault), UI after. Backend: `scripts/sessions_server.py` (pure stdlib). TUI: `tui/` (Go, Bubble Tea). App: `app/` (React). Knowledge: `vault/` (read `vault/CLAUDE.md` for the conventions).
 
 ## Language
 
-Code, comments, docstrings and docs are written in English. The TUI and the CLI print in the language configured in `sto ui` (English by default, Spanish available); every user-facing string lives in `scripts/i18n.py` — never hardcode one in `tui_app.py` or `cli.py`.
+Code, comments, docstrings and docs are written in English. The TUI and the CLI print in the language configured in `sto ui` (English by default, Spanish available); every user-facing string lives in `scripts/i18n.py` — never hardcode one in `cli.py` or in the Go TUI (`tui/`), which receives its labels from `sto data status`.
 
 ## Where code is written
 
@@ -19,13 +19,6 @@ When a significant thread closes in this repo (a bug solved, a decision taken, r
 ## Tests
 
 ```
-cd scripts && python test_sessions_server.py && python test_dream_extract.py && python test_cli.py && python test_ui_data.py && python test_tui_app.py
-```
-
-`test_tui_app.py` skips itself when `textual` is missing, which is how the line
-above stays runnable on a machine that never opted into that flavour. To
-actually run it:
-
-```
-uv run --no-project --with textual python scripts/test_tui_app.py
+cd scripts && python test_sessions_server.py && python test_dream_extract.py && python test_cli.py && python test_ui_data.py
+cd tui && go test ./...
 ```

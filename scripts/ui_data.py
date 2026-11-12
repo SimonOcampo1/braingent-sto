@@ -2,7 +2,7 @@
 
 This is what is left of `ui.py` once the stdlib TUI was removed. The rendering
 half went with it — the alt screen, the `msvcrt` key loop, the diff-based
-repaint — and `tui_app.py` is the only front-end now. What stayed was never
+repaint — and the Go TUI in `tui/` reads it through `sto data`. What stayed was never
 about drawing: sync parity, knowledge counts, the accent and language prefs,
 transcript search, memory detail. Two callers share it, so it lives apart from
 either.

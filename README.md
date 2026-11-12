@@ -45,7 +45,7 @@ STO is the union of the three, on one substrate. Every artifact is **plain text 
 - **Modular sync.** Pick exactly which parts of `~/.claude` travel: `claude-md`, `settings`, `keybindings`, `skills`, `agents`, `hooks`, `plugins`. Memories, sessions and vault always travel.
 - **Redaction on export.** Session transcripts are trimmed to what a reader needs (prompts, tool names, errors) and scrubbed of API-key-shaped strings before they ever hit a commit.
 - **Resumable conversations.** Every session another machine pushed can be brought here with `sto resume <id>` (or `e` on the Sessions tab, per row or per project): it is filed under the path this machine registered for the project (`w`), so `claude --resume` and `/resume` find it. Without a `sto keep` it is rebuilt from the trimmed export as text-only turns (tool outputs are gone, the conversation is not); `sto keep <id>` archives one transcript untrimmed and gzipped when the full tool history matters.
-- **Terminal UI (`sto ui`).** Five tabs — Home, Sessions, Memory, Config, Help — built on Textual over the same engine the CLI uses: no HTTP in between, no second copy of any rule. Runs the same on Windows and Linux, and `uv` borrows Textual in a throwaway environment when it is not installed. The footer lists the verbs that work on the tab you are standing on, and nothing else.
+- **Terminal UI (`sto ui`).** Chats, Memories, Tools and Settings under one header that says, in one phrase, what Sync would move. Written in Go (Bubble Tea) and fed only by `sto data` / `sto act`, so it holds no rule of its own: grouped and foldable lists, search as you type, a reader for chats and memories, delete one or many here or everywhere, mouse and keyboard. `sto ui` builds it once with Go, or downloads the release built from exactly its `tui/`.
 - **Live push/pull progress.** Every step of a sync reports itself (`exporting sessions → staging → committing → pushing to origin`) with a spinner, instead of freezing the screen until git returns.
 - **Memory graph.** A real graph of *your memories*: one node per memory, one per project, edges from `[[wikilinks]]`. Opens as a chrome-less window with a project/type/machine sidebar, click-to-inspect detail panel and search. Built from the same files the repo syncs, so it shows every machine and every session, not just this one.
 - **Config parity at a glance.** The Home dashboard shows what is local-only, what is in the repo but not installed, and which plugins are missing on this machine.
@@ -62,14 +62,14 @@ braingent-sto/
 ├── scripts/
 │   ├── sessions_server.py   # engine: sessions, memory, config sync, git — stdlib only
 │   ├── cli.py               # `sto` — presentation over the engine
-│   ├── tui_app.py           # the TUI (Textual), over the same engine
-│   ├── ui_data.py           # computed state both front-ends read
+│   ├── ui_data.py           # computed state `sto data` serves the UIs
 │   ├── i18n.py              # every user-facing string, en/es
 │   ├── memory_graph.html    # graph window template (canvas 2D, no CDN)
 │   ├── dream_extract.py     # transcript parsing and redaction
 │   ├── install_sto_cli.sh   # installs `sto` on Linux/macOS: ~/.local/bin + PATH
 │   ├── install_sto_cli.ps1  # the same on Windows: both PowerShell profiles
 │   └── test_*.py            # the suite: no framework, no fixtures
+├── tui/                     # `sto ui`: Go + Bubble Tea, fed by sto data / sto act
 ├── app/                     # React + Vite dashboard (optional)
 ├── knowledge/               # what travels: sessions/, memory/, config/
 ├── vault/                   # curated knowledge: raw/ → wiki/ → outputs/
@@ -83,7 +83,7 @@ braingent-sto/
 
 - **Backend** — Python 3.11+, standard library only. No `pip install`, no virtualenv, no server to keep alive for the CLI: `cli.py` imports the engine directly.
 - **Sync** — plain `git`. Your repo, your remote, your history. Conflicts are git conflicts, and you already know how to resolve those.
-- **TUI** — Textual. Same screens on Windows and Linux; `uv` borrows it in a throwaway environment when it is not installed.
+- **TUI** — Go + Bubble Tea v2 in `tui/`. A workflow publishes a build per version for Linux, macOS and Windows.
 - **Graph** — one HTML file, canvas 2D, hand-rolled force layout. Opens offline in a Chromium `--app` window.
 - **App** — React 19, Vite 8, Tailwind 4, `react-force-graph` for the 2D/3D views.
 
@@ -247,7 +247,7 @@ would do it.
 ```bash
 cd scripts
 python test_sessions_server.py && python test_dream_extract.py && python test_cli.py && python test_ui_data.py
-uv run --no-project --with textual python test_tui_app.py
+cd ../tui && go test ./...
 ```
 
-No framework, no fixtures, no mocks beyond swapping a function for a lambda. The TUI suite skips itself when `textual` is missing, which is how the first line stays runnable on a machine that never opted into it.
+No framework, no fixtures, no mocks beyond swapping a function for a lambda. The Go suite runs the TUI against a fake `sto` script that records what it was asked.
