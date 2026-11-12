@@ -846,38 +846,15 @@ def _go_tui():
 
 
 def cmd_ui(*args):
-    """`sto ui` — the terminal UI: the Go TUI, or the Textual one where Go
-    cannot be had.
-
-    Textual imports `cli` and `sessions_server` directly; when it is missing,
-    `uv` runs it in a throwaway environment so nothing lands in the user's
-    Python.
-    """
+    """`sto ui` — the terminal UI, the Go one in `tui/`. It reads and acts
+    only through `sto data` / `sto act`, so it holds no rule of its own."""
     if args:
         return _no_args("ui")
     exe = _go_tui()
-    if exe:
-        subprocess.run([str(exe)])
-        return {"message": ""}
-    try:
-        import textual  # noqa: F401
-    except ImportError:
-        pass
-    else:
-        return __import__("tui_app").run()
-    if shutil.which("uv"):
-        # --no-project: this is a script in a repo that is not a uv project, and
-        # without it uv goes looking for a pyproject.toml and gives up
-        here = Path(__file__).parent
-        uv = ["uv", "run", "--no-project", "--with", "textual"]
-        # a cached textual is enough: without --offline uv asks PyPI on every
-        # launch, and a bad network left `sto ui` blank for half a minute
-        cached = subprocess.run(uv + ["--offline", "python", "-c", "import textual"],
-                                capture_output=True).returncode == 0
-        subprocess.run(uv + (["--offline"] if cached else []) +
-                       ["python", str(here / "tui_app.py")], cwd=here.parent)
-        return {"message": ""}
-    return {"error": t("textual_missing")}
+    if not exe:
+        return {"error": t("tui_missing")}
+    subprocess.run([str(exe)])
+    return {"message": ""}
 
 
 def _no_args(cmd):
