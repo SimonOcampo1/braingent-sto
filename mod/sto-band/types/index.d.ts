@@ -5,6 +5,8 @@ export type StoStatus = {
   up: number
   phrase: string
   fetchError: string | null
+  /** a background `git fetch` still running, and how far it got */
+  fetching: { phase: 'objects' | 'deltas'; pct: number; done: number; total: number; size: string | null } | null
   accent: string
   labels: Record<string, string>
 }

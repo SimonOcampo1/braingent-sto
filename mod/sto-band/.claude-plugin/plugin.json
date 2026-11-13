@@ -1,1 +1,1 @@
-{ "name": "sto-band", "version": "0.3.0", "description": "braingent above the prompt: whether this machine and the cloud are in sync, one Sync button, the 5h and weekly limits, the context window", "types": "./types/index.d.ts" }
+{ "name": "sto-band", "version": "0.3.1", "description": "braingent above the prompt: whether this machine and the cloud are in sync, one Sync button, the 5h and weekly limits, the context window", "types": "./types/index.d.ts" }
