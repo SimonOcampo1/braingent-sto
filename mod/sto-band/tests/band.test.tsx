@@ -9,7 +9,7 @@ const BAND = {
 const LABELS = { act_sync: 'Sincronizar', act_retry: 'reintentar', mod_syncing: 'sincronizando…',
                  mod_auto_off: 'auto: no', mod_5h: '5h', mod_week: 'sem', mod_ctx: 'ctx' }
 const PENDING = { state: 'pending', down: 51, up: 2, phrase: '51 nuevas en la nube · 2 para subir',
-                  fetchError: null, accent: '36', labels: LABELS }
+                  fetchError: null, fetching: null, accent: '36', labels: LABELS }
 const UPTODATE = { ...PENDING, state: 'uptodate', down: 0, up: 0, phrase: 'al día' }
 
 function fake(on: any, status: object, calls: string[][] = []) {
@@ -81,5 +81,18 @@ test('a failed sync says why and offers retry', async ($, on) => {
   const ui = await $.ui.mount({ plugin: 'sto-band', surface: 'terminal', ...BAND })
   expect((await ui.find({ type: 'Box' }))?.text).toContain('! sin conexión')
   expect(!!(await ui.find({ key: 'retry' }))).toBe(true)
+  await ui.unmount()
+})
+
+test('a long fetch shows its progress, not a red error', async ($, on) => {
+  mock.clock(on, { now: 1_000_000 })
+  fake(on, { ...PENDING, labels: { ...LABELS, fetching: 'fetcheando…' },
+             fetching: { phase: 'objects', pct: 53, done: 3449, total: 6453, size: '145.71 MiB' } })
+  await $.command.run({ command: 'sto' } as never)
+  const ui = await $.ui.mount({ plugin: 'sto-band', surface: 'terminal', ...BAND })
+  const text = (await ui.find({ type: 'Box' }))?.text ?? ''
+  expect(text).toContain('fetcheando… 53% (3449/6453) 145.71 MiB')
+  expect(text).not.toContain('!')
+  expect(!!(await ui.find({ key: 'sync' }))).toBe(false)
   await ui.unmount()
 })

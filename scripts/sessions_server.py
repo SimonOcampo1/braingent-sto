@@ -2169,10 +2169,19 @@ def memory_graph(src=None, bodies=False) -> dict:
 
 
 FETCH_TTL = 60  # seconds: a network round trip per `sto status` is the whole cost
-# An unasked-for fetch gives up early: the Claude Code band runs `sto data status`
-# with a 30 s budget, and a slow network must show up as a fetchError, not as
-# the band aborting. A forced fetch (an explicit sync) keeps `_git`'s default.
+# How long `sync_status` waits for the fetch it started: the Claude Code band
+# runs `sto data status` with a 30 s budget. A forced fetch (an explicit sync)
+# waits 120 s. Past that the fetch keeps running on its own (`_fetch_origin`).
 FETCH_TIMEOUT = 15
+# A fetch whose log has not moved in this long was killed (a shutdown, a sleep).
+FETCH_STALL = 120
+FETCH_ARGV = ["git", "fetch", "--progress", "origin"]
+_FETCH_RUNNER = ("import subprocess, sys\n"
+                 "with open(sys.argv[1], 'a') as log:\n"
+                 "    rc = subprocess.call(sys.argv[2:], stdout=log, stderr=log)\n"
+                 "    log.write('\\nrc=%d\\n' % rc)\n")
+_FETCH_PROGRESS = re.compile(r"(Receiving objects|Resolving deltas):\s+(\d+)% \((\d+)/(\d+)\)"
+                             r"(?:, ([\d.]+ \w+))?")
 
 
 _NEIGH = {"ts": 0.0, "links": None}
@@ -2246,6 +2255,78 @@ def _stale_fetch(ttl=FETCH_TTL) -> bool:
         return True
 
 
+def _fetch_log_path() -> Path:
+    return REPO_ROOT / ".git" / "sto-fetch.log"
+
+
+def _fetch_log():
+    """(finished, rc, text) of the last background fetch; finished with rc 0
+    when there never was one."""
+    import time
+    log = _fetch_log_path()
+    try:
+        text = log.read_text(encoding="utf-8", errors="replace")
+        age = time.time() - log.stat().st_mtime
+    except OSError:
+        return True, 0, ""
+    m = re.search(r"\nrc=(-?\d+)\n\Z", text)
+    if m:
+        return True, int(m.group(1)), text
+    return age > FETCH_STALL, 1, text
+
+
+def _fetch_progress(text: str):
+    """git's last progress line as {phase, pct, done, total, size}, or None."""
+    for line in reversed(re.split(r"[\r\n]", text)):
+        m = _FETCH_PROGRESS.search(line)
+        if m:
+            return {"phase": "deltas" if m.group(1).startswith("Resolving") else "objects",
+                    "pct": int(m.group(2)), "done": int(m.group(3)),
+                    "total": int(m.group(4)), "size": m.group(5)}
+    return None
+
+
+def _fetch_origin(wait: float):
+    """(error, progress) of a `git fetch origin` that runs detached.
+
+    A fetch that has to bring hundreds of MB (another machine's transcripts
+    over a slow link) never fit in FETCH_TIMEOUT: every try was killed
+    halfway, left a tmp_pack of garbage behind, and the band stayed red with
+    "timed out" forever. Now the fetch outlives whoever started it and writes
+    git's progress to .git/sto-fetch.log; each status reads where it is.
+    `progress` is not None while it runs. A fetch somebody else started is
+    reported, not waited on.
+
+    ponytail: "running" is the log having moved in the last FETCH_STALL
+    seconds, not a pid check — a fetch killed by a shutdown is retried after that.
+    """
+    import subprocess as sp
+    import time
+    done, _, _ = _fetch_log()
+    if done:
+        _fetch_log_path().write_text("", encoding="utf-8")
+        sp.Popen([sys.executable, "-c", _FETCH_RUNNER, str(_fetch_log_path()), *FETCH_ARGV],
+                 cwd=REPO_ROOT, env={**os.environ, "LC_ALL": "C", "GIT_TERMINAL_PROMPT": "0"},
+                 stdin=sp.DEVNULL, stdout=sp.DEVNULL, stderr=sp.DEVNULL,
+                 start_new_session=True)
+    else:
+        wait = 0
+    end = time.monotonic() + wait
+    while True:
+        done, rc, text = _fetch_log()
+        if done or time.monotonic() >= end:
+            break
+        time.sleep(0.2)
+    if not done:
+        return None, _fetch_progress(text) or {"phase": "objects", "pct": 0, "done": 0,
+                                                 "total": 0, "size": None}
+    if rc == 0:
+        return None, None
+    lines = [l.strip() for l in re.split(r"[\r\n]", text)
+             if l.strip() and not l.startswith("rc=") and not _FETCH_PROGRESS.search(l)]
+    return (lines[-1] if lines else "fetch failed"), None
+
+
 def sync_status(fetch=True, force=False) -> dict:
     """`force` skips the FETCH_TTL window: a fetch nobody asked for can wait a
     minute, but one somebody pressed a key for cannot — it would flash
@@ -2253,12 +2334,10 @@ def sync_status(fetch=True, force=False) -> dict:
     code, remote = _git("remote", "get-url", "origin")
     if code != 0:
         return {"remote": None, "branch": None, "ahead": 0, "behind": 0,
-                "dirty": False, "machine": LOCAL_MACHINE, "fetchError": None}
-    fetch_error = None
+                "dirty": False, "machine": LOCAL_MACHINE, "fetchError": None, "fetching": None}
+    fetch_error = fetching = None
     if fetch and (force or _stale_fetch()):
-        fcode, fout = _git("fetch", "--quiet", "origin", timeout=120 if force else FETCH_TIMEOUT)
-        if fcode != 0:
-            fetch_error = fout or "fetch failed"
+        fetch_error, fetching = _fetch_origin(120 if force else FETCH_TIMEOUT)
     _, branch = _git("rev-parse", "--abbrev-ref", "HEAD")
     ahead = behind = 0
     code, counts = _git("rev-list", "--left-right", "--count", f"origin/{branch}...HEAD")
@@ -2269,7 +2348,8 @@ def sync_status(fetch=True, force=False) -> dict:
             pass
     _, porcelain = _git("status", "--porcelain")
     return {"remote": remote, "branch": branch, "ahead": ahead, "behind": behind,
-            "dirty": bool(porcelain), "machine": LOCAL_MACHINE, "fetchError": fetch_error}
+            "dirty": bool(porcelain), "machine": LOCAL_MACHINE, "fetchError": fetch_error,
+            "fetching": fetching}
 
 
 def _conflict_msg(out: str) -> str:
@@ -2598,6 +2678,9 @@ def sync_push(progress=None) -> dict:
     # Inside the FETCH_TTL window a push from another machine is invisible, and
     # the guard would wave through a push that git then rejects.
     st = sync_status(force=True)
+    if st.get("fetching"):
+        return {"error": f"still fetching from the cloud ({st['fetching']['pct']}%): "
+                         "push when it finishes", "status": st}
     if st["behind"] > 0:
         return {"error": f"remote has {st['behind']} new commit(s): pull first",
                 "needsPull": True, "status": st}

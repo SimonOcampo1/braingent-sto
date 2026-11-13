@@ -13,6 +13,8 @@ const isBusy = atom({ plugin: 'sto-band', key: 'isBusy' } as const, false)
 const isAuto = atom({ plugin: 'sto-band', key: 'isAuto' } as const, true)
 
 const REFRESH_MS = 60_000
+// while a long fetch runs in the background, so its progress moves on screen
+const FETCH_POLL_MS = 10_000
 const AUTO_MS = 30 * 60_000
 const ANSI: Record<string, string> = {
   '31': 'red', '32': 'green', '33': 'yellow',
@@ -94,6 +96,11 @@ export const register: Register = on => {
     // bring down before anything else: the memories another machine wrote land
     // before the first prompt reads them
     void (auto ? runSync($, ['act', 'pull'], true) : refresh($, true))
+    $.clock.every(FETCH_POLL_MS, () => {
+      void (async () => {
+        if ((await read($, status))?.fetching) await refresh($, true)
+      })()
+    })
     $.clock.every(AUTO_MS, () => {
       void (async () => {
         if (await read($, isAuto)) await runSync($, ['act', 'sync'], true)
@@ -136,6 +143,10 @@ export const register: Register = on => {
     const accent = ANSI[s?.accent ?? '36'] ?? 'cyan'
     const pct = (label: string, v?: number) =>
       v === undefined ? null : <Text dimColor>{label} {Math.round(v)}%  </Text>
+    const f = s?.fetching
+    const fetching = f && [L('fetching', 'fetching…'), f.phase === 'deltas' ? 'deltas' : '',
+                            f.pct + '%', f.total ? `(${f.done}/${f.total})` : '', f.size ?? '']
+                           .filter(Boolean).join(' ')
     const arrows = s ? [s.down ? '↓' + s.down : '', s.up ? '↑' + s.up : ''].filter(Boolean).join(' ') : ''
 
     return (
@@ -145,10 +156,11 @@ export const register: Register = on => {
         {!busy && err && <Text color="warning">! {err.slice(0, 60)}  </Text>}
         {!busy && err && <Button key="retry" label={L('act_retry', 'retry')}
                                  onPress={() => void syncHere($)} />}
-        {!busy && !err && s?.state === 'pending' && <Text color={accent}>{arrows}  </Text>}
-        {!busy && !err && s?.state === 'pending' &&
+        {!busy && !err && fetching && <Text color={accent}>{fetching}  </Text>}
+        {!busy && !err && !fetching && s?.state === 'pending' && <Text color={accent}>{arrows}  </Text>}
+        {!busy && !err && !fetching && s?.state === 'pending' &&
           <Button key="sync" label={L('act_sync', 'Sync')} onPress={() => void syncHere($)} />}
-        {!busy && !err && s?.state === 'uptodate' && <Text dimColor>{s.phrase}  </Text>}
+        {!busy && !err && !fetching && s?.state === 'uptodate' && <Text dimColor>{s.phrase}  </Text>}
         {pct(L('mod_5h', '5h'), u.fiveHour)}
         {pct(L('mod_week', 'wk'), u.week)}
         {pct(L('mod_ctx', 'ctx'), u.ctx)}

@@ -612,6 +612,9 @@ def cmd_status(*a):
            f"{_pad(behind, 18, YELLOW)}{c(dirty, DIM)}"]
     if st["fetchError"]:
         out.append(c("  " + t("cli_fetch_failed", e=st["fetchError"]), YELLOW))
+    if st.get("fetching"):
+        f = st["fetching"]
+        out.append(c(f"  {t('fetching')} {f['pct']}% ({f['done']}/{f['total']})", CYAN))
     return {"message": "\n".join(out)}
 
 

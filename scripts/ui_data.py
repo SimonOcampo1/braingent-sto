@@ -173,7 +173,7 @@ def preview_parts(data):
 
 
 # what every UI that reads `status_data` paints, in the language `sto ui` picked
-DATA_LABELS = ("act_sync", "act_retry", "mod_syncing", "mod_auto_off", "mod_5h",
+DATA_LABELS = ("act_sync", "act_retry", "mod_syncing", "fetching", "mod_auto_off", "mod_5h",
                "mod_week", "mod_ctx", "st_both", "st_local", "st_repo", "st_gone",
                "k_bring", "k_delete", "k_forget", "k_keep", "k_row_path",
                "folder_missing", "cloud_is_repo", "update_notice", "loading", "empty",
@@ -247,6 +247,7 @@ def status_data(cwd=None, fetch=False, limits=False, all_chats=False):
             "parts": {"down": preview_parts(down), "up": preview_parts(up)},
             "chats": chats, "project": project,
             "fetchError": sy.get("fetchError"),
+            "fetching": sy.get("fetching"),
             # never fetches upstream: with --fetch the origin fetch already
             # spends half the band's 30 s; `sto update` refreshes the notice
             "update": upd.get("available", 0), "updateLog": (upd.get("log") or [])[:14],

@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 import json
 import os
 import shutil
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -1382,29 +1383,41 @@ def test_an_explicit_update_check_fetches_even_with_a_fresh_ref():
         srv._git, srv._stale_fetch_ref = real_git, real_stale
 
 
-def test_a_slow_network_cannot_outlast_the_claude_code_band():
-    """The bug: the band runs `sto data status` with a 30 s budget, and the
-    status fetch used `_git`'s 120 s default. With GitHub slow, the fetch alone
-    took ~55 s and the band printed "aborted: still running after...". The
-    fetch must give up early and come back as a `fetchError` instead."""
-    real_git, real_stale = srv._git, srv._stale_fetch
-    plazos = {}
+def test_a_slow_fetch_runs_on_and_reports_its_progress():
+    """The bug: on a slow link a fetch that had hundreds of MB to bring never
+    fit in the 15 s status budget. Every try was killed halfway and the band
+    stayed red with "timed out". The fetch now runs detached: status reports
+    its progress while it runs, and an error only when it really fails."""
+    real_git, real_stale, real_root = srv._git, srv._stale_fetch, srv.REPO_ROOT
+    real_argv, real_wait = srv.FETCH_ARGV, srv.FETCH_TIMEOUT
+    slow = ("import sys, time; sys.stderr.write('remote: Counting objects\\n"
+            "Receiving objects:  53% (3449/6453), 145.71 MiB | 160.00 KiB/s\\r');"
+            "sys.stderr.flush(); time.sleep(1.5)")
     try:
-        srv._stale_fetch = lambda *a, **k: True
-        def fake(*args, timeout=120):
-            plazos[args[0]] = timeout
-            if args[0] == "remote":
-                return 0, "git@x"
-            if args[0] == "fetch":
-                return 1, "timed out"
-            return 0, ""
-        srv._git = fake
-        st = srv.sync_status()
-        assert plazos["fetch"] <= 20, plazos
-        assert st["fetchError"] == "timed out", st
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / ".git").mkdir()
+            srv.REPO_ROOT, srv.FETCH_TIMEOUT = Path(d), 0.5
+            srv._stale_fetch = lambda *a, **k: True
+            srv._git = lambda *args, timeout=120: (0, "git@x") if args[0] == "remote" else (0, "")
+            srv.FETCH_ARGV = [sys.executable, "-c", slow]
+            st = srv.sync_status()
+            assert st["fetchError"] is None, st
+            assert st["fetching"] == {"phase": "objects", "pct": 53, "done": 3449,
+                                      "total": 6453, "size": "145.71 MiB"}, st
+            # a second status does not start another fetch nor wait on this one
+            t0 = time.monotonic()
+            assert srv.sync_status()["fetching"]["pct"] == 53
+            assert time.monotonic() - t0 < 0.4
+            time.sleep(2)
+            assert srv._fetch_log()[:2] == (True, 0)   # it finished on its own
+            srv.FETCH_ARGV = [sys.executable, "-c",
+                              "import sys; sys.stderr.write('fatal: unable to access\\n'); sys.exit(128)"]
+            time.sleep(1.5)
+            st = srv.sync_status(force=True)
+            assert st == {**st, "fetchError": "fatal: unable to access", "fetching": None}, st
     finally:
-        srv._git, srv._stale_fetch = real_git, real_stale
-
+        srv._git, srv._stale_fetch, srv.REPO_ROOT = real_git, real_stale, real_root
+        srv.FETCH_ARGV, srv.FETCH_TIMEOUT = real_argv, real_wait
 
 def test_update_apply_refuses_an_unrelated_repo_instead_of_forcing_a_merge():
     """A repo copied instead of forked shares no commit with upstream. Merging
@@ -2259,7 +2272,7 @@ if __name__ == "__main__":
     test_an_echo_is_only_dropped_while_another_machine_carries_it()
     test_a_chat_continued_on_two_machines_brings_theirs_beside_ours()
     test_sync_push_forces_a_fetch_before_the_behind_check()
-    test_a_slow_network_cannot_outlast_the_claude_code_band()
+    test_a_slow_fetch_runs_on_and_reports_its_progress()
     test_delete_session_takes_the_transcript_here_and_its_copies_in_the_cloud()
     test_delete_memory_takes_every_copy_here_and_in_the_cloud()
     print("OK")
