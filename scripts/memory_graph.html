@@ -149,7 +149,22 @@
   #modal.on #docwrap { animation-delay:.06s; }
   #modal.on .sheet-foot { animation-delay:.12s; }
   #sheetClose { position:absolute; top:22px; right:22px; z-index:1; }
-  #sheetMeta { display:flex; flex-wrap:wrap; gap:6px 14px; padding-right:52px;
+  #sheetCopy { position:absolute; top:22px; right:70px; z-index:1; }
+  /* copy: the icon turns into a check in the accent, then back */
+  .i-done { display:none; }
+  .copied .i-copy { display:none; }
+  .copied .i-done { display:block; animation:pop .45s var(--out); }
+  .round.copied { border-color:var(--accent); color:var(--accent); }
+  .pill svg { width:13px; height:13px; stroke:currentColor; fill:none; stroke-width:1.8;
+              stroke-linecap:round; stroke-linejoin:round; }
+  .pill.copied { border-color:var(--accent); color:var(--accent); }
+  #sheetCopy::after { content:"Copied"; position:absolute; right:calc(100% + 10px); top:50%;
+                      font:500 10px var(--mono); letter-spacing:.12em; text-transform:uppercase;
+                      color:var(--accent); opacity:0; transform:translate(6px, -50%);
+                      transition:opacity .25s var(--out), transform .4s var(--out); pointer-events:none; }
+  #sheetCopy.copied::after { opacity:1; transform:translate(0, -50%); }
+  @keyframes pop { from { transform:scale(.4); opacity:0; } }
+  #sheetMeta { display:flex; flex-wrap:wrap; gap:6px 14px; padding-right:180px;
                font:500 10px var(--mono); letter-spacing:.14em; text-transform:uppercase; color:var(--dim); }
   #sheetMeta span { display:inline-flex; align-items:center; gap:7px; }
   #sheetMeta i { width:6px; height:6px; border-radius:50%; background:var(--accent); }
@@ -264,6 +279,7 @@
   <div><span>Zoom</span><kbd>wheel</kbd></div>
   <div><span>Detail</span><kbd>click</kbd></div>
   <div><span>Read memory</span><kbd>r · dbl-click</kbd></div>
+  <div><span>Copy memory</span><kbd>c</kbd></div>
   <div><span>Focus its project</span><kbd>f</kbd></div>
   <div><span>Search</span><kbd>/</kbd></div>
   <div><span>2D / 3D</span><kbd>2</kbd></div>
@@ -277,6 +293,7 @@
 <aside id="detail"><button class="round" id="close" title="Close (esc)">
   <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button><div id="detailBody"></div></aside>
 <div id="modal"><article id="sheet">
+  <button class="round" id="sheetCopy" title="Copy the memory (c)"><svg class="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2.5"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><svg class="i-done" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></button>
   <button class="round" id="sheetClose" title="Close (esc)">
     <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
   <header class="sheet-head"><div id="sheetMeta"></div><h2 id="sheetTitle"></h2>
@@ -726,8 +743,10 @@ function md(src) {
 }
 
 const docwrap = document.getElementById("docwrap");
+let reading = null;   // the memory the sheet shows, for the copy button
 function readNode(n) {
   if (!n || n.kind !== "memory") return;
+  reading = n;
   const go = id => { const o = byId.get(id); if (o) { centreOn(o); openNode(o); readNode(o); } };
   document.getElementById("sheetTitle").textContent = n.label;
   document.getElementById("sheetMeta").innerHTML =
@@ -777,6 +796,7 @@ function openNode(n) {
        <h2>${esc(n.label)}</h2>
        <p>${esc(n.desc || "—")}</p>
        <div class="actions"><button class="pill main" id="dRead">Read memory <kbd>r</kbd></button>
+         <button class="pill" id="dCopy"><svg class="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2.5"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><svg class="i-done" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg><span>Copy</span> <kbd>c</kbd></button>
          ${p ? `<button class="pill" id="dFocus">${fProject === p ? "Show all" : esc(p.label)} <kbd>f</kbd></button>` : ""}</div>`;
   $("detailBody").innerHTML = head +
     `<div class="head" style="margin:0 0 8px"><span>Linked</span><span>${vs.length}</span></div>` +
@@ -787,6 +807,7 @@ function openNode(n) {
   $("detailBody").querySelectorAll(".link").forEach(b =>
     b.onclick = () => { const o = byId.get(b.dataset.id); if (o) { centreOn(o); openNode(o); } });
   if ($("dRead")) $("dRead").onclick = () => readNode(n);
+  if ($("dCopy")) $("dCopy").onclick = () => copyMemory(n, $("dCopy"));
   if ($("dFocus")) $("dFocus").onclick = () => { focusProject(fProject === p ? null : p); openNode(n); };
   $("detail").classList.add("on");
   $("detail").scrollTop = 0;
@@ -873,8 +894,34 @@ function clearAll() {
   if (sel) closeDetail();
   filtersChanged();
 }
+// ── copy: the memory's text as written, markdown and all ──
+async function copyMemory(n, btn) {
+  if (!n || n.kind !== "memory") return;
+  const text = n.body || n.desc || "";
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    // no async clipboard (an old engine, a page not counted as secure): the
+    // selection route still works from a click or a key
+    const ta = Object.assign(document.createElement("textarea"), { value:text });
+    ta.style.cssText = "position:fixed;opacity:0";
+    document.body.append(ta); ta.select(); document.execCommand("copy"); ta.remove();
+  }
+  if (!btn) return;
+  const label = btn.querySelector("span");
+  btn.classList.add("copied");
+  if (label) label.textContent = "Copied";
+  clearTimeout(btn.copyTimer);
+  btn.copyTimer = setTimeout(() => { btn.classList.remove("copied"); if (label) label.textContent = "Copy"; }, 1600);
+}
+$("sheetCopy").onclick = () => copyMemory(reading, $("sheetCopy"));
+
 addEventListener("keydown", e => {
   const inField = document.activeElement === $("q");
+  if (e.key === "c" && !inField && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    if (modal.classList.contains("on")) return copyMemory(reading, $("sheetCopy"));
+    if (sel) return copyMemory(sel, $("dCopy"));
+  }
   if (e.key === "Escape") {
     if (modal.classList.contains("on")) return closeReader();
     if ($("help").classList.contains("on")) return $("bHelp").onclick();
