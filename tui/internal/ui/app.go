@@ -1064,7 +1064,10 @@ func (m Model) titleRow(l line, width int, on bool) string {
 		mark = "▶ "
 	}
 	count, moves := fmt.Sprint(l.count), ""
-	if m.shown() == tChats {
+	switch m.shown() {
+	case tSettings: // a section of settings, not a list: how many it holds says nothing
+		count = ""
+	case tChats:
 		count = n(m.L("tui_n_chats"), l.count)
 		// ↑ to send, ↓ to bring: the only colour on the line
 		moves = strings.TrimSpace(arrows(0, m.chatsIn(l.group, "local")) + " " + arrows(m.chatsIn(l.group, "repo"), 0))
@@ -1139,7 +1142,11 @@ func (m Model) side(width, ox, y int) []string {
 		g := l.lines[l.cur]
 		b := button.Render(m.L("tui_fold"))
 		m.fr.hits.add(ox+2, y+1+3, lipgloss.Width(b), target{"fold", 0})
-		out := []string{bold.Render(ansi.Truncate(g.group, in, "…")), faint.Render(fmt.Sprint(g.count)), "",
+		count := fmt.Sprint(g.count)
+		if m.shown() == tSettings {
+			count = ""
+		}
+		out := []string{bold.Render(ansi.Truncate(g.group, in, "…")), faint.Render(count), "",
 			b + faint.Render("  ↵ / space"), "", faint.Render("c  " + m.L("tui_fold_all"))}
 		if k := m.chatsIn(g.group, "repo"); m.shown() == tChats && k > 0 {
 			bb := button.Render(n(m.L("tui_bring_n"), k))

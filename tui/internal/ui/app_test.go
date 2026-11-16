@@ -506,3 +506,20 @@ func TestANarrowFooterWrapsWithoutCuttingAKey(t *testing.T) {
 		t.Fatal("? opens the list of keys")
 	}
 }
+
+func TestSettingsSectionsCarryNoCount(t *testing.T) {
+	m, _ := settingsModel(t)
+	titles := 0
+	for _, l := range m.lists[tSettings].lines {
+		if l.group == "" || l.it != nil {
+			continue
+		}
+		titles++
+		if row := strings.TrimSpace(ansi.Strip(m.titleRow(l, 80, false))); strings.ContainsAny(row[len(row)-1:], "0123456789") {
+			t.Errorf("section title %q ends in a count", row)
+		}
+	}
+	if titles == 0 {
+		t.Fatal("no section titles in settings")
+	}
+}
