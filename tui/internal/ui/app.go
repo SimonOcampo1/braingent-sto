@@ -143,6 +143,14 @@ func (m Model) L(key string) string { return m.st.L(key) }
 
 func n(label string, v int) string { return strings.ReplaceAll(label, "{n}", fmt.Sprint(v)) }
 
+// nChats is "1 chat" or "{n} chats", in the configured language.
+func (m Model) nChats(v int) string {
+	if v == 1 {
+		return n(m.L("tui_n_chat"), v)
+	}
+	return n(m.L("tui_n_chats"), v)
+}
+
 func (m Model) load(view string, args ...string) tea.Cmd {
 	c, cwd := m.c, m.cwd
 	return func() tea.Msg {
@@ -978,7 +986,7 @@ func (m Model) card(W, ox, y int) []string {
 		parts = append(parts, acc.Render("↑ ")+p)
 	}
 	if v := m.st.Chats.Up; v > 0 {
-		parts = append(parts, acc.Render("↑ ")+n(m.L("tui_n_chats"), v))
+		parts = append(parts, acc.Render("↑ ")+m.nChats(v))
 	}
 	if len(parts) > 0 {
 		body = append(body, ansi.Truncate(strings.Join(parts, "   "), inW, "…"))
@@ -1068,7 +1076,7 @@ func (m Model) titleRow(l line, width int, on bool) string {
 	case tSettings: // a section of settings, not a list: how many it holds says nothing
 		count = ""
 	case tChats:
-		count = n(m.L("tui_n_chats"), l.count)
+		count = m.nChats(l.count)
 		// ↑ to send, ↓ to bring: the only colour on the line
 		moves = strings.TrimSpace(arrows(0, m.chatsIn(l.group, "local")) + " " + arrows(m.chatsIn(l.group, "repo"), 0))
 	}
@@ -1235,7 +1243,7 @@ func (m Model) summary(W, H, ox, oy int) string {
 		lines = append(lines, faint.Render(m.L("tui_will_send")+"  ")+p)
 	}
 	if s.Chats.Up > 0 {
-		lines = append(lines, faint.Render(m.L("tui_will_send")+"  ")+n(m.L("tui_n_chats"), s.Chats.Up))
+		lines = append(lines, faint.Render(m.L("tui_will_send")+"  ")+m.nChats(s.Chats.Up))
 	}
 	if len(lines) == 2 {
 		lines = append(lines, s.Phrase)

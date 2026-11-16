@@ -114,7 +114,7 @@ STRINGS = {
         "cloud_is_repo": "La nube es tu repo privado de GitHub",
         # the Go TUI: it gets these through `braingent data status`
         "tui_chats": "Chats", "tui_memories": "Memorias", "tui_tools": "Herramientas",
-        "tui_settings": "Ajustes", "tui_n_chats": "{n} chats", "tui_here": "estás acá",
+        "tui_settings": "Ajustes", "tui_n_chats": "{n} chats", "tui_n_chat": "{n} chat", "tui_here": "estás acá",
         "tui_will_bring": "Vas a traer", "tui_will_send": "Vas a enviar",
         "tui_confirm": "↵ confirmar  esc cancelar",
         "tui_project": "Proyecto", "tui_folder": "Carpeta acá", "tui_machine": "Máquina",
@@ -372,7 +372,7 @@ STRINGS = {
         "cloud_is_repo": "The cloud is your private GitHub repo",
         # the Go TUI: it gets these through `braingent data status`
         "tui_chats": "Chats", "tui_memories": "Memories", "tui_tools": "Tools",
-        "tui_settings": "Settings", "tui_n_chats": "{n} chats", "tui_here": "you are here",
+        "tui_settings": "Settings", "tui_n_chats": "{n} chats", "tui_n_chat": "{n} chat", "tui_here": "you are here",
         "tui_will_bring": "You will bring", "tui_will_send": "You will send",
         "tui_confirm": "↵ confirm  esc cancel",
         "tui_project": "Project", "tui_folder": "Folder here", "tui_machine": "Machine",

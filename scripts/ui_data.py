@@ -177,7 +177,7 @@ DATA_LABELS = ("act_sync", "act_retry", "mod_syncing", "fetching", "mod_auto_off
                "mod_week", "mod_ctx", "st_both", "st_local", "st_repo", "st_gone",
                "k_bring", "k_delete", "k_forget", "k_keep", "k_row_path",
                "folder_missing", "cloud_is_repo", "update_notice", "loading", "empty",
-               "tui_chats", "tui_memories", "tui_tools", "tui_settings", "tui_n_chats",
+               "tui_chats", "tui_memories", "tui_tools", "tui_settings", "tui_n_chats", "tui_n_chat",
                "tui_here", "tui_will_bring", "tui_will_send",
                "tui_confirm", "tui_project", "tui_folder", "tui_machine",
                "tui_when", "tui_search", "tui_plugins",
