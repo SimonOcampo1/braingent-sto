@@ -478,6 +478,17 @@ SYNC_PREFS = CLAUDE_DIR / "sto-sync.json"  # per-machine: which modules sync
 # never synced, ever: credentials and machine-local settings
 CONFIG_EXCLUDE = {".credentials.json", "settings.local.json", "__pycache__",
                   ".DS_Store", "node_modules", ".sto-backup"}
+# never synced either: folders the agent itself fills on every machine. Claude
+# Code writes skills/synced/ from the claude.ai account each round; a second
+# writer through the repo only produced phantom changes in both directions.
+CONFIG_MANAGED = (("skills", "synced"),)
+
+
+def _managed(rel: Path) -> bool:
+    """Is `rel` (relative to the agent's home) inside a folder the agent owns?"""
+    return any(rel.parts[:len(m)] == m for m in CONFIG_MANAGED)
+
+
 _TEXT_EXT = {".md", ".json", ".txt", ".yaml", ".yml", ".toml",
              ".js", ".mjs", ".cjs", ".ts", ".py", ".ps1", ".sh"}
 
@@ -539,8 +550,9 @@ def _module_files(base: Path, module: str):
             yield p, Path(entry)
         elif p.is_dir():
             for f in sorted(p.rglob("*")):
-                if f.is_file() and not (set(f.relative_to(base).parts) & CONFIG_EXCLUDE):
-                    yield f, f.relative_to(base)
+                rel = f.relative_to(base)
+                if f.is_file() and not (set(rel.parts) & CONFIG_EXCLUDE) and not _managed(rel):
+                    yield f, rel
 
 
 def _same(target: Path, text: str | None, blob: bytes | None) -> bool:
@@ -639,6 +651,8 @@ def _apply_tree(src_root: Path, dest_root: Path, home: str, backup: Path, dry: b
         if not f.is_file():
             continue
         rel = f.relative_to(src_root)
+        if _managed(rel):   # an older export may still carry a copy: it never lands
+            continue
         target = dest_root / rel
         text = blob = None
         if f.suffix.lower() in _TEXT_EXT:

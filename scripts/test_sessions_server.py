@@ -476,6 +476,36 @@ def test_apply_config_and_bring_share_one_copy_loop():
                             home="C:/casa") == 0
 
 
+def test_the_skills_claude_code_syncs_itself_never_travel():
+    """~/.claude/skills/synced/ is written by Claude Code from the claude.ai
+    account, on every machine, every round (.last-complete-round changes each
+    time). Copying it too made two writers of one folder: after every round
+    the home said "24 to send · 24 to activate" on a repo already up to date.
+    """
+    with tempfile.TemporaryDirectory() as d:
+        claude, cfg = Path(d) / "claude", Path(d) / "cfg"
+        mine = claude / "skills" / "mine"
+        managed = claude / "skills" / "synced" / "acct_org" / "docx"
+        mine.mkdir(parents=True)
+        managed.mkdir(parents=True)
+        (mine / "SKILL.md").write_text("mine", encoding="utf-8")
+        (managed / "SKILL.md").write_text("from the account", encoding="utf-8")
+        (managed.parent / ".last-complete-round").write_text("round 1", encoding="utf-8")
+
+        assert export_config(["skills"], claude_dir=claude, repo_config=cfg, dry=True) == 1
+        export_config(["skills"], claude_dir=claude, repo_config=cfg)
+        assert (cfg / "skills" / "skills" / "mine" / "SKILL.md").is_file()
+        assert not (cfg / "skills" / "skills" / "synced").exists()
+
+        # a repo exported before the fix still carries a copy: it never lands
+        old = cfg / "skills" / "skills" / "synced" / "acct_org" / "docx"
+        old.mkdir(parents=True)
+        (old / "SKILL.md").write_text("an older round", encoding="utf-8")
+        assert apply_config(["skills"], claude_dir=claude, repo_config=cfg, dry=True) == 0
+        apply_config(["skills"], claude_dir=claude, repo_config=cfg)
+        assert (managed / "SKILL.md").read_text(encoding="utf-8") == "from the account"
+
+
 def test_memory_neighbours_is_one_level_and_both_directions():
     with tempfile.TemporaryDirectory() as d:
         root = Path(d) / "memory"
@@ -2275,4 +2305,5 @@ if __name__ == "__main__":
     test_a_slow_fetch_runs_on_and_reports_its_progress()
     test_delete_session_takes_the_transcript_here_and_its_copies_in_the_cloud()
     test_delete_memory_takes_every_copy_here_and_in_the_cloud()
+    test_the_skills_claude_code_syncs_itself_never_travel()
     print("OK")
