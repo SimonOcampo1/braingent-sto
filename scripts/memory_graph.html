@@ -131,33 +131,70 @@
   .none { color:var(--dim); font-size:13px; }
   @keyframes rise { from { opacity:0; transform:translateY(6px); } }
 
-  /* ── the reader: a sheet over a veil. Sans for the prose and a 66ch measure ── */
-  #modal { position:fixed; inset:0; z-index:9; background:var(--veil); overflow-y:auto;
-           padding:7vh 16px; backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px);
+  /* ── the reader: a sheet over a veil that never scrolls the page. The sheet
+     is capped to the window; head and foot stay, only the prose scrolls, and
+     its edges fade out where there is more. Sans for the prose, 64ch measure. ── */
+  #modal { position:fixed; inset:0; z-index:9; background:var(--veil); overflow:hidden;
+           display:grid; place-items:center; padding:5vh 20px;
+           backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px);
            opacity:0; visibility:hidden; transition:opacity .3s var(--out), visibility 0s .3s; }
   #modal.on { opacity:1; visibility:visible; transition:opacity .3s var(--out); }
-  #sheet { max-width:740px; margin:0 auto; background:var(--panel); border:1px solid var(--hair);
-           border-radius:16px; padding:46px 56px 54px; position:relative;
-           transform:translateY(18px) scale(.985); transition:transform .55s var(--out); }
+  #sheet { width:min(780px, 100%); max-height:min(880px, 90vh); display:flex; flex-direction:column;
+           background:var(--panel); border:1px solid var(--hair); border-radius:18px;
+           position:relative; overflow:hidden;
+           transform:translateY(22px) scale(.98); transition:transform .6s var(--out); }
   #modal.on #sheet { transform:none; }
-  #sheetClose { position:absolute; top:20px; right:20px; }
-  #sheetMeta { font:500 10px var(--mono); letter-spacing:.14em; text-transform:uppercase;
-               color:var(--dim); margin-bottom:12px; }
-  #sheetMeta b { color:var(--accent); font-weight:500; }
-  #sheetTitle { margin:0 0 28px; padding-bottom:22px; border-bottom:1px solid var(--hair);
-                font:600 32px/1.12 var(--sans); letter-spacing:-.02em; word-break:break-word; }
-  #doc { font:16px/1.75 var(--sans); color:var(--ink2); max-width:66ch; word-wrap:break-word; }
+  .sheet-head { flex:none; padding:34px 56px 0; animation:none; }
+  #modal.on .sheet-head, #modal.on #docwrap, #modal.on .sheet-foot { animation:rise .6s var(--out) backwards; }
+  #modal.on #docwrap { animation-delay:.06s; }
+  #modal.on .sheet-foot { animation-delay:.12s; }
+  #sheetClose { position:absolute; top:22px; right:22px; z-index:1; }
+  #sheetMeta { display:flex; flex-wrap:wrap; gap:6px 14px; padding-right:52px;
+               font:500 10px var(--mono); letter-spacing:.14em; text-transform:uppercase; color:var(--dim); }
+  #sheetMeta span { display:inline-flex; align-items:center; gap:7px; }
+  #sheetMeta i { width:6px; height:6px; border-radius:50%; background:var(--accent); }
+  #sheetTitle { margin:14px 0 0; padding-right:40px; font:650 34px/1.08 var(--sans);
+                letter-spacing:-.025em; overflow-wrap:anywhere; }
+  #sheetDesc { margin:12px 0 0; color:var(--dim); font-size:14.5px; line-height:1.55; max-width:62ch; }
+  #sheetDesc:empty { display:none; }
+  /* how far into the memory you are: a hairline that fills in the accent */
+  #readbar { height:1px; margin-top:24px; background:var(--hair); }
+  #readbar i { display:block; height:100%; width:0; background:var(--accent); transition:width .12s linear; }
+  #docwrap { flex:1 1 auto; min-height:0; overflow-y:auto; overscroll-behavior:contain; outline:none;
+             padding:28px 56px 34px; scrollbar-width:thin; scrollbar-color:var(--hair2) transparent;
+             --top:0px; --bottom:36px;
+             -webkit-mask-image:linear-gradient(transparent, #000 var(--top), #000 calc(100% - var(--bottom)), transparent);
+                     mask-image:linear-gradient(transparent, #000 var(--top), #000 calc(100% - var(--bottom)), transparent); }
+  #docwrap.scrolled { --top:28px; }
+  #docwrap.end { --bottom:0px; }
+  #docwrap::-webkit-scrollbar { width:6px; }
+  #docwrap::-webkit-scrollbar-thumb { background:var(--hair2); border-radius:6px; }
+  .sheet-foot { flex:none; display:flex; align-items:center; gap:10px; min-height:58px;
+                padding:12px 56px; border-top:1px solid var(--hair); }
+  .sheet-foot .lbl { font:500 9.5px var(--mono); letter-spacing:.16em; text-transform:uppercase;
+                     color:var(--dim); flex:none; }
+  #sheetLinks { flex:1; min-width:0; display:flex; gap:6px; overflow:hidden;
+                -webkit-mask-image:linear-gradient(90deg, #000 85%, transparent);
+                        mask-image:linear-gradient(90deg, #000 85%, transparent); }
+  #sheetLinks button { flex:none; height:28px; padding:0 12px; border:1px solid var(--hair2);
+                       border-radius:999px; font:12px var(--sans); color:var(--ink2);
+                       transition:border-color .2s, color .2s; }
+  #sheetLinks button:hover { border-color:var(--accent); color:var(--fg); }
+  #sheetLinks .none { font-size:12px; }
+  .sheet-foot .keys { flex:none; font:10px var(--mono); color:var(--dim); letter-spacing:.06em; }
+  #doc { font:15.5px/1.75 var(--sans); color:var(--ink2); max-width:64ch; overflow-wrap:anywhere; }
+  #doc > :first-child { margin-top:0; }
   #doc h3, #doc h4, #doc h5, #doc h6 { margin:30px 0 10px; color:var(--fg);
                                         font:600 16px/1.3 var(--sans); letter-spacing:-.005em; }
   #doc h3 { font-size:19px; }
   #doc p { margin:0 0 16px; }
-  #doc ul { margin:0 0 16px; padding-left:20px; }
+  #doc ul, #doc ol { margin:0 0 16px; padding-left:22px; }
   #doc li { margin:0 0 6px; }
   #doc li::marker { color:var(--dim); }
   #doc b { color:var(--fg); }
   #doc em { color:var(--dim); font-style:normal; }
-  #doc code { font:13px var(--mono); background:color-mix(in srgb, var(--fg) 6%, transparent);
-              border-radius:5px; padding:2px 6px; }
+  #doc code { font:12.5px var(--mono); color:var(--fg); background:color-mix(in srgb, var(--fg) 6%, transparent);
+              border-radius:5px; padding:1px 5px; -webkit-box-decoration-break:clone; box-decoration-break:clone; }
   #doc pre { font:12.5px/1.65 var(--mono); background:var(--bg); border:1px solid var(--hair);
              border-radius:10px; padding:14px 16px; overflow-x:auto; margin:0 0 18px; }
   #doc pre code { background:none; padding:0; }
@@ -199,7 +236,8 @@
   #intro .bar i { display:block; height:100%; width:0; background:var(--fg); transition:width .12s linear; }
 
   @media (prefers-reduced-motion: reduce) { * { transition-duration:0s !important; animation:none !important; } }
-  @media (max-width: 720px) { #index { width:calc(100vw - 48px); } #sheet { padding:34px 22px 40px; } }
+  @media (max-width: 720px) { #index { width:calc(100vw - 48px); } .sheet-head, #docwrap, .sheet-foot { padding-left:22px; padding-right:22px; }
+                             #sheetTitle { font-size:26px; } .sheet-foot .keys { display:none; } }
 </style>
 <canvas id="c"></canvas>
 <div id="labels"></div>
@@ -241,7 +279,11 @@
 <div id="modal"><article id="sheet">
   <button class="round" id="sheetClose" title="Close (esc)">
     <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
-  <div id="sheetMeta"></div><h2 id="sheetTitle"></h2><div id="doc"></div>
+  <header class="sheet-head"><div id="sheetMeta"></div><h2 id="sheetTitle"></h2>
+    <p id="sheetDesc"></p><div id="readbar"><i id="readfill"></i></div></header>
+  <div id="docwrap" tabindex="-1"><div id="doc"></div></div>
+  <footer class="sheet-foot"><span class="lbl">Linked</span><div id="sheetLinks"></div>
+    <span class="keys">↑↓ scroll · esc</span></footer>
 </article></div>
 <div id="tip"></div>
 <div id="brand"><div class="name">brain<b>gent</b></div><div class="sub" id="sub"></div></div>
@@ -647,7 +689,7 @@ function inline(s) {
 function md(src) {
   const out = [];
   let list = false, code = false, buf = [], para = [];
-  const closeList = () => { if (list) { out.push("</ul>"); list = false; } };
+  const closeList = () => { if (list) { out.push(`</${list}>`); list = false; } };
   const closePara = () => {
     if (para.length) { out.push(`<p>${inline(para.join(" "))}</p>`); para = []; }
   };
@@ -667,11 +709,12 @@ function md(src) {
       out.push(`<h${lvl}>${inline(h[2])}</h${lvl}>`);
       continue;
     }
-    const li = line.match(/^\s*[-*]\s+(.*)$/);
+    const li = line.match(/^\s*(?:([-*])|\d+[.)])\s+(.*)$/);
     if (li) {
       closePara();
-      if (!list) { out.push("<ul>"); list = true; }
-      out.push(`<li>${inline(li[1])}</li>`);
+      const tag = li[1] ? "ul" : "ol";
+      if (list !== tag) { closeList(); out.push(`<${tag}>`); list = tag; }
+      out.push(`<li>${inline(li[2])}</li>`);
       continue;
     }
     closeList();
@@ -682,19 +725,37 @@ function md(src) {
   return out.join("");
 }
 
+const docwrap = document.getElementById("docwrap");
 function readNode(n) {
   if (!n || n.kind !== "memory") return;
+  const go = id => { const o = byId.get(id); if (o) { centreOn(o); openNode(o); readNode(o); } };
   document.getElementById("sheetTitle").textContent = n.label;
   document.getElementById("sheetMeta").innerHTML =
-    `<b>${esc(n.type || "memory")}</b> · ${esc(n.project)} · ${esc(n.machine)} · ${day(n.mtime)}`;
+    `<span style="color:var(--accent)"><i></i>${esc(n.type || "memory")}</span>` +
+    `<span>${esc(n.project)}</span><span>${esc(n.machine)}</span><span>${day(n.mtime)}</span>`;
+  document.getElementById("sheetDesc").textContent = n.desc || "";
   doc.innerHTML = n.body ? md(n.body) : `<p class="meta">this memory is empty</p>`;
-  doc.querySelectorAll("a.wiki").forEach(a => a.onclick = () => {
-    const o = byId.get(a.dataset.id);
-    if (o) { centreOn(o); openNode(o); readNode(o); modal.scrollTop = 0; }
-  });
+  doc.querySelectorAll("a.wiki").forEach(a => a.onclick = () => go(a.dataset.id));
+  // the other memories it touches, as a way on; its project is in the meta already
+  const others = (adj.get(n) || []).filter(v => v.other.kind === "memory");
+  const box = document.getElementById("sheetLinks");
+  box.innerHTML = others.map(v => `<button data-id="${esc(v.other.id)}">${esc(v.other.label)}</button>`).join("")
+    || `<span class="none">nothing links here</span>`;
+  box.querySelectorAll("button").forEach(b => b.onclick = () => go(b.dataset.id));
+  // replay the entrance when one memory leads to another
+  modal.classList.remove("on"); void modal.offsetWidth;
   modal.classList.add("on");
-  modal.scrollTop = 0;
+  docwrap.scrollTop = 0;
+  readProgress();
+  docwrap.focus({ preventScroll:true });   // arrows, space and page keys scroll the prose
 }
+function readProgress() {
+  const max = docwrap.scrollHeight - docwrap.clientHeight;
+  document.getElementById("readfill").style.width = (max > 0 ? docwrap.scrollTop / max * 100 : 100) + "%";
+  docwrap.classList.toggle("scrolled", docwrap.scrollTop > 4);
+  docwrap.classList.toggle("end", docwrap.scrollTop >= max - 4);
+}
+docwrap.onscroll = readProgress;
 function closeReader() { modal.classList.remove("on"); }
 document.getElementById("sheetClose").onclick = closeReader;
 modal.onclick = e => { if (e.target === modal) closeReader(); };  // click outside
@@ -821,7 +882,7 @@ addEventListener("keydown", e => {
     if (sel) return closeDetail();
     return clearAll();
   }
-  if (inField || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (inField || e.ctrlKey || e.metaKey || e.altKey || modal.classList.contains("on")) return;
   if (e.key === "/") { e.preventDefault(); toggleIndex(true); }
   else if (e.key === "r") readNode(sel);
   else if (e.key === "f" && sel) { const p = projectOf(sel); focusProject(fProject === p ? null : p); openNode(sel); }
