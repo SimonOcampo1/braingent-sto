@@ -6,7 +6,7 @@
   <img alt="Python" src="https://img.shields.io/badge/Python-3776AB?style=flat-square&logo=python&logoColor=white">
   <img alt="React" src="https://img.shields.io/badge/React-61DAFB?style=flat-square&logo=react&logoColor=black">
   <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white">
-  <img alt="MCP" src="https://img.shields.io/badge/MCP-E38742?style=flat-square&logo=anthropic&logoColor=white">
+  <img alt="Go" src="https://img.shields.io/badge/Go-00ADD8?style=flat-square&logo=go&logoColor=white">
 </p>
 
 <p align="center">
@@ -18,7 +18,7 @@
   <a href="#commands">Commands</a>
 </p>
 
-braingent-sto turns a private git repository into the substrate that Claude Code is missing: your `~/.claude` config, your skills and plugins, the memories your agent writes, and the transcripts of every session, all synced between machines with two keystrokes. No daemon, no API key, no third-party service — a Python stdlib backend, `git`, and a terminal UI.
+braingent-sto turns a private git repository into the substrate that Claude Code is missing: your `~/.claude` config, your skills and plugins, the memories your agent writes, and the transcripts of every session, all synced between machines with two keystrokes. No daemon, no API key, no third-party service — a Python stdlib backend, `git`, and a terminal UI written in Go.
 
 ---
 
@@ -45,7 +45,7 @@ STO is the union of the three, on one substrate. Every artifact is **plain text 
 - **Modular sync.** Pick exactly which parts of `~/.claude` travel: `claude-md`, `settings`, `keybindings`, `skills`, `agents`, `hooks`, `plugins`. Memories, sessions and vault always travel.
 - **Redaction on export.** Session transcripts are trimmed to what a reader needs (prompts, tool names, errors) and scrubbed of API-key-shaped strings before they ever hit a commit.
 - **Resumable conversations.** Every session another machine pushed can be brought here with `braingent resume <id>` (or `e` on the Sessions tab, per row or per project): it is filed under the path this machine registered for the project (`w`), so `claude --resume` and `/resume` find it. Without a `braingent keep` it is rebuilt from the trimmed export as text-only turns (tool outputs are gone, the conversation is not); `braingent keep <id>` archives one transcript untrimmed and gzipped when the full tool history matters.
-- **Terminal UI (`braingent ui`).** Chats, Memories, Tools and Settings under one header that says, in one phrase, what Sync would move. Written in Go (Bubble Tea) and fed only by `braingent data` / `braingent act`, so it holds no rule of its own: grouped and foldable lists, search as you type, a reader for chats and memories, delete one or many here or everywhere, mouse and keyboard. `braingent ui` builds it once with Go, or downloads the release built from exactly its `tui/`.
+- **Terminal UI (`braingent`).** Chats, Memories, Tools and Settings under one header that says, in one phrase, what Sync would move. Written in Go (Bubble Tea) and fed only by `braingent data` / `braingent act`, so it holds no rule of its own: grouped and foldable lists, search as you type, a reader for chats and memories, delete one or many here or everywhere, mouse and keyboard. `braingent` builds it once with Go, or, without Go, downloads the release built from exactly its `tui/`. The footer keeps the essential keys and wraps to the width; `?` lists the rest.
 - **Live push/pull progress.** Every step of a sync reports itself (`exporting sessions → staging → committing → pushing to origin`) with a spinner, instead of freezing the screen until git returns.
 - **Memory graph.** A real graph of *your memories*: one node per memory, one per project, edges from `[[wikilinks]]`. A 3D map in the style of aicodingdictionary.com, in braingent's dark and accent (or a paper theme): click a project to focus its part of the graph, a node for its detail, and read any memory in full. Opens as a chrome-less window when there is a Chromium, in the default browser otherwise. Built from the same files the repo syncs, so it shows every machine and every session, not just this one.
 - **Config parity at a glance.** The Home dashboard shows what is local-only, what is in the repo but not installed, and which plugins are missing on this machine.
@@ -91,6 +91,9 @@ braingent-sto/
 ---
 
 ## Setup
+
+You need Python 3.11+ and `git`. Go is optional: with it the TUI is built on
+first run, without it the prebuilt binary for your platform is downloaded.
 
 ```bash
 git clone https://github.com/SimonOcampo1/braingent-sto.git
@@ -242,8 +245,8 @@ Honesty beats a feature matrix:
 ## What is next
 
 The parking lot lives in [ROADMAP.md](ROADMAP.md): an MCP server so the agent can
-query the repo mid-session, sync that reminds you (or runs itself), a
-cross-platform TUI, and a few smaller things — each with the smallest sketch that
+query the repo mid-session, sync that reminds you (or runs itself), and a few
+smaller things — each with the smallest sketch that
 would do it.
 
 ## Tests
