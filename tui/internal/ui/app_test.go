@@ -9,6 +9,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/SimonOcampo1/braingent-sto/tui/internal/sto"
@@ -177,9 +178,9 @@ func TestGroupsFoldOneByOneOrAllAtOnce(t *testing.T) {
 func TestTheSpinnerTurnsWhileAnActRuns(t *testing.T) {
 	m := loadedModel(t)
 	m.busy = "bringing chats"
-	before := m.footer(80)
+	before := strings.Join(m.footer(80), "\n")
 	next, cmd := m.Update(tickMsg{})
-	if after := next.(Model).footer(80); after == before || cmd == nil || !strings.Contains(ansi.Strip(after), "bringing chats") {
+	if after := strings.Join(next.(Model).footer(80), "\n"); after == before || cmd == nil || !strings.Contains(ansi.Strip(after), "bringing chats") {
 		t.Fatalf("before %q, after %q, cmd %v", before, after, cmd)
 	}
 	m.busy = ""
@@ -461,7 +462,7 @@ func TestThePlanUsageSitsInTheFooter(t *testing.T) {
 	m.st.Labels["mod_5h"], m.st.Labels["mod_week"] = "5h", "wk"
 	u := &sto.Usage{Limits: []sto.Limit{{Kind: "session", Percent: 88}, {Kind: "weekly_all", Percent: 25}, {Kind: "weekly_scoped", Percent: 3}}}
 	next, _ := m.Update(loaded{"usage", u, nil})
-	if f := ansi.Strip(next.(Model).footer(160)); !strings.HasSuffix(strings.TrimRight(f, " "), "5h 88% · wk 25%") {
+	if f := ansi.Strip(strings.Join(next.(Model).footer(160), "\n")); !strings.HasSuffix(strings.TrimRight(f, " "), "5h 88% · wk 25%") {
 		t.Fatalf("footer = %q", f)
 	}
 }
@@ -483,5 +484,25 @@ func TestUpdateAsksFirstAndGraphOpens(t *testing.T) {
 	_, cmd = press(m, "g")
 	if got := actArgs(t, cmd, args); got != "act graph" {
 		t.Fatalf("sto got %q", got)
+	}
+}
+
+func TestANarrowFooterWrapsWithoutCuttingAKey(t *testing.T) {
+	m := loadedModel(t)
+	lines := m.footer(40)
+	if len(lines) < 2 {
+		t.Fatalf("40 columns should take more than one line: %q", lines)
+	}
+	all := ansi.Strip(strings.Join(lines, " "))
+	for _, l := range lines {
+		if w := lipgloss.Width(l); w > 40 {
+			t.Errorf("line %q is %d wide", ansi.Strip(l), w)
+		}
+	}
+	if strings.Contains(all, "…") || !strings.Contains(all, "?") || !strings.Contains(all, "q") {
+		t.Fatalf("footer = %q", all)
+	}
+	if next, _ := press(m, "?"); !next.keys {
+		t.Fatal("? opens the list of keys")
 	}
 }

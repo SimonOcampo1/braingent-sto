@@ -182,7 +182,7 @@ DATA_LABELS = ("act_sync", "act_retry", "mod_syncing", "fetching", "mod_auto_off
                "tui_confirm", "tui_project", "tui_folder", "tui_machine",
                "tui_when", "tui_search", "tui_plugins",
                "tui_k_move", "tui_k_action", "tui_k_fold", "tui_k_fold_all", "tui_k_sort",
-               "tui_k_group", "tui_k_view", "tui_k_quit", "tui_k_scroll", "tui_k_page",
+               "tui_k_group", "tui_k_view", "tui_k_quit", "tui_k_keys", "tui_keys_title", "tui_k_scroll", "tui_k_page",
                "tui_k_ends", "tui_k_back", "tui_k_filter", "tui_k_close", "tui_sort_new",
                "tui_sort_az", "tui_all", "tui_notes", "tui_bring_n",
                "tui_k_results", "tui_two_letters",

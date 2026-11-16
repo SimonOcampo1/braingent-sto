@@ -122,6 +122,7 @@ type Model struct {
 	marked   map[string]bool // delete targets (kind:name) picked with x
 	ask      *folderAsk      // the folder of a project, being typed
 	updating bool            // the question before applying a new braingent version
+	keys     bool            // the full list of keys, opened with ?
 	limits   []sto.Limit
 	del      *deletion // the question of where to delete, while it is open
 	busy     string    // progress of a running act; keys wait while it is set
@@ -649,6 +650,9 @@ func (m Model) keyMsg(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 			m.ask.value += msg.Text
 		}
 		return m, nil
+	case m.keys:
+		m.keys = false
+		return m, nil
 	case m.updating:
 		m.updating = false
 		if k == "enter" {
@@ -770,6 +774,8 @@ func (m Model) keyMsg(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		return m, m.itemAct()
 	case "S":
 		m.openSync()
+	case "?":
+		m.keys = true
 	case "esc":
 		m.searching, m.marked = false, nil
 	}
@@ -1274,6 +1280,8 @@ func (m Model) deleteBox(W, H, ox, oy int) string {
 // page is the reader: the markdown rendered once per width, scrolled.
 func (m Model) page(W, H int) string {
 	r := m.read
+	keys := m.hintLines(W, "j k", "tui_k_scroll", "space", "tui_k_page", "home end", "tui_k_ends", "esc", "tui_k_back")
+	bodyH := H - 2 - len(keys)
 	body := []string{faint.Render(" " + m.L("loading"))}
 	switch {
 	case r.err != "":
@@ -1282,12 +1290,12 @@ func (m Model) page(W, H int) string {
 		if r.width != W {
 			r.width, r.lines = W, m.render(r, W)
 		}
-		r.top = max(0, min(r.top, len(r.lines)-(H-3)))
-		body = r.lines[r.top:min(len(r.lines), r.top+H-3)]
+		r.top = max(0, min(r.top, len(r.lines)-bodyH))
+		body = r.lines[r.top:min(len(r.lines), r.top+bodyH)]
 	}
 	head := spread(brand.Render("braingent")+bold.Render(ansi.Truncate(r.title, W-30, "…")),
-		faint.Render(fmt.Sprintf("%d/%d ", min(r.top+H-3, len(r.lines)), len(r.lines))), W)
-	return strings.Join(append(append([]string{head, ""}, fit(body, H-3)...), m.hints("j k", "tui_k_scroll", "space", "tui_k_page", "home end", "tui_k_ends", "esc", "tui_k_back")), "\n")
+		faint.Render(fmt.Sprintf("%d/%d ", min(r.top+bodyH, len(r.lines)), len(r.lines))), W)
+	return strings.Join(append(append([]string{head, ""}, fit(body, bodyH)...), keys...), "\n")
 }
 
 // render lays the reader's text out at width W, through Glamour. A chat's
@@ -1363,17 +1371,46 @@ func (m Model) hints(pairs ...string) string {
 	return strings.Join(out, "   ")
 }
 
-func (m Model) footer(W int) string {
+// hintLines lays the pairs out in lines no wider than w, breaking only
+// between pairs so a key never loses its words to the edge.
+func (m Model) hintLines(w int, pairs ...string) []string {
+	lines := []string{""}
+	for i := 0; i+1 < len(pairs); i += 2 {
+		h, last := m.hints(pairs[i], pairs[i+1]), &lines[len(lines)-1]
+		switch {
+		case *last == "":
+			*last = ansi.Truncate(h, w, "…")
+		case lipgloss.Width(*last)+3+lipgloss.Width(h) <= w:
+			*last += "   " + h
+		default:
+			lines = append(lines, ansi.Truncate(h, w, "…"))
+		}
+	}
+	return lines
+}
+
+// allKeys is every key of the lists, for the ? box; the footer shows only
+// the few a first look needs.
+var allKeys = []string{"j k", "tui_k_move", "↵", "tui_read", "/", "tui_search", "a", "tui_k_action",
+	"S", "act_sync", "x", "tui_k_mark", "d", "tui_k_delete", "space", "tui_k_fold", "c", "tui_k_fold_all",
+	"s", "tui_k_sort", "b", "tui_k_group", "w", "tui_k_folder", "g", "tui_k_graph", "u", "tui_k_update",
+	"tab", "tui_k_view", "q", "tui_k_quit"}
+
+// footer is the bottom of the lists: one line, or more when the essential
+// keys do not fit the width.
+func (m Model) footer(W int) []string {
 	sort := "tui_sort_az"
 	if m.alpha {
 		sort = "tui_sort_new"
 	}
-	left := m.hints("j k", "tui_k_move", "↵", "tui_read", "/", "tui_search", "a", "tui_k_action",
-		"S", "act_sync", "x", "tui_k_mark", "d", "tui_k_delete", "space", "tui_k_fold", "c", "tui_k_fold_all", "s", sort, "b", "tui_k_group",
-		"w", "tui_k_folder", "g", "tui_k_graph", "tab", "tui_k_view", "q", "tui_k_quit")
+	right := m.usage()
+	room := max(10, W-lipgloss.Width(right)-3)
+	pairs := []string{"j k", "tui_k_move", "↵", "tui_read", "/", "tui_search", "a", "tui_k_action",
+		"S", "act_sync", "tab", "tui_k_view", "?", "tui_k_keys", "q", "tui_k_quit"}
 	if m.st != nil && m.st.Update > 0 { // the one key worth reading first when it applies
-		left = m.hints("u", "tui_k_update") + "   " + left
+		pairs = append([]string{"u", "tui_k_update"}, pairs...)
 	}
+	var left string
 	switch {
 	case m.ask != nil:
 		left = faint.Render(m.L("tui_folder_of")+" "+m.ask.project+": ") + m.ask.value + acc.Render("█") +
@@ -1392,10 +1429,28 @@ func (m Model) footer(W int) string {
 		left = acc.Render(m.flash)
 	case m.searching:
 		left = acc.Render("/ "+m.query) + "   " + m.hints("↵", "tui_goto", "f", "tui_k_filter",
-			"space", "tui_k_fold", "s", sort, "esc", "tui_k_close")
+			"s", sort, "esc", "tui_k_close")
+	default:
+		lines := m.hintLines(room, pairs...)
+		lines[0] = spread(lines[0], faint.Render(right), W)
+		return lines
 	}
-	right := m.usage()
-	return spread(ansi.Truncate(left, max(10, W-lipgloss.Width(right)-3), "…"), faint.Render(right), W)
+	return []string{spread(ansi.Truncate(left, room, "…"), faint.Render(right), W)}
+}
+
+// keysBox is every key with what it does, in two columns when there is room.
+func (m Model) keysBox(W, H int) string {
+	var rows []string
+	for i := 0; i+1 < len(allKeys); i += 2 {
+		rows = append(rows, keyStyle.Width(10).Render(allKeys[i])+faint.Render(m.L(allKeys[i+1])))
+	}
+	body := strings.Join(rows, "\n")
+	if half := (len(rows) + 1) / 2; W >= 70 {
+		col := lipgloss.NewStyle().Width(28)
+		body = lipgloss.JoinHorizontal(lipgloss.Top, col.Render(strings.Join(rows[:half], "\n")), strings.Join(rows[half:], "\n"))
+	}
+	return lipgloss.Place(W, H, lipgloss.Center, lipgloss.Center,
+		popup.Render(bold.Render(m.L("tui_keys_title"))+"\n\n"+body+"\n\n"+m.hints("esc", "tui_k_close")))
 }
 
 // usage is the plan's limits as the band shows them: "5h 34% · wk 61%".
@@ -1449,6 +1504,8 @@ func (m Model) View() tea.View {
 		content = m.page(W, H)
 	case m.del != nil:
 		content = m.deleteBox(W, H, ox, oy)
+	case m.keys:
+		content = m.keysBox(W, H)
 	case m.updating:
 		content = m.updateBox(W, H)
 	case m.confirm && m.st != nil:
@@ -1460,7 +1517,8 @@ func (m Model) View() tea.View {
 		if m.searching {
 			out = append(out, m.chips(ox, oy+len(out)), "")
 		}
-		listH, y := H-len(out)-2, oy+len(out)
+		foot := m.footer(W)
+		listH, y := H-len(out)-1-len(foot), oy+len(out)
 		if W >= 90 {
 			sideW := min(48, W*2/5)
 			listW := W - sideW - 2
@@ -1470,7 +1528,7 @@ func (m Model) View() tea.View {
 		} else {
 			out = append(out, fit(m.list(W, listH, ox, y), listH)...)
 		}
-		content = strings.Join(append(fit(out, H-1), m.footer(W)), "\n")
+		content = strings.Join(append(fit(out, H-len(foot)), foot...), "\n")
 	}
 	v.SetContent(lipgloss.NewStyle().MarginTop(oy).MarginLeft(ox).Render(content))
 	return v

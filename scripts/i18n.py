@@ -122,7 +122,7 @@ STRINGS = {
         "bad_setting": "{key}: {value} no es una opción", # the footer: each key is printed by the TUI, these are only what it does
         "tui_k_move": "mover", "tui_k_action": "acción", "tui_k_fold": "plegar",
         "tui_k_fold_all": "plegar todo", "tui_k_sort": "ordenar", "tui_k_group": "agrupar",
-        "tui_k_view": "vista", "tui_k_quit": "salir", "tui_k_scroll": "desplazar",
+        "tui_k_view": "vista", "tui_k_quit": "salir", "tui_k_keys": "más teclas", "tui_keys_title": "Teclas", "tui_k_scroll": "desplazar",
         "tui_k_page": "página", "tui_k_ends": "inicio / fin", "tui_k_back": "volver",
         "tui_k_filter": "filtrar", "tui_k_close": "cerrar", "tui_sort_new": "recientes",
         "tui_sort_az": "A-Z", "tui_all": "todo", "tui_notes": "notas",
@@ -380,7 +380,7 @@ STRINGS = {
         "bad_setting": "{key}: {value} is not a choice", # the footer: each key is printed by the TUI, these are only what it does
         "tui_k_move": "move", "tui_k_action": "action", "tui_k_fold": "fold",
         "tui_k_fold_all": "fold all", "tui_k_sort": "sort", "tui_k_group": "group",
-        "tui_k_view": "view", "tui_k_quit": "quit", "tui_k_scroll": "scroll",
+        "tui_k_view": "view", "tui_k_quit": "quit", "tui_k_keys": "more keys", "tui_keys_title": "Keys", "tui_k_scroll": "scroll",
         "tui_k_page": "page", "tui_k_ends": "top / end", "tui_k_back": "back",
         "tui_k_filter": "filter", "tui_k_close": "close", "tui_sort_new": "newest",
         "tui_sort_az": "A-Z", "tui_all": "all", "tui_notes": "notes",
