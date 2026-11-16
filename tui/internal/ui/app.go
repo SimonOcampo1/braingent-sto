@@ -1406,7 +1406,7 @@ func (m Model) footer(W int) []string {
 	right := m.usage()
 	room := max(10, W-lipgloss.Width(right)-3)
 	pairs := []string{"j k", "tui_k_move", "↵", "tui_read", "/", "tui_search", "a", "tui_k_action",
-		"S", "act_sync", "tab", "tui_k_view", "?", "tui_k_keys", "q", "tui_k_quit"}
+		"S", "act_sync", "g", "tui_k_graph", "tab", "tui_k_view", "?", "tui_k_keys", "q", "tui_k_quit"}
 	if m.st != nil && m.st.Update > 0 { // the one key worth reading first when it applies
 		pairs = append([]string{"u", "tui_k_update"}, pairs...)
 	}

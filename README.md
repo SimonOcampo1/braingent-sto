@@ -47,7 +47,7 @@ STO is the union of the three, on one substrate. Every artifact is **plain text 
 - **Resumable conversations.** Every session another machine pushed can be brought here with `braingent resume <id>` (or `e` on the Sessions tab, per row or per project): it is filed under the path this machine registered for the project (`w`), so `claude --resume` and `/resume` find it. Without a `braingent keep` it is rebuilt from the trimmed export as text-only turns (tool outputs are gone, the conversation is not); `braingent keep <id>` archives one transcript untrimmed and gzipped when the full tool history matters.
 - **Terminal UI (`braingent ui`).** Chats, Memories, Tools and Settings under one header that says, in one phrase, what Sync would move. Written in Go (Bubble Tea) and fed only by `braingent data` / `braingent act`, so it holds no rule of its own: grouped and foldable lists, search as you type, a reader for chats and memories, delete one or many here or everywhere, mouse and keyboard. `braingent ui` builds it once with Go, or downloads the release built from exactly its `tui/`.
 - **Live push/pull progress.** Every step of a sync reports itself (`exporting sessions → staging → committing → pushing to origin`) with a spinner, instead of freezing the screen until git returns.
-- **Memory graph.** A real graph of *your memories*: one node per memory, one per project, edges from `[[wikilinks]]`. Opens as a chrome-less window with a project/type/machine sidebar, click-to-inspect detail panel and search. Built from the same files the repo syncs, so it shows every machine and every session, not just this one.
+- **Memory graph.** A real graph of *your memories*: one node per memory, one per project, edges from `[[wikilinks]]`. A 3D map in the style of aicodingdictionary.com, in braingent's dark and accent (or a paper theme): click a project to focus its part of the graph, a node for its detail, and read any memory in full. Opens as a chrome-less window when there is a Chromium, in the default browser otherwise. Built from the same files the repo syncs, so it shows every machine and every session, not just this one.
 - **Config parity at a glance.** The Home dashboard shows what is local-only, what is in the repo but not installed, and which plugins are missing on this machine.
 - **Plan usage.** Live limit bars and the last days of token spend, straight from `ccusage` when it is installed.
 - **Bilingual chrome.** English by default, Spanish one keystroke away — commands never change, only what they print.
@@ -64,7 +64,8 @@ braingent-sto/
 │   ├── cli.py               # `braingent` — presentation over the engine
 │   ├── ui_data.py           # computed state `braingent data` serves the UIs
 │   ├── i18n.py              # every user-facing string, en/es
-│   ├── memory_graph.html    # graph window template (canvas 2D, no CDN)
+│   ├── memory_graph.html    # graph window template (three.js inlined, no CDN)
+│   ├── vendor/three.min.js  # the parts of three.js the graph uses, prebuilt
 │   ├── dream_extract.py     # transcript parsing and redaction
 │   ├── install_cli.sh       # installs `braingent` on Linux/macOS: ~/.local/bin + PATH
 │   ├── install_cli.ps1      # the same on Windows: both PowerShell profiles
@@ -84,7 +85,7 @@ braingent-sto/
 - **Backend** — Python 3.11+, standard library only. No `pip install`, no virtualenv, no server to keep alive for the CLI: `cli.py` imports the engine directly.
 - **Sync** — plain `git`. Your repo, your remote, your history. Conflicts are git conflicts, and you already know how to resolve those.
 - **TUI** — Go + Bubble Tea v2 in `tui/`. A workflow publishes a build per version for Linux, macOS and Windows.
-- **Graph** — one HTML file, canvas 2D, hand-rolled force layout. Opens offline in a Chromium `--app` window.
+- **Graph** — one HTML file: three.js (vendored, inlined), a hand-rolled 3D force layout. Opens offline in a Chromium `--app` window, or the default browser.
 - **App** — React 19, Vite 8, Tailwind 4, `react-force-graph` for the 2D/3D views.
 
 ---

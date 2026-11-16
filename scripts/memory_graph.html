@@ -1,270 +1,619 @@
 <!doctype html>
-<!-- Memory graph template. `sto graph --memory` swaps the placeholder below
-     for the JSON of srv.memory_graph() and opens the result in a Chromium
-     window (--app). The placeholder is deliberately NOT spelled out in this
-     comment: it used to be, the substitution hit both copies, and a memory
-     quoting an HTML comment terminator then closed this one early and spilled
-     the whole graph into the page as text.
-     Canvas 2D and hand-rolled physics: with no CDN the file opens offline and
-     depends on nothing being installed. -->
+<!-- Memory graph template. `braingent graph --memory` swaps the two placeholders
+     in the script for three.js (scripts/vendor/three.min.js) and the JSON of
+     srv.memory_graph(), then opens the result in a Chromium window (--app), or
+     the default browser when there is none. The placeholders are deliberately
+     NOT spelled out in this comment: one used to be, the substitution hit both
+     copies, and a memory quoting an HTML comment terminator then closed this
+     one early and spilled the whole graph into the page as text.
+     The look is the 3D map of aicodingdictionary.com (flat spheres, depth
+     fog, no links at rest but a faint web, mono labels) in braingent's colours:
+     the dark of the terminal and the accent picked in `braingent`. Everything
+     is inline so the file opens offline. -->
 <meta charset="utf-8">
-<title>memories · sto</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>memories · braingent</title>
 <style>
-  :root { --bg:#0b0e12; --panel:#12171e; --fg:#e6edf3; --dim:#7d8590;
-          --line:#232a33; --accent:#2bd6c4; }
-  * { box-sizing: border-box; }
+  :root { --accent:#2bd6c4;
+          --bg:#0c0e11; --panel:#111418; --fg:#e8eaed; --ink2:#b3b9c1; --dim:#737b85;
+          --hair:#1f242b; --hair2:#2c333b; --veil:rgba(8,10,12,.74); --grain:.07;
+          --mono:"JetBrains Mono", "Geist Mono", "Cascadia Mono", ui-monospace, Menlo, Consolas, monospace;
+          --sans:"Inter", "Helvetica Neue", Helvetica, Arial, system-ui, sans-serif;
+          --out:cubic-bezier(.16, 1, .3, 1); }
+  :root[data-theme="paper"] { --bg:#eaeae8; --panel:#f2f2f0; --fg:#1a1a19; --ink2:#43433f;
+          --dim:#8b8b86; --hair:#dddcd7; --hair2:#c8c7c1; --veil:rgba(234,234,232,.8); --grain:.11; }
+  * { box-sizing:border-box; }
+  html, body { height:100%; }
   body { margin:0; background:var(--bg); color:var(--fg); overflow:hidden;
-         font:13px ui-monospace, "Cascadia Mono", Consolas, monospace; }
-  canvas { display:block; position:fixed; inset:0; cursor:grab; }
-  canvas.drag { cursor:grabbing; }
+         font:13px/1.5 var(--sans); -webkit-font-smoothing:antialiased;
+         transition:background-color .5s var(--out), color .5s var(--out); }
+  button { font:inherit; color:inherit; background:none; border:0; padding:0; cursor:pointer; }
+  ::selection { background:color-mix(in srgb, var(--accent) 35%, transparent); }
 
-  /* both panels live on the right: filters always, detail on top of them when
-     a node is picked — the canvas stays clear on the left */
-  aside { position:fixed; top:0; right:0; bottom:0; width:250px; background:var(--panel);
-          border-left:1px solid var(--line); padding:16px 0 24px; overflow-y:auto; }
-  aside h1 { margin:0 16px; font-size:14px; letter-spacing:.16em; text-transform:uppercase; }
-  aside .sub { margin:6px 16px 14px; color:var(--dim); font-size:11px; line-height:1.6; }
-  #q { width:calc(100% - 32px); margin:0 16px 6px; padding:6px 9px; background:#0b0e12;
-       color:var(--fg); border:1px solid var(--line); border-radius:6px;
-       font:inherit; outline:none; }
-  #q:focus { border-color:var(--accent); }
-  .head { margin:14px 16px 6px; color:var(--dim); font-size:10.5px;
-          letter-spacing:.14em; text-transform:uppercase; }
-  .row { display:flex; align-items:center; gap:8px; padding:4px 16px; cursor:pointer;
-         border-left:2px solid transparent; }
-  .row:hover { background:#171d26; }
-  .row.on { border-left-color:var(--accent); background:#151d24; }
-  .row .name { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .row .n { color:var(--dim); font-size:11px; }
-  .row i { width:8px; height:8px; border-radius:50%; flex:none; }
+  canvas { display:block; position:fixed; inset:0; width:100%; height:100%; outline:none; }
+  /* the paper grain of the reference, over everything but never in the way */
+  #grain { position:fixed; inset:-50%; pointer-events:none; z-index:20; opacity:var(--grain);
+           mix-blend-mode:overlay; transition:opacity .5s;
+           background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); }
 
-  #detail { position:fixed; top:0; right:0; bottom:0; width:330px; background:var(--panel);
-            border-left:1px solid var(--line); padding:18px 18px 24px; overflow-y:auto;
-            display:none; z-index:3; }
-  #detail.on { display:block; }
-  #detail h2 { margin:0 0 4px; font-size:15px; word-break:break-word; }
-  #detail .meta { color:var(--dim); margin-bottom:14px; }
-  #detail p { line-height:1.6; margin:0 0 16px; }
-  #detail .head { margin:0 0 6px; }
-  #detail a { display:block; color:var(--accent); text-decoration:none; padding:3px 0;
-              cursor:pointer; word-break:break-word; }
-  #detail a:hover { text-decoration:underline; }
-  #close { position:absolute; top:14px; right:16px; color:var(--dim); cursor:pointer;
-           font-size:11px; }
-  #close:hover { color:var(--fg); }
+  /* ── labels: projected each frame, mono caps like the reference ── */
+  #labels { position:fixed; inset:0; pointer-events:none; z-index:2; }
+  #labels span { position:absolute; left:0; top:0; transform:translate(-50%, -100%);
+                 font:500 9.5px/1 var(--mono); letter-spacing:.14em; text-transform:uppercase;
+                 color:var(--dim); white-space:nowrap; transition:color .25s, opacity .25s; }
+  #labels span[data-active] { color:var(--fg); font-size:10.5px; }
+  #labels span[data-project] { color:color-mix(in srgb, var(--accent) 70%, var(--fg)); }
 
-  #read { margin:2px 0 16px; padding:7px 12px; width:100%; background:transparent;
-          color:var(--accent); border:1px solid var(--accent); border-radius:6px;
-          font:inherit; cursor:pointer; }
-  #read:hover { background:var(--accent); color:var(--bg); }
+  /* ── round buttons in the corners ── */
+  .round { position:fixed; z-index:6; width:38px; height:38px; border-radius:50%;
+           border:1px solid var(--hair2); display:grid; place-items:center; color:var(--ink2);
+           background:color-mix(in srgb, var(--bg) 70%, transparent);
+           transition:border-color .2s, color .2s, background-color .2s, transform .35s var(--out); }
+  .round:hover { border-color:var(--fg); color:var(--fg); }
+  .round:active { transform:scale(.94); }
+  .round[aria-pressed="true"], .round[aria-expanded="true"] { border-color:var(--accent); color:var(--accent); }
+  .round svg { width:15px; height:15px; stroke:currentColor; fill:none; stroke-width:1.6;
+               stroke-linecap:round; stroke-linejoin:round; }
+  .round.text { font:600 10px var(--mono); letter-spacing:.06em; }
+  #bIndex { top:24px; left:24px; }
+  #bHelp { top:24px; right:24px; }
+  #bTheme { bottom:24px; right:24px; }
+  #bFlat { bottom:24px; right:72px; }
 
-  /* the reader. Sans for the prose (monospace is for the graph, not for
-     reading a page of it) and a 68ch measure, which is where lines stop
-     needing a finger to track them. */
-  #modal { position:fixed; inset:0; background:#05070aef; display:none; z-index:9;
-           padding:5vh 16px; overflow-y:auto; }
-  #modal.on { display:block; }
-  #sheet { max-width:760px; margin:0 auto; background:var(--panel); border:1px solid var(--line);
-           border-radius:10px; padding:30px 38px 40px; position:relative; }
-  #sheet .top { display:flex; align-items:baseline; gap:10px; flex-wrap:wrap;
-                border-bottom:1px solid var(--line); padding-bottom:14px; margin-bottom:22px; }
-  #sheet .top h2 { margin:0; font-size:19px; }
-  #sheet .top .meta { color:var(--dim); font-size:11.5px; }
-  #doc { font:15px/1.75 ui-sans-serif, "Segoe UI", system-ui, sans-serif;
-         max-width:68ch; word-wrap:break-word; }
-  #doc h3, #doc h4, #doc h5, #doc h6 { margin:26px 0 8px; font-size:15px; letter-spacing:.02em; }
-  #doc h3 { font-size:17px; }
-  #doc p { margin:0 0 15px; }
-  #doc ul { margin:0 0 15px; padding-left:22px; }
+  /* ── the index: search + projects / types / machines ── */
+  #index { position:fixed; top:74px; left:24px; bottom:80px; width:280px; z-index:5;
+           display:flex; flex-direction:column; background:var(--panel);
+           border:1px solid var(--hair); border-radius:14px; overflow:hidden;
+           transform-origin:20px -30px;
+           transition:opacity .35s var(--out), transform .55s var(--out), visibility 0s .55s;
+           opacity:0; transform:translateY(-8px) scale(.97); visibility:hidden; }
+  #index.on { opacity:1; transform:none; visibility:visible;
+              transition:opacity .35s var(--out), transform .55s var(--out); }
+  .search { display:flex; align-items:center; gap:9px; margin:12px 12px 4px; padding:0 11px;
+            height:36px; border:1px solid var(--hair2); border-radius:10px;
+            transition:border-color .2s; }
+  .search:focus-within { border-color:var(--accent); }
+  .search svg { width:14px; height:14px; stroke:var(--dim); fill:none; stroke-width:1.7; flex:none; }
+  #q { flex:1; min-width:0; background:none; border:0; outline:none; color:var(--fg);
+       font:13px var(--sans); }
+  #q::placeholder { color:var(--dim); }
+  .search kbd { font:10px var(--mono); color:var(--dim); border:1px solid var(--hair2);
+                border-radius:4px; padding:1px 5px; }
+  #lists { overflow-y:auto; padding:4px 0 14px; scrollbar-width:thin;
+           scrollbar-color:var(--hair2) transparent; }
+  .head { display:flex; justify-content:space-between; margin:16px 20px 6px; color:var(--dim);
+          font:500 9.5px var(--mono); letter-spacing:.16em; text-transform:uppercase; }
+  .row { position:relative; display:flex; align-items:center; gap:10px; width:100%;
+         padding:6px 20px; text-align:left; color:var(--ink2);
+         transition:color .2s, background-color .2s; }
+  .row::before { content:""; position:absolute; left:0; top:6px; bottom:6px; width:2px;
+                 border-radius:2px; background:var(--accent); transform:scaleY(0);
+                 transition:transform .35s var(--out); }
+  .row:hover { color:var(--fg); background:color-mix(in srgb, var(--fg) 4%, transparent); }
+  .row.on { color:var(--fg); }
+  .row.on::before { transform:none; }
+  .row .name { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+               transition:transform .3s var(--out); }
+  .row:hover .name { transform:translateX(3px); }
+  .row .n { font:11px var(--mono); color:var(--dim); font-variant-numeric:tabular-nums; }
+  .row i { width:7px; height:7px; border-radius:50%; flex:none; }
+
+  /* ── detail: slides in from the right, as the reference's panel ── */
+  #detail { position:fixed; top:0; right:0; bottom:0; width:min(420px, 100vw); z-index:7;
+            background:var(--panel); border-left:1px solid var(--hair); overflow-y:auto;
+            padding:84px 34px 40px; transform:translateX(102%); visibility:hidden;
+            transition:transform .62s var(--out), visibility 0s .62s;
+            scrollbar-width:thin; scrollbar-color:var(--hair2) transparent; }
+  #detail.on { transform:none; visibility:visible; transition:transform .62s var(--out); }
+  #close { position:absolute; top:24px; right:24px; }
+  #detail .eyebrow { font:500 10px var(--mono); letter-spacing:.14em; text-transform:uppercase;
+                     color:var(--dim); margin-bottom:12px; }
+  #detail .eyebrow b { color:var(--accent); font-weight:500; }
+  #detail h2 { margin:0 0 14px; font:600 26px/1.15 var(--sans); letter-spacing:-.015em;
+               word-break:break-word; }
+  #detail p { margin:0 0 22px; color:var(--ink2); font-size:14.5px; line-height:1.65; }
+  .actions { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:30px; }
+  .pill { display:inline-flex; align-items:center; gap:8px; height:34px; padding:0 15px;
+          border:1px solid var(--hair2); border-radius:999px; font:500 12px var(--sans);
+          transition:border-color .2s, background-color .2s, color .2s, gap .3s var(--out); }
+  .pill:hover { border-color:var(--fg); gap:11px; }
+  .pill.main { background:var(--fg); color:var(--bg); border-color:var(--fg); }
+  .pill.main:hover { background:var(--accent); border-color:var(--accent); color:#0c0e11; }
+  .pill kbd { font:10px var(--mono); opacity:.6; }
+  .link { display:flex; align-items:baseline; gap:10px; width:100%; padding:7px 0;
+          border-top:1px solid var(--hair); text-align:left; color:var(--ink2);
+          animation:rise .5s var(--out) backwards; transition:color .2s; }
+  .link:hover { color:var(--fg); }
+  .link .k { font:10px var(--mono); color:var(--dim); width:14px; flex:none; }
+  .link .t { flex:1; word-break:break-word; transition:transform .3s var(--out); }
+  .link:hover .t { transform:translateX(3px); }
+  .link .m { font:10px var(--mono); color:var(--dim); letter-spacing:.06em; text-transform:uppercase; }
+  .none { color:var(--dim); font-size:13px; }
+  @keyframes rise { from { opacity:0; transform:translateY(6px); } }
+
+  /* ── the reader: a sheet over a veil. Sans for the prose and a 66ch measure ── */
+  #modal { position:fixed; inset:0; z-index:9; background:var(--veil); overflow-y:auto;
+           padding:7vh 16px; backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px);
+           opacity:0; visibility:hidden; transition:opacity .3s var(--out), visibility 0s .3s; }
+  #modal.on { opacity:1; visibility:visible; transition:opacity .3s var(--out); }
+  #sheet { max-width:740px; margin:0 auto; background:var(--panel); border:1px solid var(--hair);
+           border-radius:16px; padding:46px 56px 54px; position:relative;
+           transform:translateY(18px) scale(.985); transition:transform .55s var(--out); }
+  #modal.on #sheet { transform:none; }
+  #sheetClose { position:absolute; top:20px; right:20px; }
+  #sheetMeta { font:500 10px var(--mono); letter-spacing:.14em; text-transform:uppercase;
+               color:var(--dim); margin-bottom:12px; }
+  #sheetMeta b { color:var(--accent); font-weight:500; }
+  #sheetTitle { margin:0 0 28px; padding-bottom:22px; border-bottom:1px solid var(--hair);
+                font:600 32px/1.12 var(--sans); letter-spacing:-.02em; word-break:break-word; }
+  #doc { font:16px/1.75 var(--sans); color:var(--ink2); max-width:66ch; word-wrap:break-word; }
+  #doc h3, #doc h4, #doc h5, #doc h6 { margin:30px 0 10px; color:var(--fg);
+                                        font:600 16px/1.3 var(--sans); letter-spacing:-.005em; }
+  #doc h3 { font-size:19px; }
+  #doc p { margin:0 0 16px; }
+  #doc ul { margin:0 0 16px; padding-left:20px; }
   #doc li { margin:0 0 6px; }
-  #doc b { color:#fff; }
-  #doc code { font:13px ui-monospace, Consolas, monospace; background:#0b0e12;
-              border:1px solid var(--line); border-radius:4px; padding:1px 5px; }
-  #doc pre { font:12.5px/1.6 ui-monospace, Consolas, monospace; background:#0b0e12;
-             border:1px solid var(--line); border-radius:8px; padding:12px 14px;
-             overflow-x:auto; margin:0 0 16px; }
-  #doc pre code { background:none; border:0; padding:0; }
+  #doc li::marker { color:var(--dim); }
+  #doc b { color:var(--fg); }
+  #doc em { color:var(--dim); font-style:normal; }
+  #doc code { font:13px var(--mono); background:color-mix(in srgb, var(--fg) 6%, transparent);
+              border-radius:5px; padding:2px 6px; }
+  #doc pre { font:12.5px/1.65 var(--mono); background:var(--bg); border:1px solid var(--hair);
+             border-radius:10px; padding:14px 16px; overflow-x:auto; margin:0 0 18px; }
+  #doc pre code { background:none; padding:0; }
   #doc a.wiki { color:var(--accent); cursor:pointer; text-decoration:none;
-                border-bottom:1px dashed currentColor; }
-  #doc a.wiki:hover { border-bottom-style:solid; }
+                background:linear-gradient(currentColor, currentColor) 0 100% / 0 1px no-repeat;
+                transition:background-size .35s var(--out); }
+  #doc a.wiki:hover { background-size:100% 1px; }
   #doc a.dead { color:var(--dim); cursor:default; border-bottom:1px dotted currentColor; }
-  #sheetClose { position:absolute; top:16px; right:20px; color:var(--dim); cursor:pointer;
-                font-size:12px; }
-  #sheetClose:hover { color:var(--fg); }
 
-  #tip { position:fixed; max-width:320px; padding:7px 10px; background:var(--panel);
-         border:1px solid var(--line); border-radius:6px; display:none;
-         pointer-events:none; line-height:1.45; z-index:5; }
-  #tip b { color:var(--accent); }
-  #tip em { color:var(--dim); font-style:normal; }
-  #hint { position:fixed; bottom:12px; left:16px; color:var(--dim); font-size:11px; }
+  /* ── help, tooltip, brand, intro ── */
+  #help { position:fixed; top:74px; right:24px; z-index:6; width:250px; padding:14px 18px;
+          background:var(--panel); border:1px solid var(--hair); border-radius:14px;
+          transform-origin:calc(100% - 20px) -30px; opacity:0; visibility:hidden;
+          transform:translateY(-8px) scale(.97);
+          transition:opacity .3s var(--out), transform .5s var(--out), visibility 0s .5s; }
+  #help.on { opacity:1; visibility:visible; transform:none;
+             transition:opacity .3s var(--out), transform .5s var(--out); }
+  #help div { display:flex; justify-content:space-between; gap:12px; padding:5px 0; color:var(--ink2); }
+  #help kbd { font:10.5px var(--mono); color:var(--fg); }
+  #tip { position:fixed; left:0; top:0; z-index:8; max-width:300px; padding:10px 12px;
+         background:var(--panel); border:1px solid var(--hair); border-radius:10px;
+         pointer-events:none; opacity:0; transition:opacity .18s; line-height:1.5; }
+  #tip.on { opacity:1; }
+  #tip .eyebrow { font:500 9.5px var(--mono); letter-spacing:.14em; text-transform:uppercase; color:var(--dim); }
+  #tip .t { color:var(--fg); font-weight:600; margin:2px 0; }
+  #tip .d { color:var(--ink2); font-size:12px; }
+  #brand { position:fixed; left:24px; bottom:22px; z-index:4; pointer-events:none; }
+  #brand .name { font:700 15px var(--sans); letter-spacing:-.01em; }
+  #brand .name b { color:var(--accent); font-weight:700; }
+  #brand .sub { font:10px var(--mono); color:var(--dim); letter-spacing:.06em; margin-top:2px; }
+  #intro { position:fixed; inset:0; z-index:30; display:grid; place-items:center; background:var(--bg);
+           transition:opacity .7s var(--out), visibility 0s .7s; }
+  #intro.gone { opacity:0; visibility:hidden; }
+  #intro .box { text-align:center; }
+  #intro .kick { font:500 10px var(--mono); letter-spacing:.32em; color:var(--dim); text-transform:uppercase; }
+  #intro h1 { margin:10px 0 18px; font:700 46px/1 var(--sans); letter-spacing:-.025em; text-transform:uppercase; }
+  #intro h1 b { color:var(--accent); font-weight:700; }
+  #intro .bar { width:208px; height:2px; margin:0 auto; background:var(--hair2); overflow:hidden; }
+  #intro .bar i { display:block; height:100%; width:0; background:var(--fg); transition:width .12s linear; }
+
+  @media (prefers-reduced-motion: reduce) { * { transition-duration:0s !important; animation:none !important; } }
+  @media (max-width: 720px) { #index { width:calc(100vw - 48px); } #sheet { padding:34px 22px 40px; } }
 </style>
 <canvas id="c"></canvas>
-<aside>
-  <h1>memories</h1>
-  <div class="sub" id="sub"></div>
-  <input id="q" placeholder="filter…" autocomplete="off">
-  <div class="head">projects</div>
-  <div id="projects"></div>
-  <div class="head">types</div>
-  <div id="types"></div>
-  <div class="head">machines</div>
-  <div id="machines"></div>
-</aside>
-<div id="detail"><span id="close">× filters</span><div id="detailBody"></div></div>
-<div id="modal"><div id="sheet"><span id="sheetClose">× esc</span>
-  <div class="top"><h2 id="sheetTitle"></h2><span class="meta" id="sheetMeta"></span></div>
-  <div id="doc"></div>
-</div></div>
-<div id="tip"></div>
-<div id="hint">drag to pan · wheel to zoom · click a node for detail · r reads it · Esc clears</div>
-<script>
-const DATA = __DATA__;
-const esc = s => String(s).replace(/[<>&]/g, ch => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[ch]));
-const COLOR = { project:"#2bd6c4", user:"#f2b544", feedback:"#e5666f",
-                reference:"#8b7cf6", memory:"#5aa9f0" };
-const color = n => n.kind === "project" ? COLOR.project : (COLOR[n.type] || COLOR.memory);
-const day = ms => new Date(ms * 1000).toISOString().slice(0, 10);
+<div id="labels"></div>
+<div id="grain"></div>
 
-const cv = document.getElementById("c"), ctx = cv.getContext("2d");
-const tip = document.getElementById("tip"), search = document.getElementById("q");
-const detail = document.getElementById("detail"), detailBody = document.getElementById("detailBody");
+<button class="round" id="bIndex" aria-expanded="false" title="Search and filters (/)">
+  <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></button>
+<aside id="index">
+  <label class="search">
+    <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+    <input id="q" placeholder="Search memories" autocomplete="off" spellcheck="false"><kbd>/</kbd>
+  </label>
+  <div id="lists">
+    <div class="head"><span>Projects</span><span id="nProjects"></span></div><div id="projects"></div>
+    <div class="head"><span>Types</span></div><div id="types"></div>
+    <div class="head"><span>Machines</span></div><div id="machines"></div>
+  </div>
+</aside>
+
+<button class="round text" id="bHelp" aria-expanded="false" title="Controls">i</button>
+<div id="help">
+  <div><span>Rotate</span><kbd>drag</kbd></div>
+  <div><span>Pan</span><kbd>right drag</kbd></div>
+  <div><span>Zoom</span><kbd>wheel</kbd></div>
+  <div><span>Detail</span><kbd>click</kbd></div>
+  <div><span>Read memory</span><kbd>r · dbl-click</kbd></div>
+  <div><span>Focus its project</span><kbd>f</kbd></div>
+  <div><span>Search</span><kbd>/</kbd></div>
+  <div><span>2D / 3D</span><kbd>2</kbd></div>
+  <div><span>Dark / paper</span><kbd>t</kbd></div>
+  <div><span>Clear</span><kbd>esc</kbd></div>
+</div>
+<button class="round text" id="bFlat" aria-pressed="false" title="2D / 3D (2)">2D</button>
+<button class="round" id="bTheme" title="Dark / paper (t)">
+  <svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 0 18c1 0 1.6-.8 1.6-1.7 0-.5-.2-.8-.4-1.1-.3-.3-.4-.7-.4-1.1 0-.9.7-1.6 1.6-1.6H16a5 5 0 0 0 5-5c0-4.1-4-7.5-9-7.5Z"/><circle cx="7.5" cy="11" r="1"/><circle cx="10.5" cy="7" r="1"/><circle cx="15" cy="7.5" r="1"/></svg></button>
+
+<aside id="detail"><button class="round" id="close" title="Close (esc)">
+  <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button><div id="detailBody"></div></aside>
+<div id="modal"><article id="sheet">
+  <button class="round" id="sheetClose" title="Close (esc)">
+    <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+  <div id="sheetMeta"></div><h2 id="sheetTitle"></h2><div id="doc"></div>
+</article></div>
+<div id="tip"></div>
+<div id="brand"><div class="name">brain<b>gent</b></div><div class="sub" id="sub"></div></div>
+<div id="intro"><div class="box"><div class="kick">braingent</div><h1>Memo<b>ries</b></h1>
+  <div class="bar"><i id="bar"></i></div></div></div>
+<script>
+__VENDOR__
+const DATA = __DATA__;
+const T = THREE;
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[<>&"]/g, ch => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[ch]));
+const day = ms => new Date(ms * 1000).toISOString().slice(0, 10);
+const store = { get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+                set(k, v) { try { localStorage.setItem(k, v); } catch {} } };
+const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+// the memory types keep a hue of their own, mixed into the neutral so they read
+// as a legend and not as decoration; the projects take the accent
+const TYPE = { user:"#e3b45a", feedback:"#ec6a72", reference:"#9b8cf8", project:"#62aef2" };
 
 // ── the model ──
-const nodes = DATA.nodes.map(n => ({ ...n, x:(Math.random()-.5)*600, y:(Math.random()-.5)*600,
-                                     vx:0, vy:0, deg:0 }));
+const nodes = DATA.nodes.map((n, i) => ({ ...n, i, deg:0, f:0, x:0, y:0, z:0, vx:0, vy:0, vz:0 }));
 const byId = new Map(nodes.map(n => [n.id, n]));
 const links = DATA.links.map(l => ({ ...l, s:byId.get(l.source), t:byId.get(l.target) }))
                         .filter(l => l.s && l.t);
 links.forEach(l => { l.s.deg++; l.t.deg++; });
-const radius = n => n.kind === "project" ? 7 + Math.min(9, n.n * .5) : 4 + Math.min(5, n.deg);
-const neighbours = n => links.filter(l => l.s === n || l.t === n)
-                         .map(l => ({ other: l.s === n ? l.t : l.s, kind: l.kind }));
-
-// ── sidebar: the panels you actually want while staring at a graph ──
+const adj = new Map(nodes.map(n => [n, []]));
+// one entry per neighbour: a wiki link both ways, or a link plus the "in" of
+// its project, would list the same memory twice
+links.forEach(l => [[l.s, l.t], [l.t, l.s]].forEach(([a, b]) => {
+  const list = adj.get(a);
+  if (!list.some(v => v.other === b)) list.push({ other:b, kind:l.kind });
+}));
+const neighbours = n => adj.get(n) || [];
+const maxDeg = Math.max(1, ...nodes.map(n => n.deg));
+const projects = nodes.filter(n => n.kind === "project").sort((a, b) => b.n - a.n);
 const memoryNodes = nodes.filter(n => n.kind === "memory");
-document.getElementById("sub").innerHTML =
-  `${DATA.counts.memories} memories · ${DATA.counts.projects} projects<br>` +
-  `${DATA.counts.links} wiki links · read on ${esc(DATA.machine)}`;
+const projectOf = n => n.kind === "project" ? n : byId.get("proj:" + n.project);
+const radius = n => n.kind === "project" ? 7 + Math.min(10, Math.sqrt(n.n) * 1.7)
+                                         : 2.8 + Math.min(3.6, n.deg * .55);
+nodes.forEach(n => n.r = radius(n));
 
-let fProject = null, fType = null, fMachine = null, q = "", sel = null;
+$("sub").textContent = `${DATA.counts.memories} memories · ${DATA.counts.projects} projects · ` +
+                       `${DATA.counts.links} links · ${DATA.machine}`;
 
+// ── layout: projects on a sphere, their memories around them, then forces ──
+// ponytail: O(n²) repulsion on the main thread; fine for a few hundred nodes,
+// a worker and Barnes-Hut the day there are thousands.
+const POS = "braingent-memgraph-pos-1";
+const saved = (() => { try { return JSON.parse(store.get(POS) || "{}"); } catch { return {}; } })();
+projects.forEach((p, k) => {
+  const y = 1 - 2 * (k + .5) / projects.length, rr = Math.sqrt(1 - y * y), a = k * 2.39996;
+  [p.x, p.y, p.z] = [Math.cos(a) * rr * 320, y * 320, Math.sin(a) * rr * 320];
+});
+const jitter = () => (Math.random() - .5) * 90;
+nodes.forEach(n => {
+  if (saved[n.id]) { [n.x, n.y, n.z] = saved[n.id]; return; }
+  if (n.kind === "project") return;
+  const p = projectOf(n) || { x:0, y:0, z:0 };
+  [n.x, n.y, n.z] = [p.x + jitter(), p.y + jitter(), p.z + jitter()];
+});
+let heat = Object.keys(saved).length >= nodes.length * .9 ? .08 : 1;
+let held = null;
+
+function tick() {
+  const N = nodes.length;
+  for (let i = 0; i < N; i++) {
+    const a = nodes[i];
+    for (let j = i + 1; j < N; j++) {
+      const b = nodes[j];
+      const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z, d2 = dx*dx + dy*dy + dz*dz || .01;
+      if (d2 > 160000) continue;
+      const f = 1500 * heat / d2, d = Math.sqrt(d2);
+      const fx = f * dx / d, fy = f * dy / d, fz = f * dz / d;
+      a.vx -= fx; a.vy -= fy; a.vz -= fz; b.vx += fx; b.vy += fy; b.vz += fz;
+    }
+  }
+  for (const l of links) {
+    const rest = l.kind === "in" ? 55 + l.t.r * 2 : 120;
+    const dx = l.t.x - l.s.x, dy = l.t.y - l.s.y, dz = l.t.z - l.s.z;
+    const d = Math.hypot(dx, dy, dz) || .01, f = (d - rest) * (l.kind === "in" ? .04 : .015) * heat;
+    const fx = f * dx / d, fy = f * dy / d, fz = f * dz / d;
+    l.s.vx += fx; l.s.vy += fy; l.s.vz += fz; l.t.vx -= fx; l.t.vy -= fy; l.t.vz -= fz;
+  }
+  for (const n of nodes) {
+    const g = .0018 * heat;
+    n.vx -= n.x * g; n.vy -= n.y * g; n.vz -= n.z * g;
+    if (n === held) { n.vx = n.vy = n.vz = 0; continue; }
+    n.vx *= .8; n.vy *= .8; n.vz *= .8;
+    n.x += Math.max(-14, Math.min(14, n.vx));
+    n.y += Math.max(-14, Math.min(14, n.vy));
+    n.z += Math.max(-14, Math.min(14, n.vz));
+  }
+  heat = held ? Math.max(heat, .3) : heat * .988;
+  if (heat < .012 && !held) {
+    heat = 0;
+    store.set(POS, JSON.stringify(Object.fromEntries(nodes.map(n => [n.id, [n.x, n.y, n.z].map(Math.round)]))));
+  }
+}
+
+// ── filters: a node passes them or fades to the paper, it never leaves ──
+let fProject = null, fType = null, fMachine = null, q = "";
+const filtering = () => !!(fProject || fType || fMachine || q);
+function passes(n) {
+  if (fProject && projectOf(n) !== fProject) return false;
+  if (fType && (n.kind === "project" || n.type !== fType)) return false;
+  if (fMachine && (n.kind === "project" ? !n.machines.includes(fMachine) : n.machine !== fMachine)) return false;
+  if (q && !(n.label + " " + (n.desc || "") + " " + (n.title || "") + " " + (n.body || "")).toLowerCase().includes(q)) return false;
+  return true;
+}
+
+// ── the scene ──
+const canvas = $("c");
+const renderer = new T.WebGLRenderer({ canvas, antialias:true });
+renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
+const scene = new T.Scene();
+const fog = new T.Fog(0, 1, 2);
+scene.fog = fog;
+const camera = new T.PerspectiveCamera(48, 1, 1, 50000);
+camera.position.set(0, 120, 2600);
+const controls = new T.OrbitControls(camera, canvas);
+controls.enableDamping = true;
+controls.dampingFactor = .08;
+controls.autoRotate = !still;
+controls.autoRotateSpeed = .32;
+controls.zoomSpeed = 1.2;
+
+const mesh = new T.InstancedMesh(new T.SphereGeometry(1, 24, 16), new T.MeshBasicMaterial(), nodes.length);
+const web = new T.LineSegments(new T.BufferGeometry(), new T.LineBasicMaterial({ transparent:true, depthWrite:false }));
+const sub = new T.LineSegments(new T.BufferGeometry(), new T.LineBasicMaterial({ transparent:true, depthWrite:false }));
+const act = new T.LineSegments(new T.BufferGeometry(), new T.LineBasicMaterial({ transparent:true, depthWrite:false }));
+const dotTex = (() => {
+  const c = document.createElement("canvas"); c.width = c.height = 64;
+  const g = c.getContext("2d"); g.fillStyle = "#fff"; g.beginPath(); g.arc(32, 32, 30, 0, 7); g.fill();
+  return new T.CanvasTexture(c);
+})();
+const sparks = new T.Points(new T.BufferGeometry(), new T.PointsMaterial({ size:3.2, map:dotTex, alphaTest:.5, transparent:true }));
+const ring = new T.Mesh(new T.RingGeometry(1.3, 1.42, 64), new T.MeshBasicMaterial({ transparent:true, side:T.DoubleSide, depthWrite:false }));
+ring.visible = false;
+web.geometry.setAttribute("position", new T.BufferAttribute(new Float32Array(links.length * 6), 3));
+scene.add(web, sub, act, sparks, mesh, ring);
+
+let paper, ink, accent;
+function readTheme() {
+  const css = getComputedStyle(document.documentElement);
+  const tok = k => new T.Color(css.getPropertyValue(k).trim());
+  paper = tok("--bg"); ink = tok("--fg"); accent = tok("--accent");
+  scene.background = paper;
+  fog.color = paper;
+  const neutral = ink.clone().lerp(paper, .5);
+  nodes.forEach(n => {
+    const base = n.kind === "project" ? accent.clone()
+      : TYPE[n.type] ? neutral.clone().lerp(new T.Color(TYPE[n.type]), .3) : neutral.clone();
+    // more links, more contrast towards the ink: the hubs stand out
+    n.tone = base.lerp(ink, (n.kind === "project" ? .12 : .5) * (Math.log1p(n.deg) / Math.log1p(maxDeg)) ** 2);
+    n.f = -1;   // repaint on the next frame
+  });
+  web.material.color = ink.clone().lerp(paper, .35);
+  sub.material.color = accent.clone().lerp(paper, .25);
+  act.material.color = ink.clone().lerp(paper, .2);
+  sparks.material.color = accent;
+  ring.material.color = ink;
+  dirty = true;
+}
+
+// draw only when something moved: sim, camera, hover, fades
+let dirty = true;
+controls.addEventListener("change", () => dirty = true);
+
+// 2D: the layout flattens onto the view plane; the forces are untouched, so going
+// back to 3D leaves everything where it was
+let flat = false, flatK = 0, flatAnim = null;
+const axis = new T.Vector3(0, 0, 1), flatC = new T.Vector3();
+function where(n, out) {
+  out.set(n.x, n.y, n.z);
+  if (!flatK) return out;
+  const d = (out.x - flatC.x) * axis.x + (out.y - flatC.y) * axis.y + (out.z - flatC.z) * axis.z;
+  return out.addScaledVector(axis, -d * flatK);
+}
+function setFlat(on) {
+  flat = on;
+  $("bFlat").textContent = on ? "3D" : "2D";
+  $("bFlat").setAttribute("aria-pressed", on);
+  if (on) { axis.copy(camera.position).sub(controls.target).normalize(); flatC.copy(controls.target); }
+  controls.enableRotate = !on;
+  controls.mouseButtons.LEFT = on ? T.MOUSE.PAN : T.MOUSE.ROTATE;
+  controls.autoRotate = false;
+  flatAnim = { t0:performance.now(), from:flatK, to:on ? 1 : 0 };
+}
+
+const m4 = new T.Matrix4(), v0 = new T.Vector3(), v1 = new T.Vector3(), col = new T.Color();
+function place() {
+  nodes.forEach(n => mesh.setMatrixAt(n.i, m4.makeScale(n.r, n.r, n.r).setPosition(where(n, v0))));
+  mesh.instanceMatrix.needsUpdate = true;
+  mesh.computeBoundingSphere();
+  const p = web.geometry.getAttribute("position");
+  links.forEach((l, k) => {
+    where(l.s, v0); where(l.t, v1);
+    p.setXYZ(2 * k, v0.x, v0.y, v0.z); p.setXYZ(2 * k + 1, v1.x, v1.y, v1.z);
+  });
+  p.needsUpdate = true;
+  web.geometry.computeBoundingSphere();
+  placeSub();
+}
+let subLinks = [];
+function placeSub() {
+  const p = new Float32Array(subLinks.length * 6);
+  subLinks.forEach((l, k) => { where(l.s, v0).toArray(p, 6 * k); where(l.t, v1).toArray(p, 6 * k + 3); });
+  sub.geometry.setAttribute("position", new T.BufferAttribute(p, 3));
+  sub.geometry.computeBoundingSphere();
+}
+
+// ── focus: the node under the mouse, else the picked one, lights up with its neighbours ──
+let hover = null, sel = null, lit = new Set(), active = [], labelled = [];
+const focus = () => hover || sel;
+function repaint() {
+  const a = focus();
+  lit = a ? new Set([a, ...neighbours(a).map(v => v.other)]) : new Set();
+  active = a ? links.filter(l => l.s === a || l.t === a) : [];
+  act.geometry.setAttribute("position", new T.BufferAttribute(new Float32Array(active.length * 6), 3));
+  sparks.geometry.setAttribute("position", new T.BufferAttribute(new Float32Array(active.length * 6), 3));
+  ring.visible = !!a;
+  subLinks = filtering() ? links.filter(l => passes(l.s) && passes(l.t)) : [];
+  placeSub();
+  web.material.opacity = filtering() || a ? .025 : (document.documentElement.dataset.theme === "paper" ? .14 : .085);
+  sub.material.opacity = .55;
+  act.material.opacity = .8;
+  // labels: at rest the big projects; filtering, the ones that pass with the most
+  // links; with a focus, only it and the picked one (a hub's neighbours covered everything)
+  if (a) labelled = [...new Set([sel, a])].filter(Boolean);
+  else if (filtering()) labelled = nodes.filter(passes).sort((x, y) => (y.kind === "project") - (x.kind === "project") || y.deg - x.deg).slice(0, 8);
+  else labelled = projects.slice(0, 14);
+  const box = $("labels");
+  while (box.children.length < labelled.length) box.append(document.createElement("span"));
+  [...box.children].forEach((s, k) => {
+    s.hidden = k >= labelled.length;
+    if (s.hidden) return;
+    const n = labelled[k];
+    s.textContent = n.label;
+    s.toggleAttribute("data-active", n === a);
+    s.toggleAttribute("data-project", n.kind === "project" && n !== a);
+  });
+  dirty = true;
+}
+
+function fades() {
+  let moved = false;
+  for (const n of nodes) {
+    const goal = lit.size ? (lit.has(n) ? 0 : .93) : filtering() && !passes(n) ? .94 : 0;
+    if (n.f === goal) continue;
+    n.f = n.f < 0 ? goal : Math.abs(goal - n.f) < .004 ? goal : n.f + (goal - n.f) * (still ? 1 : .14);
+    mesh.setColorAt(n.i, col.copy(n.tone).lerp(paper, n.f));
+    moved = true;
+  }
+  if (moved) mesh.instanceColor.needsUpdate = true;
+  return moved;
+}
+
+function linksAndLabels(now) {
+  const a = focus();
+  if (a) {
+    ring.position.copy(where(a, v0));
+    ring.scale.setScalar(a.r);
+    ring.quaternion.copy(camera.quaternion);
+  }
+  const p = act.geometry.getAttribute("position"), s = sparks.geometry.getAttribute("position");
+  const t = now * .00035;
+  active.forEach((l, k) => {
+    const from = l.s === a ? l.s : l.t, to = l.s === a ? l.t : l.s;
+    where(from, v0); where(to, v1);
+    p.setXYZ(2 * k, v0.x, v0.y, v0.z); p.setXYZ(2 * k + 1, v1.x, v1.y, v1.z);
+    for (const h of [0, 1]) {
+      const u = (t + h / 2 + k * .137) % 1;
+      s.setXYZ(2 * k + h, v0.x + (v1.x - v0.x) * u, v0.y + (v1.y - v0.y) * u, v0.z + (v1.z - v0.z) * u);
+    }
+  });
+  p.needsUpdate = s.needsUpdate = true;
+  act.geometry.computeBoundingSphere(); sparks.geometry.computeBoundingSphere();
+  // in order of importance; a label that would land on one already placed is
+  // skipped this frame rather than printed over it
+  const box = $("labels").children, w = innerWidth, h = innerHeight, taken = [];
+  labelled.forEach((n, k) => {
+    const span = box[k];
+    where(n, v0).add(v1.copy(camera.up).multiplyScalar(n.r + 4)).project(camera);
+    const x = (v0.x + 1) / 2 * w, y = (1 - v0.y) / 2 * h, half = n.label.length * 3.7 + 6;
+    const clash = taken.some(b => Math.abs(b.y - y) < 13 && Math.abs(b.x - x) < b.half + half);
+    span.style.visibility = v0.z > 1 || (clash && n !== focus()) ? "hidden" : "";
+    if (!clash) taken.push({ x, y, half });
+    span.style.left = x + "px";
+    span.style.top = y + "px";
+  });
+}
+
+// ── camera: frame a set of nodes, fly to one ──
+let flight = null, framing = true, spinAgain = 0;
+function frameOf(list) {
+  const pts = (list.length ? list : nodes).map(n => where(n, new T.Vector3()));
+  const c = pts.reduce((s, p) => s.add(p), new T.Vector3()).divideScalar(pts.length);
+  const ds = pts.map(p => p.distanceTo(c)).sort((x, y) => x - y);
+  const r = Math.max(60, ds[Math.floor(ds.length * .8)] || 60);
+  return { c, d:r * 1.05 / Math.tan(camera.fov * Math.PI / 360) / Math.min(1, camera.aspect) };
+}
+function fly(c, d, ms = 1100) {
+  const dir = camera.position.clone().sub(controls.target).normalize();
+  flight = { t0:performance.now(), ms, from:[controls.target.clone(), camera.position.clone()],
+             to:[c.clone(), c.clone().addScaledVector(dir, d)] };
+  framing = false;
+  dirty = true;
+}
+function frame(list) { const f = frameOf(list); fly(f.c, f.d); }
+function centreOn(n) {
+  const c = where(n, new T.Vector3());
+  fly(c, Math.max(n.r * 30, 260, Math.min(camera.position.distanceTo(controls.target) * .6, 700)));
+}
+function pauseSpin() {
+  controls.autoRotate = false;
+  clearTimeout(spinAgain);
+  spinAgain = setTimeout(() => controls.autoRotate = !still && !sel && !flat && !filtering(), 9000);
+}
+controls.addEventListener("start", () => { framing = false; flight = null; pauseSpin(); });
+
+// ── the index ──
 const countBy = (arr, key) => {
   const m = new Map();
   arr.forEach(n => m.set(n[key], (m.get(n[key]) || 0) + 1));
   return [...m.entries()].sort((a, b) => b[1] - a[1]);
 };
-
-function addRow(cont, { label, n, dot, active, onclick }) {
-  const el = document.createElement("div");
-  el.className = "row" + (active ? " on" : "");
-  el.innerHTML = (dot ? `<i style="background:${dot}"></i>` : "") +
-                 `<span class="name">${esc(label)}</span><span class="n">${n}</span>`;
-  el.onclick = onclick;
-  cont.appendChild(el);
+function addRow(box, { label, n, dot, on, click }) {
+  const b = document.createElement("button");
+  b.className = "row" + (on ? " on" : "");
+  b.innerHTML = (dot ? `<i style="background:${dot}"></i>` : "") +
+                `<span class="name">${esc(label)}</span><span class="n">${n}</span>`;
+  b.onclick = click;
+  box.appendChild(b);
 }
-
-function paintPanels() {
-  const P = document.getElementById("projects"), T = document.getElementById("types"),
-        M = document.getElementById("machines");
-  P.innerHTML = T.innerHTML = M.innerHTML = "";
-  nodes.filter(n => n.kind === "project").sort((a, b) => b.n - a.n).forEach(p =>
-    addRow(P, { label:p.label, n:p.n, dot:COLOR.project, active: fProject === p.title,
-              onclick: () => { fProject = fProject === p.title ? null : p.title; paintPanels(); } }));
+function paintIndex() {
+  const P = $("projects"), Ty = $("types"), M = $("machines");
+  P.innerHTML = Ty.innerHTML = M.innerHTML = "";
+  $("nProjects").textContent = projects.length;
+  const acc = "#" + accent.getHexString();
+  projects.forEach(p => addRow(P, { label:p.label, n:p.n, dot:acc, on:fProject === p,
+                                    click:() => focusProject(fProject === p ? null : p) }));
   countBy(memoryNodes, "type").forEach(([k, n]) =>
-    addRow(T, { label:k || "—", n, dot:COLOR[k] || COLOR.memory, active: fType === k,
-              onclick: () => { fType = fType === k ? null : k; paintPanels(); } }));
+    addRow(Ty, { label:k || "—", n, dot:TYPE[k] || "#888", on:fType === k,
+                 click:() => { fType = fType === k ? null : k; filtersChanged(); } }));
   countBy(memoryNodes, "machine").forEach(([k, n]) =>
-    addRow(M, { label:k, n, active: fMachine === k,
-              onclick: () => { fMachine = fMachine === k ? null : k; paintPanels(); } }));
+    addRow(M, { label:k, n, on:fMachine === k,
+                click:() => { fMachine = fMachine === k ? null : k; filtersChanged(); } }));
 }
-paintPanels();
-
-// a node either passes the four filters or gets painted dim — dropping it from
-// the canvas would make the rest jump around on every click
-function passes(n) {
-  if (fProject && (n.kind === "project" ? n.title : n.project) !== fProject) return false;
-  if (fType && (n.kind === "project" || n.type !== fType)) return false;
-  if (fMachine && (n.kind === "project" ? !n.machines.includes(fMachine) : n.machine !== fMachine)) return false;
-  if (q && !(n.label + " " + (n.desc || "") + " " + (n.title || "")).toLowerCase().includes(q)) return false;
-  return true;
+function filtersChanged(reframe = true) {
+  paintIndex();
+  repaint();
+  if (reframe && filtering()) { frame(nodes.filter(passes)); pauseSpin(); controls.autoRotate = false; }
+  else if (reframe) frame(nodes.filter(n => n.deg > 0));
 }
-
-// ── physics: O(n²) repulsion, springs and gravity ──
-// ponytail: no quadtree; the day the graph passes ~2000 nodes, Barnes-Hut.
-function step() {
-  for (let i = 0; i < nodes.length; i++) {
-    const a = nodes[i];
-    for (let j = i + 1; j < nodes.length; j++) {
-      const b = nodes[j];
-      const dx = b.x - a.x, dy = b.y - a.y, d2 = dx*dx + dy*dy || .01;
-      if (d2 > 90000) continue;                       // far apart: no push
-      const f = 900 / d2, d = Math.sqrt(d2);
-      const fx = f * dx / d, fy = f * dy / d;
-      a.vx -= fx; a.vy -= fy; b.vx += fx; b.vy += fy;
-    }
-  }
-  for (const l of links) {
-    const rest = l.kind === "in" ? 70 : 120;
-    const dx = l.t.x - l.s.x, dy = l.t.y - l.s.y;
-    const d = Math.hypot(dx, dy) || .01, f = (d - rest) * .012;
-    const fx = f * dx / d, fy = f * dy / d;
-    l.s.vx += fx; l.s.vy += fy; l.t.vx -= fx; l.t.vy -= fy;
-  }
-  for (const n of nodes) {
-    n.vx -= n.x * .002; n.vy -= n.y * .002;           // gravity towards the centre
-    if (n === held) { n.vx = n.vy = 0; continue; }
-    n.vx *= .82; n.vy *= .82;
-    n.x += Math.max(-12, Math.min(12, n.vx));
-    n.y += Math.max(-12, Math.min(12, n.vy));
-  }
+function focusProject(p) {
+  fProject = p;
+  filtersChanged();
 }
-
-// ── camera ──
-let scale = 1, ox = 0, oy = 0, held = null, pan = null, hover = null;
-const toWorld = (px, py) => [(px - innerWidth / 2 - ox) / scale, (py - innerHeight / 2 - oy) / scale];
-const sx = n => n.x * scale + ox + innerWidth / 2, sy = n => n.y * scale + oy + innerHeight / 2;
-
-function draw() {
-  const dpr = devicePixelRatio || 1;
-  if (cv.width !== innerWidth * dpr || cv.height !== innerHeight * dpr) {
-    cv.width = innerWidth * dpr; cv.height = innerHeight * dpr;
-    cv.style.width = innerWidth + "px"; cv.style.height = innerHeight + "px";
-  }
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.clearRect(0, 0, innerWidth, innerHeight);
-
-  const linked = sel ? new Set(neighbours(sel).map(v => v.other)) : null;
-  for (const l of links) {
-    const shown = passes(l.s) && passes(l.t);
-    const touched = sel && (l.s === sel || l.t === sel);
-    ctx.strokeStyle = touched ? "rgba(43,214,196,.9)"
-      : l.kind === "link" ? (shown ? "rgba(90,169,240,.5)" : "rgba(90,169,240,.06)")
-                          : (shown ? "rgba(125,133,144,.32)" : "rgba(125,133,144,.05)");
-    ctx.lineWidth = touched ? 1.6 : (l.kind === "link" ? 1.2 : .8);
-    ctx.beginPath(); ctx.moveTo(sx(l.s), sy(l.s)); ctx.lineTo(sx(l.t), sy(l.t)); ctx.stroke();
-  }
-  for (const n of nodes) {
-    const r = radius(n) * Math.min(1.6, scale), shown = passes(n);
-    ctx.globalAlpha = shown ? 1 : .1;
-    ctx.fillStyle = color(n);
-    ctx.beginPath(); ctx.arc(sx(n), sy(n), r, 0, 6.2832); ctx.fill();
-    if (n === sel || n === hover) {
-      ctx.strokeStyle = n === sel ? "#fff" : "rgba(255,255,255,.6)";
-      ctx.lineWidth = 1.6; ctx.stroke();
-    }
-    if (n.kind === "project" || scale > 1.15 || n === hover || n === sel ||
-        (linked && linked.has(n))) {
-      ctx.fillStyle = n.kind === "project" ? "#e6edf3" : "#9aa4ae";
-      ctx.font = (n.kind === "project" ? "bold 12px " : "11px ") + "ui-monospace, monospace";
-      ctx.fillText(n.label, sx(n) + r + 4, sy(n) + 4);
-    }
-    ctx.globalAlpha = 1;
-  }
+function toggleIndex(on = !$("index").classList.contains("on"), type = true) {
+  $("index").classList.toggle("on", on);
+  $("bIndex").setAttribute("aria-expanded", on);
+  if (on && type) setTimeout(() => $("q").focus({ preventScroll:true }), 60);
 }
-
-function loop() { step(); draw(); requestAnimationFrame(loop); }
-loop();
+$("bIndex").onclick = () => toggleIndex();
+let typing = 0;
+$("q").addEventListener("input", () => {
+  q = $("q").value.trim().toLowerCase();
+  clearTimeout(typing);
+  repaint();
+  typing = setTimeout(() => filtersChanged(), 280);   // reframe once typing pauses
+});
 
 // ── the reader ──
 // A markdown subset by hand, because this file opens offline with no CDN and
@@ -336,8 +685,8 @@ function md(src) {
 function readNode(n) {
   if (!n || n.kind !== "memory") return;
   document.getElementById("sheetTitle").textContent = n.label;
-  document.getElementById("sheetMeta").textContent =
-    `${n.type} · ${n.machine} · ${day(n.mtime)} · ${n.project}`;
+  document.getElementById("sheetMeta").innerHTML =
+    `<b>${esc(n.type || "memory")}</b> · ${esc(n.project)} · ${esc(n.machine)} · ${day(n.mtime)}`;
   doc.innerHTML = n.body ? md(n.body) : `<p class="meta">this memory is empty</p>`;
   doc.querySelectorAll("a.wiki").forEach(a => a.onclick = () => {
     const o = byId.get(a.dataset.id);
@@ -353,81 +702,209 @@ modal.onclick = e => { if (e.target === modal) closeReader(); };  // click outsi
 // ── detail panel ──
 function openNode(n) {
   sel = n;
-  detail.classList.add("on");
-  const vs = neighbours(n).sort((a, b) => a.other.label.localeCompare(b.other.label));
-  const body = n.kind === "project"
-    ? `<h2>${esc(n.label)}</h2>
-       <div class="meta">${n.n} memories · ${esc(n.machines.join(", "))}</div>
-       <p>${esc(n.title)}</p>`
-    : `<h2>${esc(n.label)}</h2>
-       <div class="meta">${esc(n.type)} · ${esc(n.machine)} · ${day(n.mtime)}</div>
-       <p>${esc(n.desc || "—")}</p>`;
-  detailBody.innerHTML = body +
-    (n.kind === "memory" ? `<button id="read">read memory</button>` : "") +
-    `<div class="head">linked (${vs.length})</div>` +
-    (vs.map(v => `<a data-id="${esc(v.other.id)}">${v.kind === "in" ? "▸" : "→"} ${esc(v.other.label)}</a>`).join("")
-     || `<span class="meta">nothing links here</span>`);
-  detailBody.querySelectorAll("a").forEach(a =>
-    a.onclick = () => { const o = byId.get(a.dataset.id); if (o) { centreOn(o); openNode(o); } });
-  const btn = document.getElementById("read");
-  if (btn) btn.onclick = () => readNode(n);
+  pauseSpin();
+  repaint();
+  const vs = neighbours(n).slice().sort((a, b) => (a.other.kind === "project") - (b.other.kind === "project")
+                                                  || a.other.label.localeCompare(b.other.label));
+  const p = projectOf(n);
+  const head = n.kind === "project"
+    ? `<div class="eyebrow"><b>project</b> · ${n.n} memories</div>
+       <h2>${esc(n.label)}</h2>
+       <p>${esc(n.machines.join(" · "))}</p>
+       <div class="actions"><button class="pill main" id="dFocus">${fProject === n ? "Show all" : "Focus project"} <kbd>f</kbd></button></div>`
+    : `<div class="eyebrow"><b>${esc(n.type || "memory")}</b> · ${esc(n.machine)} · ${day(n.mtime)}</div>
+       <h2>${esc(n.label)}</h2>
+       <p>${esc(n.desc || "—")}</p>
+       <div class="actions"><button class="pill main" id="dRead">Read memory <kbd>r</kbd></button>
+         ${p ? `<button class="pill" id="dFocus">${fProject === p ? "Show all" : esc(p.label)} <kbd>f</kbd></button>` : ""}</div>`;
+  $("detailBody").innerHTML = head +
+    `<div class="head" style="margin:0 0 8px"><span>Linked</span><span>${vs.length}</span></div>` +
+    (vs.map((v, k) => `<button class="link" data-id="${esc(v.other.id)}" style="animation-delay:${Math.min(k, 20) * 18}ms">
+        <span class="k">${v.kind === "in" ? "◇" : "→"}</span><span class="t">${esc(v.other.label)}</span>
+        <span class="m">${v.other.kind === "project" ? "project" : esc(v.other.type || "")}</span></button>`).join("")
+     || `<span class="none">Nothing links here.</span>`);
+  $("detailBody").querySelectorAll(".link").forEach(b =>
+    b.onclick = () => { const o = byId.get(b.dataset.id); if (o) { centreOn(o); openNode(o); } });
+  if ($("dRead")) $("dRead").onclick = () => readNode(n);
+  if ($("dFocus")) $("dFocus").onclick = () => { focusProject(fProject === p ? null : p); openNode(n); };
+  $("detail").classList.add("on");
+  $("detail").scrollTop = 0;
 }
-function centreOn(n) { ox = -n.x * scale; oy = -n.y * scale; }
-document.getElementById("close").onclick = () => { sel = null; detail.classList.remove("on"); };
+function closeDetail() { sel = null; $("detail").classList.remove("on"); repaint(); pauseSpin(); }
+$("close").onclick = closeDetail;
 
-// ── interaction ──
-function pick(px, py) {
-  const [wx, wy] = toWorld(px, py);
-  let best = null, bd = 1e9;
-  for (const n of nodes) {
-    const d = Math.hypot(n.x - wx, n.y - wy);
-    if (d < (radius(n) + 6) / scale && d < bd) { best = n; bd = d; }
-  }
-  return best;
+// ── pointer: hover, click, drag a node ──
+const ray = new T.Raycaster(), ptr = new T.Vector2();
+let under = null, release = 0, pending = null, down = null, drag = null;
+function nodeAt(x, y) {
+  ptr.set(x / innerWidth * 2 - 1, -(y / innerHeight) * 2 + 1);
+  ray.setFromCamera(ptr, camera);
+  const hits = ray.intersectObject(mesh);
+  // the hover sees only lit nodes: leaving a node, the ray used to land on a
+  // faded neighbour and the focus never came back
+  const shown = hits.find(h => !lit.size || lit.has(nodes[h.instanceId]));
+  return { any:hits[0] ? nodes[hits[0].instanceId] : null, shown:shown ? nodes[shown.instanceId] : null };
 }
-cv.addEventListener("dblclick", e => {
-  const n = pick(e.clientX, e.clientY);
-  if (n) readNode(n);
-});
-cv.addEventListener("mousedown", e => {
-  const n = pick(e.clientX, e.clientY);
-  if (n) { held = n; openNode(n); }
-  else { pan = [e.clientX - ox, e.clientY - oy]; cv.classList.add("drag"); }
-});
-addEventListener("mousemove", e => {
-  if (held) { const w = toWorld(e.clientX, e.clientY); held.x = w[0]; held.y = w[1]; }
-  else if (pan) { ox = e.clientX - pan[0]; oy = e.clientY - pan[1]; }
-  hover = held || pick(e.clientX, e.clientY);
-  if (hover) {
-    tip.style.display = "block";
-    tip.style.left = Math.min(innerWidth - 340, e.clientX + 14) + "px";
-    tip.style.top = (e.clientY + 16) + "px";
-    tip.innerHTML = hover.kind === "project"
-      ? `<b>${esc(hover.label)}</b><br><em>${hover.n} memories · ${esc(hover.machines.join(", "))}</em>`
-      : `<b>${esc(hover.label)}</b><br><em>${esc(hover.type)} · ${esc(hover.machine)}</em><br>${esc(hover.desc || "")}`;
-  } else { tip.style.display = "none"; }
-});
-addEventListener("mouseup", () => { held = null; pan = null; cv.classList.remove("drag"); });
-cv.addEventListener("wheel", e => {
-  e.preventDefault();
-  // zoom towards the cursor, with a big step: with the old factor it took twenty
-  // wheel notches to get close to a node
-  const k = Math.max(.5, Math.min(2, Math.exp(-e.deltaY * .006)));
-  const before = toWorld(e.clientX, e.clientY);
-  scale = Math.max(.15, Math.min(8, scale * k));
-  const after = toWorld(e.clientX, e.clientY);
-  ox += (after[0] - before[0]) * scale;
-  oy += (after[1] - before[1]) * scale;
-}, { passive: false });
-search.addEventListener("input", () => { q = search.value.trim().toLowerCase(); });
-addEventListener("keydown", e => {
-  if (e.key === "Escape" && modal.classList.contains("on")) { closeReader(); return; }
-  if (e.key === "r" && document.activeElement !== search) { readNode(sel); return; }
-  if (e.key === "Escape") {
-    search.value = ""; q = ""; search.blur();
-    fProject = fType = fMachine = sel = null;
-    detail.classList.remove("on"); paintPanels();
+function doHover() {
+  if (!pending) return;
+  const e = pending; pending = null;
+  const { any, shown } = nodeAt(e.clientX, e.clientY);
+  under = any;
+  canvas.style.cursor = drag ? "grabbing" : any ? "pointer" : "";
+  const tip = $("tip");
+  if (shown) {
+    clearTimeout(release); release = 0;
+    if (shown !== hover) { hover = shown; repaint(); }
+    tip.innerHTML = shown.kind === "project"
+      ? `<div class="eyebrow">project · ${shown.n} memories</div><div class="t">${esc(shown.label)}</div>`
+      : `<div class="eyebrow">${esc(shown.type || "memory")} · ${esc(shown.project)}</div>
+         <div class="t">${esc(shown.label)}</div><div class="d">${esc((shown.desc || "").slice(0, 160))}</div>`;
+    tip.style.transform = `translate(${Math.min(innerWidth - 320, e.clientX + 16)}px, ${Math.min(innerHeight - 110, e.clientY + 18)}px)`;
+    tip.classList.add("on");
+  } else {
+    tip.classList.remove("on");
+    if (hover && !release) release = setTimeout(() => { release = 0; hover = null; repaint(); }, 160);
   }
-  if (e.key === "/" && document.activeElement !== search) { e.preventDefault(); search.focus(); }
+}
+canvas.addEventListener("pointermove", e => {
+  pending = e;
+  if (drag && down && Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 4) {
+    ptr.set(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
+    ray.setFromCamera(ptr, camera);
+    const hit = ray.ray.intersectPlane(drag.plane, v1);
+    if (hit) { [held.x, held.y, held.z] = [hit.x, hit.y, hit.z]; heat = Math.max(heat, .3); }
+  }
 });
+canvas.addEventListener("pointerdown", e => {
+  down = [e.clientX, e.clientY];
+  const { any } = nodeAt(e.clientX, e.clientY);
+  if (e.button === 0 && any && !flat) {
+    held = any;
+    drag = { plane:new T.Plane().setFromNormalAndCoplanarPoint(camera.getWorldDirection(new T.Vector3()), where(any, new T.Vector3())) };
+    controls.enabled = false;
+    canvas.setPointerCapture(e.pointerId);
+  }
+}, { capture:true });
+canvas.addEventListener("pointerup", e => {
+  const click = down && Math.hypot(e.clientX - down[0], e.clientY - down[1]) < 4;
+  if (click) { if (under) { openNode(under); centreOn(under); } else if (sel) closeDetail(); }
+  down = null; held = null; drag = null; controls.enabled = true;
+});
+canvas.addEventListener("pointerleave", () => { $("tip").classList.remove("on"); pending = null;
+  if (hover) { hover = null; repaint(); } });
+canvas.addEventListener("dblclick", e => { const { any } = nodeAt(e.clientX, e.clientY); if (any) readNode(any); });
+
+// ── chrome ──
+function setTheme(name) {
+  document.documentElement.dataset.theme = name;
+  store.set("braingent-graph-theme", name);
+  readTheme(); paintIndex(); repaint();
+}
+$("bTheme").onclick = () => setTheme(document.documentElement.dataset.theme === "paper" ? "dark" : "paper");
+$("bFlat").onclick = () => setFlat(!flat);
+$("bHelp").onclick = () => {
+  const on = !$("help").classList.contains("on");
+  $("help").classList.toggle("on", on); $("bHelp").setAttribute("aria-expanded", on);
+};
+function clearAll() {
+  $("q").value = ""; q = ""; $("q").blur();
+  fProject = fType = fMachine = null;
+  if (sel) closeDetail();
+  filtersChanged();
+}
+addEventListener("keydown", e => {
+  const inField = document.activeElement === $("q");
+  if (e.key === "Escape") {
+    if (modal.classList.contains("on")) return closeReader();
+    if ($("help").classList.contains("on")) return $("bHelp").onclick();
+    if (inField && $("q").value) { $("q").value = ""; q = ""; return filtersChanged(); }
+    if (sel) return closeDetail();
+    return clearAll();
+  }
+  if (inField || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.key === "/") { e.preventDefault(); toggleIndex(true); }
+  else if (e.key === "r") readNode(sel);
+  else if (e.key === "f" && sel) { const p = projectOf(sel); focusProject(fProject === p ? null : p); openNode(sel); }
+  else if (e.key === "2") setFlat(!flat);
+  else if (e.key === "t") $("bTheme").onclick();
+});
+
+// the graph centres in the room the panels leave: the index pushes it right,
+// the detail left. The shift eases like the panels do.
+let shift = 0;
+const shiftGoal = () => innerWidth < 900 ? 0
+  : ($("index").classList.contains("on") ? 152 : 0) - ($("detail").classList.contains("on") ? 210 : 0);
+function view() {
+  camera.setViewOffset(innerWidth, innerHeight, -shift, 0, innerWidth, innerHeight);
+  camera.updateProjectionMatrix();
+}
+function resize() {
+  renderer.setSize(innerWidth, innerHeight, false);
+  camera.aspect = innerWidth / innerHeight;
+  view();
+  dirty = true;
+}
+addEventListener("resize", resize);
+
+// ── the loop ──
+let last = performance.now();
+function loop(now) {
+  requestAnimationFrame(loop);
+  const dt = Math.min(now - last, 100); last = now;
+  let moved = false;
+  if (heat) { tick(); moved = true; }
+  if (flatAnim) {
+    const t = Math.min(1, (now - flatAnim.t0) / 700);
+    flatK = flatAnim.from + (flatAnim.to - flatAnim.from) * (1 - (1 - t) ** 3);
+    if (t === 1) flatAnim = null;
+    moved = true;
+  }
+  if (moved) { place(); dirty = true; }
+  if (flight) {
+    const t = Math.min(1, (now - flight.t0) / flight.ms), k = still ? 1 : 1 - (1 - t) ** 4;
+    controls.target.lerpVectors(flight.from[0], flight.to[0], k);
+    camera.position.lerpVectors(flight.from[1], flight.to[1], k);
+    if (t === 1 || still) flight = null;
+    dirty = true;
+  } else if (framing && moved) {
+    // while the layout settles the camera keeps the core in frame, easing in
+    const f = frameOf(nodes.filter(n => n.deg > 0));
+    const dir = camera.position.clone().sub(controls.target), d = dir.length();
+    controls.target.lerp(f.c, .06);
+    camera.position.copy(controls.target).addScaledVector(dir.normalize(), d + (f.d - d) * (still ? 1 : .06));
+  }
+  const sg = shiftGoal();
+  if (shift !== sg) {
+    shift = Math.abs(sg - shift) < .5 || still ? sg : shift + (sg - shift) * (1 - Math.exp(-dt / 110));
+    view();
+    dirty = true;
+  }
+  controls.update();
+  doHover();
+  if (fades() || active.length) dirty = true;
+  if (!dirty) return;
+  dirty = false;
+  const d = camera.position.distanceTo(controls.target);
+  fog.near = d * .75; fog.far = d * 2.2;
+  linksAndLabels(now);
+  renderer.render(scene, camera);
+}
+
+// ── start: settle the layout behind the intro, then lift it ──
+document.documentElement.dataset.theme = store.get("braingent-graph-theme") || "dark";
+readTheme();
+resize();
+paintIndex();
+repaint();
+place();
+if (innerWidth > 1100) toggleIndex(true, false);   // wide: the index stays open
+(function warm(k = 0) {
+  const steps = heat > .5 ? 26 : 4;
+  for (let i = 0; i < steps && heat; i++) tick();
+  $("bar").style.width = Math.min(100, (k + 1) * 12.5) + "%";
+  if (k < 7) return requestAnimationFrame(() => warm(k + 1));
+  place();
+  setTimeout(() => $("intro").classList.add("gone"), still ? 0 : 160);
+  requestAnimationFrame(loop);
+})();
 </script>

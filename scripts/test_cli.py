@@ -736,8 +736,7 @@ def test_the_graph_window_is_painted_in_the_accent_you_picked():
             dest=pathlib.Path(tempfile.mkdtemp()) / "g.html").read_text(encoding="utf-8")
         assert f'--accent:{cli.ACCENT_HEX["35"]}' in html, "the window ignored the accent"
         assert cli.TEMPLATE_ACCENT not in html
-        # the node palette is a legend, not chrome: it does not follow the accent
-        assert 'project:"#2bd6c4"' in html
+        # the project spheres take the accent too: it is read off --accent
         cli.i18n.get_prefs = lambda: {}          # never configured → default
         html = cli.build_memory_graph(
             dest=pathlib.Path(tempfile.mkdtemp()) / "g.html").read_text(encoding="utf-8")

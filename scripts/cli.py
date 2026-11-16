@@ -520,6 +520,8 @@ MEMORY_HTML = srv.REPO_ROOT / ".sto-cache" / "memory-graph.html"
 
 
 PLACEHOLDER = "__" + "DATA" + "__"   # split so this file is not a second copy
+VENDOR = "__" + "VENDOR" + "__"
+THREE_JS = Path(__file__).parent / "vendor" / "three.min.js"
 
 
 def _embeddable(data: str) -> str:
@@ -558,6 +560,12 @@ def build_memory_graph(dest=None):
     n = tpl.count(PLACEHOLDER)
     if n != 1:
         raise OSError(f"the template has {n} copies of the data placeholder, expected 1")
+    # three.js goes in first, so the data never meets its placeholder; the
+    # library is checked for the two strings that would break the page
+    three = THREE_JS.read_text(encoding="utf-8")
+    if "</script" in three.lower() or PLACEHOLDER in three:
+        raise OSError("vendor/three.min.js cannot be inlined as it is")
+    tpl = tpl.replace(VENDOR, three, 1)
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(tpl.replace(PLACEHOLDER, data), encoding="utf-8")
     return dest
