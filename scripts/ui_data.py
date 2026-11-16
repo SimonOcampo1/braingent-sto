@@ -2,7 +2,7 @@
 
 This is what is left of `ui.py` once the stdlib TUI was removed. The rendering
 half went with it — the alt screen, the `msvcrt` key loop, the diff-based
-repaint — and the Go TUI in `tui/` reads it through `sto data`. What stayed was never
+repaint — and the Go TUI in `tui/` reads it through `braingent data`. What stayed was never
 about drawing: sync parity, knowledge counts, the accent and language prefs,
 transcript search, memory detail. Two callers share it, so it lives apart from
 either.
@@ -172,7 +172,7 @@ def preview_parts(data):
     return out
 
 
-# what every UI that reads `status_data` paints, in the language `sto ui` picked
+# what every UI that reads `status_data` paints, in the language `braingent ui` picked
 DATA_LABELS = ("act_sync", "act_retry", "mod_syncing", "fetching", "mod_auto_off", "mod_5h",
                "mod_week", "mod_ctx", "st_both", "st_local", "st_repo", "st_gone",
                "k_bring", "k_delete", "k_forget", "k_keep", "k_row_path",
@@ -203,7 +203,7 @@ def state_phrase(down, up):
 
 
 def accent_code():
-    """The ANSI code `sto ui` picked, so every UI paints the same accent."""
+    """The ANSI code `braingent ui` picked, so every UI paints the same accent."""
     try:
         return json.loads(i18n.PREFS.read_text(encoding="utf-8")).get("accent", "36")
     except (OSError, ValueError, AttributeError):
@@ -215,12 +215,12 @@ def status_data(cwd=None, fetch=False, limits=False, all_chats=False):
     and nothing else, so they cannot disagree about a number.
 
     With `cwd` it also counts that project's chats waiting to be kept or
-    brought (what `sto act sync --cwd` moves), and records `cwd` as the
+    brought (what `braingent act sync --cwd` moves), and records `cwd` as the
     project's folder on this machine when none was saved: the band runs inside
     the project, so asking the user for it would be asking what we know.
 
     With `all_chats` (the TUI) it counts every project's chats to send, which
-    `sto act sync --all` moves. The chats only in the cloud are not counted:
+    `braingent act sync --all` moves. The chats only in the cloud are not counted:
     Sync never brings them, the TUI shows them on their project instead.
 
     Nothing here touches the network unless asked: `fetch` refreshes the cloud
@@ -249,7 +249,7 @@ def status_data(cwd=None, fetch=False, limits=False, all_chats=False):
             "fetchError": sy.get("fetchError"),
             "fetching": sy.get("fetching"),
             # never fetches upstream: with --fetch the origin fetch already
-            # spends half the band's 30 s; `sto update` refreshes the notice
+            # spends half the band's 30 s; `braingent update` refreshes the notice
             "update": upd.get("available", 0), "updateLog": (upd.get("log") or [])[:14],
             "limits": (srv.usage_snapshot(detail=False).get("limits") or []) if limits else [],
             "machine": srv.LOCAL_MACHINE, "accent": accent_code(),
@@ -641,11 +641,11 @@ def classify(paths):
 
 
 def commands():
-    """(usage, what it does) for every `sto` command.
+    """(usage, what it does) for every `braingent` command.
 
     The list comes from the `cli.CLI` registry and not from a copy by hand: a
     new command shows up here on its own. The **usage** comes from the `cmd_*`
-    docstring when there is one (`sto search <text> — …`), because the syntax is
+    docstring when there is one (`braingent search <text> — …`), because the syntax is
     never translated and that way it cannot drift. The **description** comes
     from `STRINGS`, not from the docstring; if the key is missing, it falls back
     to whatever the docstring says after the dash.
@@ -655,8 +655,8 @@ def commands():
         doc = (getattr(fn, "__doc__", "") or "").strip().splitlines()
         first = doc[0].strip() if doc else ""
         usage, _, from_doc = first.partition(" — ")
-        if not usage.startswith("sto "):
-            usage, from_doc = f"sto {name}", ""
+        if not usage.startswith("braingent "):
+            usage, from_doc = f"braingent {name}", ""
         key = f"cmd_{name}"
         what = t(key)
         if what == key:                        # no translation: whatever there is

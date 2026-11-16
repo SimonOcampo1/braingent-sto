@@ -1,10 +1,11 @@
-# Installs the `sto` function into this machine's PowerShell profiles.
+# Installs the `braingent` function (and `bgent`, plus `sto`, the old name)
+# into this machine's PowerShell profiles.
 # Idempotent: start.cmd runs it on every boot. It rewrites the whole block, so
 # if you move the repo the next boot fixes the path on its own.
 #
 # It writes to BOTH profiles (PowerShell 7 and Windows PowerShell 5.1) because
 # $PROFILE points at a different file in each host, and there is no telling
-# which terminal you will open. Installing into only one makes `sto` "not
+# which terminal you will open. Installing into only one makes `braingent` "not
 # exist" in the other.
 $ErrorActionPreference = 'Stop'
 
@@ -14,11 +15,18 @@ $end = '# <<< STO CLI <<<'
 
 $block = @"
 $start
-function sto {
+function braingent {
     # @(...) is mandatory: without it, an if with a single element returns a
     # String and @splat over a String passes one argument per character.
-    `$sto_args = @(if (`$args.Count) { `$args } else { 'status' })
-    python "$repo\scripts\cli.py" @sto_args
+    `$b_args = @(if (`$args.Count) { `$args } else { 'ui' })
+    python "$repo\scripts\cli.py" @b_args
+}
+function bgent { braingent @args }
+function sto {
+    `$env:BRAINGENT_LEGACY = '1'
+    `$b_args = @(if (`$args.Count) { `$args } else { 'status' })
+    python "$repo\scripts\cli.py" @b_args
+    Remove-Item Env:BRAINGENT_LEGACY
 }
 $end
 "@
@@ -44,6 +52,6 @@ foreach ($target in $targets) {
     $new = if ($stripped) { "$stripped`n`n$block`n" } else { "$block`n" }
     if ($new -ne $current) {
         Set-Content -Path $target -Value $new -NoNewline
-        Write-Host "sto CLI installed in $target (repo: $repo)"
+        Write-Host "braingent CLI installed in $target (repo: $repo)"
     }
 }

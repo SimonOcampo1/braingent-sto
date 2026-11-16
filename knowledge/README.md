@@ -1,6 +1,6 @@
 # knowledge/
 
-What `sto push` writes and `sto pull` reads. Empty in a fresh clone; it fills
+What `braingent push` writes and `braingent pull` reads. Empty in a fresh clone; it fills
 up the first time you push.
 
 ```

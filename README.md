@@ -41,11 +41,11 @@ STO is the union of the three, on one substrate. Every artifact is **plain text 
 ## Features
 
 - **Built on the native memory, not beside it.** No second memory store, no protocol to paste into `CLAUDE.md`, nothing new to teach the model: Claude Code writes its auto memory as markdown, and STO mirrors those exact files between machines.
-- **One repo, everything in it.** `sto push` exports sessions, memories, `~/.claude` modules and your vault, commits and pushes. `sto pull` applies them on the other machine — including installing missing plugins and marketplaces.
+- **One repo, everything in it.** `braingent push` exports sessions, memories, `~/.claude` modules and your vault, commits and pushes. `braingent pull` applies them on the other machine — including installing missing plugins and marketplaces.
 - **Modular sync.** Pick exactly which parts of `~/.claude` travel: `claude-md`, `settings`, `keybindings`, `skills`, `agents`, `hooks`, `plugins`. Memories, sessions and vault always travel.
 - **Redaction on export.** Session transcripts are trimmed to what a reader needs (prompts, tool names, errors) and scrubbed of API-key-shaped strings before they ever hit a commit.
-- **Resumable conversations.** Every session another machine pushed can be brought here with `sto resume <id>` (or `e` on the Sessions tab, per row or per project): it is filed under the path this machine registered for the project (`w`), so `claude --resume` and `/resume` find it. Without a `sto keep` it is rebuilt from the trimmed export as text-only turns (tool outputs are gone, the conversation is not); `sto keep <id>` archives one transcript untrimmed and gzipped when the full tool history matters.
-- **Terminal UI (`sto ui`).** Chats, Memories, Tools and Settings under one header that says, in one phrase, what Sync would move. Written in Go (Bubble Tea) and fed only by `sto data` / `sto act`, so it holds no rule of its own: grouped and foldable lists, search as you type, a reader for chats and memories, delete one or many here or everywhere, mouse and keyboard. `sto ui` builds it once with Go, or downloads the release built from exactly its `tui/`.
+- **Resumable conversations.** Every session another machine pushed can be brought here with `braingent resume <id>` (or `e` on the Sessions tab, per row or per project): it is filed under the path this machine registered for the project (`w`), so `claude --resume` and `/resume` find it. Without a `braingent keep` it is rebuilt from the trimmed export as text-only turns (tool outputs are gone, the conversation is not); `braingent keep <id>` archives one transcript untrimmed and gzipped when the full tool history matters.
+- **Terminal UI (`braingent ui`).** Chats, Memories, Tools and Settings under one header that says, in one phrase, what Sync would move. Written in Go (Bubble Tea) and fed only by `braingent data` / `braingent act`, so it holds no rule of its own: grouped and foldable lists, search as you type, a reader for chats and memories, delete one or many here or everywhere, mouse and keyboard. `braingent ui` builds it once with Go, or downloads the release built from exactly its `tui/`.
 - **Live push/pull progress.** Every step of a sync reports itself (`exporting sessions → staging → committing → pushing to origin`) with a spinner, instead of freezing the screen until git returns.
 - **Memory graph.** A real graph of *your memories*: one node per memory, one per project, edges from `[[wikilinks]]`. Opens as a chrome-less window with a project/type/machine sidebar, click-to-inspect detail panel and search. Built from the same files the repo syncs, so it shows every machine and every session, not just this one.
 - **Config parity at a glance.** The Home dashboard shows what is local-only, what is in the repo but not installed, and which plugins are missing on this machine.
@@ -61,19 +61,19 @@ STO is the union of the three, on one substrate. Every artifact is **plain text 
 braingent-sto/
 ├── scripts/
 │   ├── sessions_server.py   # engine: sessions, memory, config sync, git — stdlib only
-│   ├── cli.py               # `sto` — presentation over the engine
-│   ├── ui_data.py           # computed state `sto data` serves the UIs
+│   ├── cli.py               # `braingent` — presentation over the engine
+│   ├── ui_data.py           # computed state `braingent data` serves the UIs
 │   ├── i18n.py              # every user-facing string, en/es
 │   ├── memory_graph.html    # graph window template (canvas 2D, no CDN)
 │   ├── dream_extract.py     # transcript parsing and redaction
-│   ├── install_sto_cli.sh   # installs `sto` on Linux/macOS: ~/.local/bin + PATH
-│   ├── install_sto_cli.ps1  # the same on Windows: both PowerShell profiles
+│   ├── install_cli.sh       # installs `braingent` on Linux/macOS: ~/.local/bin + PATH
+│   ├── install_cli.ps1      # the same on Windows: both PowerShell profiles
 │   └── test_*.py            # the suite: no framework, no fixtures
-├── tui/                     # `sto ui`: Go + Bubble Tea, fed by sto data / sto act
+├── tui/                     # `braingent`: Go + Bubble Tea, fed by braingent data / braingent act
 ├── app/                     # React + Vite dashboard (optional)
 ├── knowledge/               # what travels: sessions/, memory/, config/
 ├── vault/                   # curated knowledge: raw/ → wiki/ → outputs/
-├── start.sh                 # launcher: backend + app + `sto`, Ctrl+C stops both
+├── start.sh                 # launcher: backend + app + `braingent`, Ctrl+C stops both
 └── start.cmd                # the same on Windows, from a double click
 ```
 
@@ -94,11 +94,11 @@ braingent-sto/
 ```bash
 git clone https://github.com/SimonOcampo1/braingent-sto.git
 cd braingent-sto
-sh scripts/install_sto_cli.sh                                          # Linux / macOS
-powershell -ExecutionPolicy Bypass -File scripts/install_sto_cli.ps1   # Windows
+sh scripts/install_cli.sh                                          # Linux / macOS
+powershell -ExecutionPolicy Bypass -File scripts/install_cli.ps1   # Windows
 ```
 
-Open a new terminal and you have `sto`. Now make the clone yours.
+Open a new terminal and you have `braingent` (and `bgent`, the same command, shorter). Now make the clone yours.
 
 > **Every command below runs inside the `braingent-sto/` folder you just
 > cloned.** The new GitHub repo is never cloned — you only need its URL.
@@ -117,10 +117,10 @@ Open a new terminal and you have `sto`. Now make the clone yours.
    ```bash
    git push -u origin main
    ```
-5. Push your knowledge — `sto push` exports sessions, memories and the
+5. Push your knowledge — `braingent push` exports sessions, memories and the
    `~/.claude` modules you chose, commits and pushes them:
    ```bash
-   sto push
+   braingent push
    ```
 
 Steps 4 and 5 are both in the same folder: the first publishes the engine, the
@@ -128,7 +128,7 @@ second publishes what the engine collected.
 
 | remote | what lives there | who writes to it |
 |---|---|---|
-| `origin` | the engine **plus your sessions, memories and config** | only you, with `sto push` |
+| `origin` | the engine **plus your sessions, memories and config** | only you, with `braingent push` |
 | `upstream` | the engine, nothing else | whoever publishes the OS |
 
 ### On every other machine
@@ -138,29 +138,29 @@ Here you *do* clone — and what you clone is **your private repo**, not the pub
 ```bash
 git clone git@github.com:<you>/<your-repo>.git
 cd <your-repo>
-sh scripts/install_sto_cli.sh                                          # Linux / macOS
-powershell -ExecutionPolicy Bypass -File scripts/install_sto_cli.ps1   # Windows
-sto pull     # brings and installs what the other machines have
-sto push     # uploads the memories this machine already had
+sh scripts/install_cli.sh                                          # Linux / macOS
+powershell -ExecutionPolicy Bypass -File scripts/install_cli.ps1   # Windows
+braingent pull     # brings and installs what the other machines have
+braingent push     # uploads the memories this machine already had
 ```
 
 That machine almost certainly has months of memories of its own already —
-`sto push` picks them up on the first run, no setup, no import step. And
+`braingent push` picks them up on the first run, no setup, no import step. And
 pulling first is safe: a pull never overwrites a local memory you have not
 published yet.
 
-From then on `sto push` / `sto pull` — or `p` / `l` inside `sto ui` — keep every
-machine identical. The same instructions live in `sto ui` › Config, next to the
+From then on `braingent push` / `braingent pull` — or `p` / `l` inside `braingent ui` — keep every
+machine identical. The same instructions live in `braingent ui` › Config, next to the
 two remotes they are about.
 
 ### Getting updates to the OS itself
 
-`sto update` merges `upstream` into your repo. If you skipped the rename above
+`braingent update` merges `upstream` into your repo. If you skipped the rename above
 it adds the remote itself, pointing at where the OS is published.
 
 ```
-sto update            # what is available
-sto update --apply    # bring it down   (or `u` inside `sto ui`)
+braingent update            # what is available
+braingent update --apply    # bring it down   (or `u` inside `braingent ui`)
 ```
 
 Your memories cannot be overwritten by an update, and this is structural rather
@@ -168,9 +168,9 @@ than a promise: the published repo has never held a single file under
 `knowledge/memory/`, so a merge has nothing to bring there.
 
 If you made your repo by copying files instead of cloning or forking, the two
-histories share no commit and git refuses to merge — the home says so. `sto
+histories share no commit and git refuses to merge — the home says so. `braingent
 update --link` grafts them once, keeping every local file exactly as it is;
-from then on `sto update` is an ordinary merge.
+from then on `braingent update` is an ordinary merge.
 
 > Keep the repo **private**. It carries your session transcripts and memories.
 
@@ -182,25 +182,28 @@ macOS both servers log to `.sto-cache/` and `Ctrl+C` takes them down together.
 
 ## Commands
 
+`bgent` is the same command, shorter. `sto`, the old name, still works and
+says it was renamed.
+
 | Command | What it does |
 |---|---|
-| `sto` / `sto status` | where sync stands: branch, ahead/behind, dirty |
-| `sto push` / `sto pull` | export and upload / download and apply |
-| `sto ui` | the terminal UI |
-| `sto sessions [project]` | sessions, most recent first |
-| `sto show <id>` | one transcript, through the pager |
-| `sto keep <id>` | archive a transcript in full so another machine can resume it |
-| `sto resume <id>` | bring a session from the repo into this machine's checkout and print the `claude --resume` line |
-| `sto search <text>` | full-text search across every session, every machine |
-| `sto memory [project\|show\|search\|sync]` | the memories in the repo |
-| `sto skills [id]` | installed skills, or one in full |
-| `sto config` | which `~/.claude` modules are syncing |
-| `sto machines` | the machines feeding the repo |
-| `sto usage` | plan limits and recent spend |
-| `sto graph [--memory\|--open\|<note>]` | memory graph window (read any memory in full), repo graph, or a node's neighbours |
-| `sto update [--apply]` | bring OS updates down from upstream — never touches your knowledge |
-| `sto badge [--install\|--off]` | the `◆ STO` badge in Claude Code's status line |
-| `sto data <view>` / `sto act <verb>` | JSON for the UIs: read a view (`status`, `chats`, `memories`, `tools`, `search`), or run an action and stream its progress |
+| `braingent` | the terminal UI (`braingent ui` does the same) |
+| `braingent status` | where sync stands: branch, ahead/behind, dirty |
+| `braingent push` / `braingent pull` | export and upload / download and apply |
+| `braingent sessions [project]` | sessions, most recent first |
+| `braingent show <id>` | one transcript, through the pager |
+| `braingent keep <id>` | archive a transcript in full so another machine can resume it |
+| `braingent resume <id>` | bring a session from the repo into this machine's checkout and print the `claude --resume` line |
+| `braingent search <text>` | full-text search across every session, every machine |
+| `braingent memory [project\|show\|search\|sync]` | the memories in the repo |
+| `braingent skills [id]` | installed skills, or one in full |
+| `braingent config` | which `~/.claude` modules are syncing |
+| `braingent machines` | the machines feeding the repo |
+| `braingent usage` | plan limits and recent spend |
+| `braingent graph [--memory\|--open\|<note>]` | memory graph window (read any memory in full), repo graph, or a node's neighbours |
+| `braingent update [--apply]` | bring OS updates down from upstream — never touches your knowledge |
+| `braingent badge [--install\|--off]` | the `◆ STO` badge in Claude Code's status line |
+| `braingent data <view>` / `braingent act <verb>` | JSON for the UIs: read a view (`status`, `chats`, `memories`, `tools`, `search`), or run an action and stream its progress |
 
 ### Inside Claude Code: the `sto-band` mod
 
@@ -208,16 +211,16 @@ A band above the prompt with one state: arrows with the count waiting in
 the cloud (↓N) and on this machine (↑M), or "up to date". A single **Sync**
 button shows only when something is pending, and turns into a retry when the
 last sync failed. It moves this project's chats and the memories in one go.
-`auto: off` shows only when auto is off. Commands: `/sto` refreshes the band,
-`/sto sync` syncs, `/sto auto` toggles auto (remembered across sessions).
-The band reads everything from `sto data status`, so it never disagrees with
+`auto: off` shows only when auto is off. Commands: `/braingent` refreshes the band,
+`/braingent sync` syncs, `/braingent auto` toggles auto (remembered across sessions).
+The band reads everything from `braingent data status`, so it never disagrees with
 the TUI.
 
 ```
 /plugin install sto-band --marketplace SimonOcampo1/braingent-sto
 ```
 
-Or, to have `sto update` update the mod too, add your clone as the marketplace:
+Or, to have `braingent update` update the mod too, add your clone as the marketplace:
 `claude plugin marketplace add <your clone>`, then the same `/plugin install`
 naming it, and `/reload-plugins` after each update.
 
@@ -250,4 +253,4 @@ python test_sessions_server.py && python test_dream_extract.py && python test_cl
 cd ../tui && go test ./...
 ```
 
-No framework, no fixtures, no mocks beyond swapping a function for a lambda. The Go suite runs the TUI against a fake `sto` script that records what it was asked.
+No framework, no fixtures, no mocks beyond swapping a function for a lambda. The Go suite runs the TUI against a fake `braingent` script that records what it was asked.

@@ -669,7 +669,7 @@ def bring(target, apply=False, claude_dir=None, repo_config=None, home=None):
     in the useful direction: without it the only thing you could do to a skill
     the repo has and you do not was drop it.
 
-    `sto pull` already installs everything at once; this is the same operation
+    `braingent pull` already installs everything at once; this is the same operation
     scoped to one item, for when you want that skill and not the other forty.
 
     Returns `(paths, error)`. `apply=False` is a dry run, same contract as
@@ -1402,7 +1402,7 @@ def resume_session(sid: str, project_dir=None, claude_dir=None,
     lives at a different path on every machine, and a transcript only resumes
     under the project it is filed against.
 
-    A full archive (`sto keep`) is copied as is. Anything else comes from the
+    A full archive (`braingent keep`) is copied as is. Anything else comes from the
     trimmed export, rebuilt into text-only turns: the tool outputs are gone,
     the conversation is not, and nobody had to remember to keep it.
 
@@ -1418,7 +1418,7 @@ def resume_session(sid: str, project_dir=None, claude_dir=None,
     where = project_dir or local_project_path(row["project"])
     if not where:
         return {"error": f"no path for {row['project']} on this machine "
-                         f"(set it in `sto ui`, or run `sto resume` from the checkout)"}
+                         f"(set it in `braingent ui`, or run `braingent resume` from the checkout)"}
     cd = Path(claude_dir) if claude_dir else CLAUDE_DIR
     target = cd / "projects" / project_slug(where)
     out = target / (row["id"] + ".jsonl")
@@ -1983,7 +1983,7 @@ def forget(target, apply=False, claude_dir=None, repo_config=None, repo_memory=N
     is a dry run so the caller can show the manifest before asking: nothing in
     this repo deletes without the user seeing the list first.
 
-    The deletion reaches the remote on the next `sto push` — `sync_stage`
+    The deletion reaches the remote on the next `braingent push` — `sync_stage`
     already runs `git add -A`, which stages removals. The other machine keeps
     its copy and decides for itself; git history says which of the two happened
     (`git log --diff-filter=D`), so no tombstone file has to be invented.
@@ -2168,9 +2168,9 @@ def memory_graph(src=None, bodies=False) -> dict:
                        "links": sum(1 for l in links if l["kind"] == "link")}}
 
 
-FETCH_TTL = 60  # seconds: a network round trip per `sto status` is the whole cost
+FETCH_TTL = 60  # seconds: a network round trip per `braingent status` is the whole cost
 # How long `sync_status` waits for the fetch it started: the Claude Code band
-# runs `sto data status` with a 30 s budget. A forced fetch (an explicit sync)
+# runs `braingent data status` with a 30 s budget. A forced fetch (an explicit sync)
 # waits 120 s. Past that the fetch keeps running on its own (`_fetch_origin`).
 FETCH_TIMEOUT = 15
 # A fetch whose log has not moved in this long was killed (a shutdown, a sleep).
@@ -2241,7 +2241,7 @@ def _stale_fetch(ttl=FETCH_TTL) -> bool:
 
     git stamps .git/FETCH_HEAD on every fetch, so the answer is already on
     disk and survives process boundaries — which is what matters, since each
-    `sto <cmd>` is a new process that used to fetch from scratch.
+    `braingent <cmd>` is a new process that used to fetch from scratch.
 
     ponytail: FETCH_HEAD is shared by every remote, so a fetch of `upstream`
     also holds origin off for a minute. One stat() beats the `for-each-ref`
@@ -2586,7 +2586,7 @@ def update_link() -> dict:
     if code != 0:
         _git("merge", "--abort")
         return {"error": f"link failed, nothing changed: {out[:400]}"}
-    return {"ok": True, "message": "linked to upstream; `sto update` works from now on"}
+    return {"ok": True, "message": "linked to upstream; `braingent update` works from now on"}
 
 
 def update_apply(progress=None) -> dict:
@@ -2597,7 +2597,7 @@ def update_apply(progress=None) -> dict:
     if st["error"]:
         return {"error": st["error"]}
     if not st["linked"]:
-        return {"error": "this repo shares no history with upstream: run `sto update --link` once"}
+        return {"error": "this repo shares no history with upstream: run `braingent update --link` once"}
     if st["available"] == 0:
         return {"ok": True, "message": "already on the latest version"}
     if sync_status(fetch=False)["dirty"] and not _commit_own_project_map():
@@ -2757,7 +2757,7 @@ def _oauth_usage():
 
 def _read_usage_cache() -> dict:
     """The on-disk half of the cache. In-process caching alone was useless for
-    the CLI: every `sto` is a fresh process, so every `sto status` paid the
+    the CLI: every `braingent` is a fresh process, so every `braingent status` paid the
     full ccusage bill again."""
     try:
         return json.loads(USAGE_CACHE.read_text(encoding="utf-8"))
@@ -2942,8 +2942,8 @@ def main():
 
 
 if __name__ == "__main__":
-    # ponytail: the subcommands live in `sto` (cli.py), which is what translates
+    # ponytail: the subcommands live in `braingent` (cli.py), which is what translates
     # and paints; only the server stayed here so there are not two CLIs.
     if len(sys.argv) > 1:
-        sys.exit("commands live in `sto` (scripts/cli.py) — this only starts the server")
+        sys.exit("commands live in `braingent` (scripts/cli.py) — this only starts the server")
     main()

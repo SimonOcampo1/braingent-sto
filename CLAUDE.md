@@ -4,13 +4,13 @@ An orchestration layer over Claude Code: engine first (sessions + sync + vault),
 
 ## Language
 
-Code, comments, docstrings and docs are written in English. The TUI and the CLI print in the language configured in `sto ui` (English by default, Spanish available); every user-facing string lives in `scripts/i18n.py` — never hardcode one in `cli.py` or in the Go TUI (`tui/`), which receives its labels from `sto data status`.
+Code, comments, docstrings and docs are written in English. The TUI and the CLI print in the language configured in `braingent` (English by default, Spanish available); every user-facing string lives in `scripts/i18n.py` — never hardcode one in `cli.py` or in the Go TUI (`tui/`), which receives its labels from `braingent data status`.
 
 ## Where code is written
 
-Two clones, one rule: **code changes are made in the public clone** (`../sto-agentic-os`, remote `braingent-sto`) and reach the private one (`my-agentic-os`) through `sto update`. The private clone commits knowledge — `knowledge/`, `vault/` — and nothing under `scripts/` or `app/`.
+Two clones, one rule: **code changes are made in the public clone** (`../sto-agentic-os`, remote `braingent-sto`) and reach the private one (`my-agentic-os`) through `braingent update`. The private clone commits knowledge — `knowledge/`, `vault/` — and nothing under `scripts/` or `app/`.
 
-It is not bureaucracy: editing the same file in both clones is what produces the merge conflicts `sto update` aborts on, and every fix taken this way is one more real test of the update path users depend on. `tools/build_public.py` stays for repairing drift, not for daily work.
+It is not bureaucracy: editing the same file in both clones is what produces the merge conflicts `braingent update` aborts on, and every fix taken this way is one more real test of the update path users depend on. `tools/build_public.py` stays for repairing drift, not for daily work.
 
 ## Knowledge rule
 

@@ -295,7 +295,7 @@ def test_the_commands_are_translated_too():
     try:
         ui.i18n.LANG = "en"
         usos = dict(ui.commands())
-        assert usos["sto search <text>"] == "search text across every session"
+        assert usos["braingent search <text>"] == "search text across every session"
         assert not any("busca" in q for q in usos.values())
     finally:
         ui.i18n.LANG = real
@@ -305,10 +305,10 @@ def test_a_new_command_shows_up_without_touching_the_help():
     real = dict(ui.cli.CLI)
     try:
         def cmd_inventado(*a):
-            """sto inventado <x> — hace algo nuevo."""
+            """braingent inventado <x> — hace algo nuevo."""
         ui.cli.CLI["inventado"] = cmd_inventado
         usos = dict(ui.commands())
-        assert usos["sto inventado <x>"] == "hace algo nuevo"
+        assert usos["braingent inventado <x>"] == "hace algo nuevo"
     finally:
         ui.cli.CLI.clear()
         ui.cli.CLI.update(real)
@@ -506,7 +506,7 @@ def test_no_pictographs_in_the_source():
     clone tracks its owner's files next to ours — research notes, plans, a
     `prompt.md` at the root — and our house style is not theirs to obey.
     `upstream/main` is the published tree, which is the only local answer to
-    "is this our source"; `sto update` keeps the ref fresh. `scripts/` and
+    "is this our source"; `braingent update` keeps the ref fresh. `scripts/` and
     `app/` are policed regardless, so a source file that is new and not pushed
     yet cannot slip through the same door.
     """

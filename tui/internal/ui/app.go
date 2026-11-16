@@ -1,7 +1,7 @@
 // Package ui is the braingent TUI: a header with the tabs and the sync
 // state, a card with the one Sync button, and each tab's list beside a
 // sidebar that explains the selected item. Every number and word comes from
-// `sto data`; this package only lays them out.
+// `braingent data`; this package only lays them out.
 package ui
 
 import (
@@ -177,7 +177,7 @@ func (m Model) Init() tea.Cmd { return m.loadAll() }
 
 func listen(ch chan tea.Msg) tea.Cmd { return func() tea.Msg { return <-ch } }
 
-// act runs `sto act args...`, its progress arriving as stepMsg and its end
+// act runs `braingent act args...`, its progress arriving as stepMsg and its end
 // as actDone; busy is what the footer says meanwhile.
 func (m *Model) act(busy string, args ...string) tea.Cmd {
 	c, ch := m.c, make(chan tea.Msg, 16)
@@ -213,7 +213,7 @@ func (m *Model) settingItems() []item {
 	return its
 }
 
-// choices is what a setting can be: the values `sto act set` takes, the
+// choices is what a setting can be: the values `braingent act set` takes, the
 // current one shown, and how each value reads. Empty for one that is only
 // shown (the cloud's URL).
 func (m Model) choices(id string) (opts []string, cur string, labels []string) {
@@ -252,7 +252,7 @@ func (m Model) choices(id string) (opts []string, cur string, labels []string) {
 	return nil, "", nil
 }
 
-// changeSetting asks `sto act set` for the setting's next value.
+// changeSetting asks `braingent act set` for the setting's next value.
 func (m *Model) changeSetting(id string) tea.Cmd {
 	opts, cur, labels := m.choices(id)
 	if len(opts) == 0 {
@@ -495,7 +495,7 @@ type deletion struct {
 	here            bool
 }
 
-// delTarget is what `sto act delete` takes for an item, or "" when the item
+// delTarget is what `braingent act delete` takes for an item, or "" when the item
 // cannot be deleted (a setting, a vault note).
 func delTarget(it *item) string {
 	switch it.kind {

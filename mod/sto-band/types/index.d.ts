@@ -1,4 +1,4 @@
-/** What `sto data status` prints (the fields the band reads). */
+/** What `braingent data status` prints (the fields the band reads). */
 export type StoStatus = {
   state: 'uptodate' | 'pending'
   down: number

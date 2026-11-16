@@ -207,7 +207,7 @@ def project_todo(project):
 
 
 def cmd_sessions(*args):
-    """sto sessions [<project>]"""
+    """braingent sessions [<project>]"""
     rows, _ = cached_sessions()
     if not rows:
         return {"error": t("cli_no_sessions")}
@@ -250,8 +250,8 @@ def page(text):
     """Stdlib pager: `more` on Windows, $PAGER/less on Unix, plain without a tty.
 
     ponytail: `pydoc` is imported here and not at the top — it drags `inspect`
-    behind it and costs ~90 ms of import on every `sto` command, while only
-    `sto show`/`sto skills <id>` ever page anything.
+    behind it and costs ~90 ms of import on every `braingent` command, while only
+    `braingent show`/`braingent skills <id>` ever page anything.
     """
     import pydoc
     enc = sys.stdout.encoding or "utf-8"
@@ -278,7 +278,7 @@ def timeline_lines(row):
 
 
 def cmd_show(sid=""):
-    """sto show <id> — one transcript, through the pager."""
+    """braingent show <id> — one transcript, through the pager."""
     if not sid:
         return {"error": t("cli_use_show")}
     rows, _ = cached_sessions()
@@ -323,7 +323,7 @@ def snippet(row, terms):
 
 
 def cmd_search(*terms):
-    """sto search <text> — search across the sessions."""
+    """braingent search <text> — search across the sessions."""
     q = " ".join(terms).strip()
     if not q:
         return {"error": t("cli_use_search")}
@@ -343,7 +343,7 @@ def cmd_search(*terms):
 
 
 def cmd_skills(*args):
-    """sto skills [<id>] — the list, or one SKILL.md through the pager."""
+    """braingent skills [<id>] — the list, or one SKILL.md through the pager."""
     if not args:
         rows = sorted(srv.list_skills(), key=lambda r: r["id"])
         if not rows:
@@ -364,7 +364,7 @@ def cmd_skills(*args):
 
 
 def cmd_usage():
-    """sto usage — plan limits and the last few days of spend."""
+    """braingent usage — plan limits and the last few days of spend."""
     u = srv.usage_snapshot()
     out = []
     for lim in u.get("limits") or []:
@@ -392,7 +392,7 @@ def cmd_usage():
 
 
 def cmd_machines():
-    """sto machines — the machines feeding the repo."""
+    """braingent machines — the machines feeding the repo."""
     ms = srv.list_machines()
     lines = [f"  {_pad(name, 22, BOLD)}{d['type'].ljust(10)}"
              f"{c('(' + t('this_one') + ')', GREEN) if d['local'] else ''}".rstrip()
@@ -505,7 +505,7 @@ def open_window(path, launcher=None, fallback=None):
 
 
 def open_graph(launcher=None, fallback=None):
-    """`sto graph --open` — the repo graph (graphify) in a window."""
+    """`braingent graph --open` — the repo graph (graphify) in a window."""
     if not GRAPH_HTML.is_file():
         return {"error": t("cli_graph_missing")}
     return open_window(GRAPH_HTML, launcher, fallback)
@@ -545,7 +545,7 @@ TEMPLATE_ACCENT = "--accent:#2bd6c4"
 
 
 def _accent_hex():
-    """The accent picked in `sto ui`, as a hex. Unknown value → the default."""
+    """The accent picked in `braingent ui`, as a hex. Unknown value → the default."""
     return ACCENT_HEX.get(i18n.get_prefs().get("accent"), ACCENT_HEX["36"])
 
 
@@ -564,7 +564,7 @@ def build_memory_graph(dest=None):
 
 
 def open_memory_graph(launcher=None, fallback=None, dest=None):
-    """`sto graph --memory` — the repo's memories in a window."""
+    """`braingent graph --memory` — the repo's memories in a window."""
     try:
         file = build_memory_graph(dest)
     except OSError as e:
@@ -573,7 +573,7 @@ def open_memory_graph(launcher=None, fallback=None, dest=None):
 
 
 def cmd_graph(*args):
-    """sto graph [--open|--memory|<note>] — summary, neighbours, or a window."""
+    """braingent graph [--open|--memory|<note>] — summary, neighbours, or a window."""
     if args and args[0] in ("--memory", "-m", "--memorias"):
         return open_memory_graph()
     if args and args[0] in ("--open", "-o"):
@@ -600,7 +600,7 @@ def cmd_graph(*args):
 
 
 def cmd_status(*a):
-    """sto status — where the sync stands, in two lines and without JSON."""
+    """braingent status — where the sync stands, in two lines and without JSON."""
     st = srv.sync_status()
     if not st["remote"]:
         return {"error": t("cli_status_remote")}
@@ -619,7 +619,7 @@ def cmd_status(*a):
 
 
 def cmd_update(*args):
-    """sto update [--apply|--link] — updates to the OS itself, from upstream."""
+    """braingent update [--apply|--link] — updates to the OS itself, from upstream."""
     if args and args[0] in ("--link", "-l"):
         return srv.update_link()
     if args and args[0] in ("--apply", "-y", "--yes"):
@@ -640,7 +640,7 @@ def cmd_update(*args):
 
 
 def cmd_badge(*args):
-    """sto badge [--install|--off] — the STO badge in Claude Code's status line."""
+    """braingent badge [--install|--off] — the STO badge in Claude Code's status line."""
     if args and args[0] in ("--install", "--on"):
         res = srv.set_badge(True)
         return res if res.get("error") else {"message": "  " + t("cli_badge_installed")}
@@ -662,7 +662,7 @@ def cmd_badge(*args):
 
 
 def cmd_config(*a):
-    """sto config — which ~/.claude modules travel through the repo."""
+    """braingent config — which ~/.claude modules travel through the repo."""
     on = set(srv.get_sync_prefs())
     lines = []
     for mod in srv.CONFIG_MODULES:
@@ -673,7 +673,7 @@ def cmd_config(*a):
 
 
 def cmd_forget(*args):
-    """sto forget <skill|config|plugin|memory>:<name> [--apply]
+    """braingent forget <skill|config|plugin|memory>:<name> [--apply]
 
     The repo half of a deletion. chezmoi deprecated its single `remove` in
     favour of `forget` (source state) and `destroy` (source state + disk); one
@@ -696,7 +696,7 @@ def cmd_forget(*args):
 
 
 def cmd_memory(*args):
-    """sto memory [<project> | show <project>/<slug> | search <text> | sync | repair]"""
+    """braingent memory [<project> | show <project>/<slug> | search <text> | sync | repair]"""
     sub = args[0] if args else ""
     if sub == "repair":
         seco = "--apply" not in args
@@ -756,7 +756,7 @@ def cmd_memory(*args):
 
 
 def cmd_keep(sid=""):
-    """sto keep <id> — archive a full transcript so another machine can resume it."""
+    """braingent keep <id> — archive a full transcript so another machine can resume it."""
     if not sid:
         return {"error": t("cli_use_keep")}
     res = srv.keep_session(sid)
@@ -767,7 +767,7 @@ def cmd_keep(sid=""):
 
 
 def cmd_resume(sid=""):
-    """sto resume <id> — bring an archived transcript into this machine.
+    """braingent resume <id> — bring an archived transcript into this machine.
 
     Filed under the path this machine registered for the project, which is
     the directory `claude --resume` looks at; the current directory only when
@@ -849,8 +849,8 @@ def _go_tui():
 
 
 def cmd_ui(*args):
-    """`sto ui` — the terminal UI, the Go one in `tui/`. It reads and acts
-    only through `sto data` / `sto act`, so it holds no rule of its own."""
+    """`braingent ui` — the terminal UI, the Go one in `tui/`. It reads and acts
+    only through `braingent data` / `braingent act`, so it holds no rule of its own."""
     if args:
         return _no_args("ui")
     exe = _go_tui()
@@ -926,7 +926,7 @@ def _inside(path, root):
 
 
 def _data_detail(kind="", ref=""):
-    """sto data detail chat <id> | memory <project>/<machine>/<slug> | note <path>"""
+    """braingent data detail chat <id> | memory <project>/<machine>/<slug> | note <path>"""
     if kind == "chat":
         row, err = resolve_id(ref, cached_sessions()[0]) if ref else (None, t("cli_use_show"))
         if err:
@@ -958,7 +958,7 @@ def _data_settings():
 
 
 def _act_set(key="", value="", extra=""):
-    """sto act set lang <en|es> | accent <code> | module <id> on|off |
+    """braingent act set lang <en|es> | accent <code> | module <id> on|off |
     badge on|off | icon <name> | color <name>"""
     ui = _ui()
     if key == "lang" and value in i18n.LANGS:
@@ -1019,7 +1019,7 @@ DATA_VIEWS = {
 
 
 def cmd_data(*args):
-    """sto data <view> [--cwd DIR] [--all] [--fetch] [--limits] [--q TEXT] — JSON for the UIs."""
+    """braingent data <view> [--cwd DIR] [--all] [--fetch] [--limits] [--q TEXT] — JSON for the UIs."""
     rest, opts = _opts(args, "cwd", "all", "fetch", "limits", "q")
     view = rest[0] if rest else "status"
     opts["args"] = rest[1:]
@@ -1032,7 +1032,7 @@ def cmd_data(*args):
 
 
 def _emit(obj):
-    """One progress line for whoever reads `sto act` as it runs."""
+    """One progress line for whoever reads `braingent act` as it runs."""
     print(json.dumps(obj, ensure_ascii=False), flush=True)
 
 
@@ -1115,7 +1115,7 @@ def _delete_one(target, everywhere):
 
 
 def _act_delete(targets, scope="here"):
-    """sto act delete [--scope here|everywhere] kind:name... — one step per
+    """braingent act delete [--scope here|everywhere] kind:name... — one step per
     target; the rest still go when one fails, and the end says how many."""
     fails = []
     for target in targets:
@@ -1152,7 +1152,7 @@ ACTS = {
 
 
 def cmd_act(*args):
-    """sto act <verb> [args] [--cwd DIR] [--all] [--dry] — JSON lines for the UIs:
+    """braingent act <verb> [args] [--cwd DIR] [--all] [--dry] — JSON lines for the UIs:
     steps, then exactly one final `done` or `error` line."""
     rest, opts = _opts(args, "cwd", "all", "dry", "scope")
     verb = rest[0] if rest else ""
@@ -1188,6 +1188,23 @@ CLI = {
 }
 
 
+def _install_launchers():
+    """`braingent` and `bgent` arrive through `sto update`, which runs the old
+    code and installs nothing: the first run of this one puts them on PATH."""
+    mark = srv.CACHE_DIR / "launchers-braingent"
+    if mark.exists():
+        return
+    scripts = Path(__file__).parent
+    cmd = (["powershell", "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(scripts / "install_cli.ps1")]
+           if os.name == "nt" else ["sh", str(scripts / "install_cli.sh")])
+    try:
+        if subprocess.run(cmd, capture_output=True).returncode == 0:
+            mark.parent.mkdir(parents=True, exist_ok=True)
+            mark.touch()
+    except OSError:
+        pass  # no shell to run it: start.sh / start.cmd install them anyway
+
+
 def main(argv):
     cmd = argv[0] if argv else "status"
     if cmd not in CLI:
@@ -1199,6 +1216,9 @@ def main(argv):
 
 
 if __name__ == "__main__":
+    _install_launchers()
+    if os.environ.get("BRAINGENT_LEGACY"):  # set by the `sto` launcher
+        print(c(t("cli_renamed"), DIM), file=sys.stderr)
     res = main(sys.argv[1:])
     # every command returns {message|error}: never dump a raw dict
     print(res.get("error") or res.get("message") or "")

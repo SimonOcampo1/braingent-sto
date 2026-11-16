@@ -3,9 +3,9 @@ import type { EngineInterface, Register, SessionContextUsage, SessionRateLimit }
 
 import type { StoStatus, Usage } from '../types'
 
-// The band asks `sto` for everything sync-related, so the rules stay in one
+// The band asks `braingent` for everything sync-related, so the rules stay in one
 // place (scripts/cli.py, scripts/ui_data.py) and the strings in scripts/i18n.py.
-// It reads the same `sto data status` the TUI header reads: one number, two UIs.
+// It reads the same `braingent data status` the TUI header reads: one number, two UIs.
 const status = atom({ plugin: 'sto-band', key: 'status' } as const, null)
 const error = atom({ plugin: 'sto-band', key: 'error' } as const, null)
 const usage = atom({ plugin: 'sto-band', key: 'usage' } as const, {})
@@ -26,22 +26,22 @@ export function toUsage(limits: readonly SessionRateLimit[], context: SessionCon
   return { fiveHour: pct('five_hour'), week: pct('seven_day'), ctx: context.percent }
 }
 
-/** `sto <argv>`'s last stdout line as JSON: `sto act` prints steps before its
- *  final line, `sto data` prints one line. Or the reason, in one line. */
+/** `braingent <argv>`'s last stdout line as JSON: `braingent act` prints steps before its
+ *  final line, `braingent data` prints one line. Or the reason, in one line. */
 async function sto($: EngineInterface, argv: string[], long = false): Promise<{ data?: any; error?: string }> {
   try {
-    const r = await $.process.run(['sto', ...argv], { timeoutMs: long ? 600_000 : 30_000 })
+    const r = await $.process.run(['braingent', ...argv], { timeoutMs: long ? 600_000 : 30_000 })
     const last = r.stdout.trim().split('\n').pop() ?? ''
     const data = JSON.parse(last)
     return data.error ? { error: data.error } : { data }
   } catch (err) {
-    return { error: 'sto: ' + String((err as Error)?.message ?? err).slice(0, 80) }
+    return { error: 'braingent: ' + String((err as Error)?.message ?? err).slice(0, 80) }
   }
 }
 
 let lastAt = 0
 
-/** Ask `sto` again, at most once a minute unless somebody pressed for it. */
+/** Ask `braingent` again, at most once a minute unless somebody pressed for it. */
 async function refresh($: EngineInterface, force = false) {
   const now = await $.clock.now()
   if (!force && now - lastAt < REFRESH_MS) return
@@ -55,7 +55,7 @@ async function refresh($: EngineInterface, force = false) {
 }
 
 /** One sync at a time, whoever asked: the button, a command or the timer.
- *  `act sync --cwd` moves this project's chats too (the button and /sto sync);
+ *  `act sync --cwd` moves this project's chats too (the button and /braingent sync);
  *  the timer's bare `act sync` carries memories and config. `quiet` toasts
  *  only a failure. */
 async function runSync($: EngineInterface, argv: string[], quiet = false): Promise<string> {
@@ -88,8 +88,8 @@ async function setAuto($: EngineInterface, isOn: boolean) {
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
-      name: 'sto',
-      description: '/sto sync: sync now. /sto auto: auto sync on/off. Bare: the state in one line',
+      name: 'braingent',
+      description: '/braingent sync: sync now. /braingent auto: auto sync on/off. Bare: the state in one line',
     })
     const auto = (await $.store.get('auto')) !== false
     await update($, isAuto, () => auto)
@@ -119,7 +119,7 @@ export const register: Register = on => {
     return next(e)
   })
 
-  on('command.run', { command: 'sto' }, async ($, e) => {
+  on('command.run', { command: 'braingent' }, async ($, e) => {
     const arg = (e.args ?? '').trim()
     if (arg === 'sync') return { text: await syncHere($) }
     if (arg === 'auto') {

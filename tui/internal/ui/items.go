@@ -12,7 +12,7 @@ import (
 // search results treat chats, memories, tools and settings alike.
 type item struct {
 	kind  string // chat, memory, skill, plugin, setting, note
-	id    string // what `sto data detail` / `sto act` take
+	id    string // what `braingent data detail` / `braingent act` take
 	title string
 	group string // what arrange groups by: the project, or Skills / Plugins
 	sub   string // the second column: machine, memory type, current value

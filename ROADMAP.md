@@ -18,10 +18,10 @@ look:
 1. **Claude writes a memory** — already happens. Claude Code's auto memory saves
    markdown into `~/.claude/projects/<repo>/memory/` when it judges something
    worth keeping. STO adds nothing here, and should not.
-2. **It leaves the machine** — item **2**. A `SessionEnd` hook runs `sto push
+2. **It leaves the machine** — item **2**. A `SessionEnd` hook runs `braingent push
    --quiet` when something changed and the tree is clean.
 3. **It lands on the other machine** — item **2** from the other side: a
-   `SessionStart` hook runs `sto pull --quiet` when behind, so the session opens
+   `SessionStart` hook runs `braingent pull --quiet` when behind, so the session opens
    with what the other machine learned.
 4. **The agent sees it without being asked** — item **3**. Same-repo memories are
    already loaded natively (`MEMORY.md`, every session). What is missing is
@@ -34,7 +34,7 @@ Steps 2–5 are the whole gap. The rest of this list is polish around them.
 
 ---
 
-## 1. `sto mcp` — recall inside the session (**gap**)
+## 1. `braingent mcp` — recall inside the session (**gap**)
 
 **Today.** STO *moves* files. During a session Claude only sees what Claude Code
 itself loads; it cannot ask the repo anything.
@@ -54,7 +54,7 @@ Four tools, not twenty:
 
 | tool | maps to |
 |---|---|
-| `memory_search(query, project?)` | the same lexical search as `sto memory search` |
+| `memory_search(query, project?)` | the same lexical search as `braingent memory search` |
 | `memory_get(project/slug)` | the file, verbatim |
 | `session_search(query)` | `srv.search_sessions`, across every machine |
 | `sync_status()` | ahead/behind/dirty, so the agent can say "push first" |
@@ -80,11 +80,11 @@ of unsynced memories.
 - **Nudge.** The TUI already computes what would travel; when the count crosses a
   threshold or the last sync is older than N hours, say it in the status bar
   instead of only colouring the button. Zero new machinery.
-- **On session end.** A `SessionEnd` hook running `sto push --quiet` when the
+- **On session end.** A `SessionEnd` hook running `braingent push --quiet` when the
   tree is clean and something actually changed.
-- **On session start.** A `SessionStart` hook running `sto pull --quiet` when
+- **On session start.** A `SessionStart` hook running `braingent pull --quiet` when
   behind — this is what makes the other machine's memories already *be there*.
-- **On a schedule.** `sto autosync on --at 22:00`, installing a Scheduled Task or
+- **On a schedule.** `braingent autosync on --at 22:00`, installing a Scheduled Task or
   a cron entry.
 
 Hard rules for all four: never auto-push a dirty tree, never auto-pull over one,
@@ -109,7 +109,7 @@ except the source is plain files in your own repo:
 ## From your other work (STO)
 - honda-frelife-bot/global-pause-feature — global pause: Config sheet, fail-open (LaptopA, 3d)
 - sto-agentic-os/use-opus-for-design — prefers Opus for design passes (DeskB, 1w)
-→ detail: memory_get, or `sto memory show <project>/<slug>`
+→ detail: memory_get, or `braingent memory show <project>/<slug>`
 ```
 
 Design constraints, in order:
@@ -123,9 +123,9 @@ Design constraints, in order:
 
 ---
 
-## 4. `sto bootstrap` — day one, not day zero
+## 4. `braingent bootstrap` — day one, not day zero
 
-**Today.** A first `sto push` already carries **every** local memory: it walks
+**Today.** A first `braingent push` already carries **every** local memory: it walks
 every `~/.claude/projects/*/memory/` directory, not only the repos you touched
 this week. Sessions come too, capped at the 500 most recent and 10 MB per file.
 So the migration mostly happens by itself — silently, and with caps nobody was
@@ -158,7 +158,7 @@ One TUI, portable, no flag.
 
 ---
 
-## 6. `sto doctor`
+## 6. `braingent doctor`
 
 One command checking: git remote and branch, both PowerShell profiles, Python
 version, `ccusage` present, plugin parity, `.gitattributes` for `.jsonl`, whether
@@ -212,7 +212,7 @@ reserved.
 
 ---
 
-## 8. `sto find` — one search across everything
+## 8. `braingent find` — one search across everything
 
 **Half done.** The ranking function exists: `ui.search_all(q)` searches
 sessions, memories, tools and vault notes and returns one ranked list where
@@ -223,11 +223,11 @@ index — not the design.
 The remembered numbers, because they are the reason the rest of this item still
 matters: an uncached pass over a real repo is 0.83 s, most of it reading the
 vault. `search_all` keeps an in-process index keyed by mtime, which turns that
-into 0.07 s — but it dies with the process, so `sto find` from a shell would
+into 0.07 s — but it dies with the process, so `braingent find` from a shell would
 pay the 0.83 s every time. That is what the FTS5 cache below is for.
 
-Three corpora used to mean three commands and three rankings (`sto search` for
-sessions, `sto memory search`, nothing for the vault). One command over all
+Three corpora used to mean three commands and three rankings (`braingent search` for
+sessions, `braingent memory search`, nothing for the vault). One command over all
 three, grouped by source. [basic-memory](https://github.com/basicmachines-co/basic-memory)'s design
 is the one to copy: **markdown stays the source of truth, the index is derived** —
 a `sqlite3` FTS5 table under `.sto-cache/`, rebuilt from files, deletable at any
@@ -239,7 +239,7 @@ this stays dependency-free.
 ## 9. Memory conflicts, visible
 
 `import_memory` skips a file when it diverged since the last push — correct, and
-invisible. `sto memory conflicts` should list them with the diff, and the Memory
+invisible. `braingent memory conflicts` should list them with the diff, and the Memory
 tab should mark the row.
 
 Worth stealing from [graphiti](https://github.com/getzep/graphiti): resolve
@@ -265,14 +265,14 @@ nothing is distilled.
 
 **Sketch.** `dream_extract.py` already parses transcripts into prompts, tool names
 and errors. A `SessionEnd` hook can queue a *draft* into `vault/raw/` — never into
-`wiki/`, never into `knowledge/memory/`. Then `sto curate` walks the drafts and
+`wiki/`, never into `knowledge/memory/`. Then `braingent curate` walks the drafts and
 proposes, per item, one of mem0's four verbs: **ADD / UPDATE / DELETE / NOOP**.
 That vocabulary is the useful part of their pipeline, and it works fine with a
 human pressing the key instead of an LLM deciding alone.
 
 Engram's **topic key** belongs here too: one evolving file per topic, updated,
 instead of five near-duplicates. Our frontmatter `name` already is that key —
-`sto memory merge <a> <b>` would make it usable.
+`braingent memory merge <a> <b>` would make it usable.
 
 ---
 
@@ -311,7 +311,7 @@ loop that still needs manual syncing is polish on the wrong end.
 
 ## 13. Team mode
 
-A second remote for a shared vault, separate from the personal repo: `sto push
+A second remote for a shared vault, separate from the personal repo: `braingent push
 --to team`, pushing only `vault/wiki/`. The substrate already supports it — a
 prefs entry and a pathspec, not an architecture.
 
@@ -338,9 +338,9 @@ Distilled from reading the field. Each row is a mechanism, not a dependency.
 |---|---|---|
 | Three-layer progressive disclosure (ids → context → full text) | engram, claude-mem, agentmemory | shapes the MCP tools (1) and the injected block (3) |
 | Brief the agent the moment it starts | memanto, claude-mem, Memori | the `SessionStart` block, budgeted and ranked (3) |
-| Hooks that **queue** instead of processing inline | claude-mem (`PostToolUse` → pending table) | drafts and auto-push queue to a file, processed on the next `sto` run (2, 11) |
-| ADD / UPDATE / DELETE / NOOP as the curation vocabulary | mem0 | `sto curate` proposes, you press the key (11) |
-| Topic key → upsert one evolving memory | engram | frontmatter `name` + `sto memory merge` (11) |
+| Hooks that **queue** instead of processing inline | claude-mem (`PostToolUse` → pending table) | drafts and auto-push queue to a file, processed on the next `braingent` run (2, 11) |
+| ADD / UPDATE / DELETE / NOOP as the curation vocabulary | mem0 | `braingent curate` proposes, you press the key (11) |
+| Topic key → upsert one evolving memory | engram | frontmatter `name` + `braingent memory merge` (11) |
 | Invalidate, do not delete, on contradiction | graphiti, memanto | `supersedes:` in frontmatter, dimmed in the graph (9) |
 | Markdown is the source of truth, the index is derived | basic-memory | FTS5 cache under `.sto-cache/`, rebuildable (8) |
 | `[category] content #tags` observations inside notes | basic-memory | a light convention that makes the graph richer than wikilinks alone |
@@ -360,7 +360,7 @@ Distilled from reading the field. Each row is a mechanism, not a dependency.
 |  | Who writes the memory | Where it lives | Recall |
 |---|---|---|---|
 | **Claude Code (auto memory)** | Claude itself, when it judges something worth keeping | `~/.claude/projects/<repo>/memory/*.md`, plain markdown | `MEMORY.md` index loaded every session (first 200 lines / 25 KB); topic files on demand |
-| **STO** | nobody new — it syncs the files above | the same files, mirrored into `knowledge/memory/<project>/<machine>/` | what Claude Code already does, plus `sto memory search` and the graph |
+| **STO** | nobody new — it syncs the files above | the same files, mirrored into `knowledge/memory/<project>/<machine>/` | what Claude Code already does, plus `braingent memory search` and the graph |
 | **[engram](https://github.com/Gentleman-Programming/engram)** | the agent, calling `mem_save` | its own SQLite (FTS5) | 20 MCP tools; a protocol snippet in `CLAUDE.md` to survive compaction |
 | **[claude-mem](https://github.com/thedotmack/claude-mem)** | hooks, distilling the session with an LLM | its own SQLite + Chroma vectors | injected at session start; 4 MCP search tools |
 | **[agentmemory](https://github.com/rohitg00/agentmemory)** | 12 lifecycle hooks + LLM compression | its own store | BM25 + vector + graph fused by RRF; 53 MCP tools |
@@ -382,7 +382,8 @@ Items 1 and 3 raise it without a second store; item 14 goes past it, if ever.
 
 ## Naming — settled
 
-The project is **braingent-sto**. The command stays `sto`.
+The project is **braingent-sto**. The command is `braingent`, `bgent` for short;
+bare, it opens the TUI. `sto`, the first name, still runs and says it was renamed.
 
 This section used to carry nine candidates and a long argument about which half
 of the product a name has to cover. That was decided: the repo, the README and

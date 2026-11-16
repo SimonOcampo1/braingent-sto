@@ -1,4 +1,4 @@
-// braingent's TUI. It reads and acts only through `sto data` / `sto act`.
+// braingent's TUI. It reads and acts only through `braingent data` / `braingent act`.
 package main
 
 import (
@@ -12,9 +12,9 @@ import (
 )
 
 func main() {
-	bin := os.Getenv("STO_BIN") // `sto ui` points it at itself
+	bin := os.Getenv("STO_BIN") // set it to try another build of the CLI
 	if bin == "" {
-		bin = "sto"
+		bin = "braingent"
 	}
 	cwd, _ := os.Getwd()
 	if _, err := tea.NewProgram(ui.New(sto.Client{Bin: bin}, cwd)).Run(); err != nil {

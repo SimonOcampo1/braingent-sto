@@ -1,5 +1,5 @@
 # Builds the Go TUI for every platform whenever tui/ changes on main, into a
-# release tagged with the git hash of tui/: `sto ui` on a machine without Go
+# release tagged with the git hash of tui/: `braingent ui` on a machine without Go
 # downloads exactly the build of the tui/ it has, so no tag is ever cut by hand.
 name: tui release
 
@@ -41,4 +41,4 @@ jobs:
               -o "../dist/braingent-tui-$os-$arch$ext" .)
           done
           gh release create "$tag" dist/* --target "$GITHUB_SHA" \
-            --title "TUI $tag" --notes "The Go TUI built from tui/ at $tree. sto ui downloads it on machines without Go."
+            --title "TUI $tag" --notes "The Go TUI built from tui/ at $tree. braingent ui downloads it on machines without Go."

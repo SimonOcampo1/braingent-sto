@@ -35,7 +35,7 @@ command -v npm >/dev/null 2>&1 || die "Node.js/npm is missing: https://nodejs.or
 
 # `npm ci`, not `npm install`: install re-resolves every semver range, so on a
 # machine whose npm cache is newer it rewrites package-lock.json — a dirty tree
-# that made `sto update` and `sto sync` refuse to run on every fresh clone. `ci`
+# that made `braingent update` and `braingent sync` refuse to run on every fresh clone. `ci`
 # installs the lockfile as written and never touches it. It only fails when the
 # lock and package.json really disagree, and then install is the right repair.
 echo "Checking the app dependencies..."
@@ -66,9 +66,9 @@ if command -v graphify >/dev/null 2>&1 && [ ! -f graphify-out/graph.json ]; then
     graphify update . || echo "[warn] graphify update failed" >&2
 fi
 
-# ── `sto` in the terminal (idempotent; fixes the path if you moved the repo) ──
+# ── `braingent` in the terminal (idempotent; fixes the path if you moved the repo) ──
 
-sh scripts/install_sto_cli.sh
+sh scripts/install_cli.sh
 
 # ── the two servers ──
 

@@ -194,16 +194,16 @@ def test_bad_arity_is_a_usage_error():
     try:
         cli.CLI["status"] = lambda: {"message": "ok"}
         res = cli.main(["status", "de", "mas"])
-        assert res["error"].startswith("uso: sto status")
+        assert res["error"].startswith("uso: braingent status")
     finally:
         cli.CLI["status"] = old
 
 
 def test_ui_rejects_extra_args_instead_of_opening():
-    # `sto ui junk` must not open the TUI silently: same arity error as any
+    # `braingent ui junk` must not open the TUI silently: same arity error as any
     # other command, and without importing the TUI at all.
     res = cli.main(["ui", "basura"])
-    assert res["error"].startswith("uso: sto ui")
+    assert res["error"].startswith("uso: braingent ui")
 
 
 def _rows(*specs):
@@ -241,7 +241,7 @@ def test_sessions_of_one_project_and_long_name_alignment():
         msg = cli.cmd_sessions(largo)["message"]
         assert "aaaaaaaa" in msg and "hacer X" in msg
         assert "error" in cli.cmd_sessions("noexiste")
-        assert "sto sessions" in cli.cmd_sessions("noexiste")["error"]
+        assert "braingent sessions" in cli.cmd_sessions("noexiste")["error"]
     finally:
         cli.COLOR = old
         _restore_cached()
@@ -271,7 +271,7 @@ def test_resolve_id_unique_missing_and_ambiguous():
     assert err is None and row["id"] == "bbbbbbbb-3333"
 
     row, err = cli.resolve_id("zzzz", rows)
-    assert row is None and "no existe" in err and "sto sessions" in err
+    assert row is None and "no existe" in err and "braingent sessions" in err
 
     row, err = cli.resolve_id("aaaa", rows)
     assert row is None and "ambiguo" in err
@@ -332,8 +332,8 @@ def test_search_snippet_highlights_and_falls_back_to_title():
 
 
 def test_search_splits_quoted_phrase_into_terms_for_snippet():
-    """sto search "sto cli" (a single argv) must split into terms just like
-    sto search sto cli (two argv), so that snippet() does not fall back to the
+    """braingent search "sto cli" (a single argv) must split into terms just like
+    braingent search sto cli (two argv), so that snippet() does not fall back to the
     title by looking for the whole literal phrase."""
     rows = _rows(("aaaaaaaa-1", "projA", "hacer algo", 1.0, None))
     captured = []
@@ -397,7 +397,7 @@ def test_skills_lists_and_shows():
         err = cli.cmd_skills("ponytail")["error"]     # id incompleto
         assert "plugin:ponytail" in err               # suggests the one that matches
         err2 = cli.cmd_skills("noexiste")["error"]
-        assert "sto skills" in err2
+        assert "braingent skills" in err2
     finally:
         cli.COLOR, cli.srv.list_skills, cli.srv.get_skill, cli.page = (
             old_color, old_list, old_get, old_page)
@@ -510,7 +510,7 @@ def test_status_and_config_print_text_not_json():
         cli.srv.sync_status = lambda *a, **k: {
             "remote": None, "branch": None, "ahead": 0, "behind": 0,
             "dirty": False, "machine": "PC", "fetchError": None}
-        assert "sto ui" in cli.cmd_status()["error"]
+        assert "`braingent`" in cli.cmd_status()["error"]
     finally:
         cli.srv.sync_status, cli.srv.get_sync_prefs, cli.srv.CONFIG_MODULES = reales
         cli.COLOR = old
@@ -643,7 +643,7 @@ def test_ui_downloads_the_build_of_its_version_where_go_is_missing():
 
 
 def test_ui_says_what_is_missing_instead_of_opening_nothing():
-    """With no Go TUI to build or download, `sto ui` says what to do. The
+    """With no Go TUI to build or download, `braingent ui` says what to do. The
     failure worth guarding against is the silent one: an empty message and a
     user staring at a prompt."""
     real_go = cli._go_tui
@@ -868,7 +868,7 @@ def test_session_todo():
             assert cli.session_todo(rows[0]) is None
         finally:
             cli.srv.KNOWLEDGE_SESSIONS = old
-    # the band moved to `sto data` / `sto act`
+    # the band moved to `braingent data` / `braingent act`
     assert "mod" not in cli.CLI
 
 

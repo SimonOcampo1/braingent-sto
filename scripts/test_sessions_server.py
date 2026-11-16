@@ -577,7 +577,7 @@ def test_the_skills_row_counts_skills_and_not_the_files_inside_them():
 
 
 def test_the_conflict_error_names_the_files_that_conflicted():
-    """The bug: `sto update` reported "Auto-merging scripts/i18n.py" — the head
+    """The bug: `braingent update` reported "Auto-merging scripts/i18n.py" — the head
     of git's output — and never said which file actually conflicted."""
     out = ("Auto-merging scripts/i18n.py\n"
            "Auto-merging scripts/ui.py\n"
@@ -1875,7 +1875,7 @@ def test_resume_of_an_unknown_id_says_so():
 
 def test_a_session_nobody_kept_still_resumes_from_its_trimmed_export():
     """Every push exports a trimmed copy; that has to be enough to continue
-    the conversation on another machine without a `sto keep` first.
+    the conversation on another machine without a `braingent keep` first.
 
     The export keeps `tool_use` blocks and drops their results, which the API
     rejects, so the rebuilt transcript is text only, chained by uuid and filed

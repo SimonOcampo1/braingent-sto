@@ -1,5 +1,5 @@
-// Package sto is the TUI's only way into the engine: it runs `sto data` and
-// `sto act` and decodes their JSON, the contract the band reads too. No rule
+// Package sto is the TUI's only way into the engine: it runs `braingent data` and
+// `braingent act` and decodes their JSON, the contract the band reads too. No rule
 // about chats or the cloud is decided here.
 package sto
 
@@ -12,10 +12,10 @@ import (
 	"os/exec"
 )
 
-// Client runs one `sto` binary; tests point Bin at a fake script.
+// Client runs one `braingent` binary; tests point Bin at a fake script.
 type Client struct{ Bin string }
 
-// Status is `sto data status`: the one sync state every UI shows.
+// Status is `braingent data status`: the one sync state every UI shows.
 type Status struct {
 	State  string `json:"state"`
 	Down   int    `json:"down"`
@@ -46,7 +46,7 @@ func (s *Status) L(key string) string {
 	return key
 }
 
-// Chat is one row of `sto data chats`. State is "both", "local" or "repo".
+// Chat is one row of `braingent data chats`. State is "both", "local" or "repo".
 type Chat struct {
 	ID      string  `json:"id"`
 	Title   string  `json:"title"`
@@ -56,13 +56,13 @@ type Chat struct {
 	State   string  `json:"state"`
 }
 
-// Chats is `sto data chats`; Folders maps a project to its folder here, or nil.
+// Chats is `braingent data chats`; Folders maps a project to its folder here, or nil.
 type Chats struct {
 	Rows    []Chat             `json:"rows"`
 	Folders map[string]*string `json:"folders"`
 }
 
-// Memory is one memory of `sto data memories`.
+// Memory is one memory of `braingent data memories`.
 type Memory struct {
 	Slug        string  `json:"slug"`
 	Type        string  `json:"type"`
@@ -78,7 +78,7 @@ type MemoryProject struct {
 	Memories []Memory `json:"memories"`
 }
 
-// Memories is `sto data memories`, by project.
+// Memories is `braingent data memories`, by project.
 type Memories struct {
 	Projects []MemoryProject `json:"projects"`
 }
@@ -92,7 +92,7 @@ type Tool struct {
 	Where string `json:"where"`
 }
 
-// Tools is `sto data tools`.
+// Tools is `braingent data tools`.
 type Tools struct {
 	Skills  []Tool `json:"skills"`
 	Plugins []Tool `json:"plugins"`
@@ -104,7 +104,7 @@ type Module struct {
 	Enabled bool   `json:"enabled"`
 }
 
-// Settings is `sto data settings`.
+// Settings is `braingent data settings`.
 type Settings struct {
 	Lang    string   `json:"lang"`
 	Langs   []string `json:"langs"`
@@ -131,12 +131,12 @@ type Limit struct {
 	Percent int    `json:"percent"`
 }
 
-// Usage is `sto data usage`.
+// Usage is `braingent data usage`.
 type Usage struct {
 	Limits []Limit `json:"limits"`
 }
 
-// Hit is one result of `sto data search`; Ref says where it lives, by kind.
+// Hit is one result of `braingent data search`; Ref says where it lives, by kind.
 type Hit struct {
 	Kind  string         `json:"kind"`
 	Label string         `json:"label"`
@@ -144,7 +144,7 @@ type Hit struct {
 	Ref   map[string]any `json:"ref"`
 }
 
-// Search is `sto data search --q`.
+// Search is `braingent data search --q`.
 type Search struct {
 	Hits []Hit `json:"hits"`
 }
@@ -155,7 +155,7 @@ type Turn struct {
 	Markdown string `json:"markdown"`
 }
 
-// Detail is `sto data detail <kind> <id>`: what the reader shows. A chat
+// Detail is `braingent data detail <kind> <id>`: what the reader shows. A chat
 // comes in Turns too, so the reader can tell who spoke.
 type Detail struct {
 	Title    string `json:"title"`
@@ -163,7 +163,7 @@ type Detail struct {
 	Turns    []Turn `json:"turns"`
 }
 
-// engineErr is the `{"error": ...}` every sto answer may be instead.
+// engineErr is the `{"error": ...}` every braingent answer may be instead.
 func engineErr(line []byte) error {
 	var e struct {
 		Error string `json:"error"`
@@ -174,7 +174,7 @@ func engineErr(line []byte) error {
 	return nil
 }
 
-// Data runs `sto data <view> args...` and decodes the answer into v.
+// Data runs `braingent data <view> args...` and decodes the answer into v.
 func (c Client) Data(v any, view string, args ...string) error {
 	return c.DataCtx(context.Background(), v, view, args...)
 }
@@ -183,7 +183,7 @@ func (c Client) Data(v any, view string, args ...string) error {
 func (c Client) DataCtx(ctx context.Context, v any, view string, args ...string) error {
 	out, err := exec.CommandContext(ctx, c.Bin, append([]string{"data", view}, args...)...).Output()
 	if err != nil {
-		return fmt.Errorf("sto data %s: %w", view, err)
+		return fmt.Errorf("braingent data %s: %w", view, err)
 	}
 	if err := engineErr(out); err != nil {
 		return err
@@ -191,7 +191,7 @@ func (c Client) DataCtx(ctx context.Context, v any, view string, args ...string)
 	return json.Unmarshal(out, v)
 }
 
-// Act runs `sto act args...`, calling step for each progress line, and
+// Act runs `braingent act args...`, calling step for each progress line, and
 // returns the final line's message or its error.
 func (c Client) Act(step func(string), args ...string) (string, error) {
 	cmd := exec.Command(c.Bin, append([]string{"act"}, args...)...)
@@ -220,10 +220,10 @@ func (c Client) Act(step func(string), args ...string) (string, error) {
 		}
 	}
 	if err := cmd.Wait(); err != nil && fail == nil {
-		fail = fmt.Errorf("sto act: %w", err)
+		fail = fmt.Errorf("braingent act: %w", err)
 	}
 	if fail == nil && !final.Done {
-		fail = errors.New("sto act: no final line")
+		fail = errors.New("braingent act: no final line")
 	}
 	return final.Message, fail
 }

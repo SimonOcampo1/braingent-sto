@@ -5,9 +5,9 @@ Claude Code re-runs the status line command constantly, so this reads two small
 JSON files and nothing else — no git, no imports beyond the stdlib's cheapest.
 Importing `sessions_server` here would cost ~200 ms on every repaint.
 
-`.sto-cache/badge.json` is written by the TUI and by `sto status`; when it is
+`.sto-cache/badge.json` is written by the TUI and by `braingent status`; when it is
 missing or stale the badge still shows, just without the counts. Wire it up
-with `sto badge`.
+with `braingent badge`.
 """
 import json
 import sys
@@ -41,7 +41,7 @@ def chained(payload: bytes) -> str:
 
     ponytail: one subprocess per repaint, and if the previous command was a
     PowerShell script it is the slow half of this script. Chaining is the price
-    of not silently replacing a badge the user already had; `sto badge --off`
+    of not silently replacing a badge the user already had; `braingent badge --off`
     puts it back and this disappears.
     """
     cmd = _json(Path.home() / ".claude" / "sto-ui.json", {}).get("statusline_chain")

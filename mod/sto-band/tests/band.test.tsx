@@ -31,8 +31,8 @@ test('pending: arrows, one Sync button, the plan windows', async ($, on) => {
   mock.clock(on, { now: 1_000_000 })
   const calls: string[][] = []
   fake(on, PENDING, calls)
-  const res = await $.command.run({ command: 'sto' } as never)
-  expect(calls[0]).toEqual(['sto', 'data', 'status', '--cwd', '/work/p', '--fetch'])
+  const res = await $.command.run({ command: 'braingent' } as never)
+  expect(calls[0]).toEqual(['braingent', 'data', 'status', '--cwd', '/work/p', '--fetch'])
   expect(res.text).toBe(PENDING.phrase)
 
   const ui = await $.ui.mount({ plugin: 'sto-band', surface: 'terminal', ...BAND })
@@ -44,7 +44,7 @@ test('pending: arrows, one Sync button, the plan windows', async ($, on) => {
   expect(text).toContain('ctx 22%')
   expect(!!(await ui.find({ key: 'auto' }))).toBe(false)
   await ui.press({ key: 'sync' })
-  expect(calls.some(c => c.join(' ') === 'sto act sync --cwd /work/p')).toBe(true)
+  expect(calls.some(c => c.join(' ') === 'braingent act sync --cwd /work/p')).toBe(true)
   await ui.unmount()
 })
 
@@ -53,13 +53,13 @@ test('up to date: the phrase and no button; auto off shows and is remembered', a
   const saved: unknown[] = []
   on('store.set', async (_$, e) => (saved.push(e), { value: undefined }))
   fake(on, UPTODATE)
-  await $.command.run({ command: 'sto' } as never)
+  await $.command.run({ command: 'braingent' } as never)
   const ui = await $.ui.mount({ plugin: 'sto-band', surface: 'terminal', ...BAND })
   expect((await ui.find({ type: 'Box' }))?.text).toContain('al día')
   expect(!!(await ui.find({ key: 'sync' }))).toBe(false)
   await ui.unmount()
 
-  const off = await $.command.run({ command: 'sto', args: 'auto' } as never)
+  const off = await $.command.run({ command: 'braingent', args: 'auto' } as never)
   expect(off.text).toContain('off')
   expect(JSON.stringify(saved)).toContain('false')
   const ui2 = await $.ui.mount({ plugin: 'sto-band', surface: 'terminal', ...BAND })
@@ -76,7 +76,7 @@ test('a failed sync says why and offers retry', async ($, on) => {
     return { value: { exitCode: 0, stdout: JSON.stringify(out), stderr: '',
                       isStdoutTruncated: false, isStderrTruncated: false } }
   })
-  const res = await $.command.run({ command: 'sto', args: 'sync' } as never)
+  const res = await $.command.run({ command: 'braingent', args: 'sync' } as never)
   expect(res.text).toBe('sin conexión')
   const ui = await $.ui.mount({ plugin: 'sto-band', surface: 'terminal', ...BAND })
   expect((await ui.find({ type: 'Box' }))?.text).toContain('! sin conexión')
@@ -88,7 +88,7 @@ test('a long fetch shows its progress, not a red error', async ($, on) => {
   mock.clock(on, { now: 1_000_000 })
   fake(on, { ...PENDING, labels: { ...LABELS, fetching: 'fetcheando…' },
              fetching: { phase: 'objects', pct: 53, done: 3449, total: 6453, size: '145.71 MiB' } })
-  await $.command.run({ command: 'sto' } as never)
+  await $.command.run({ command: 'braingent' } as never)
   const ui = await $.ui.mount({ plugin: 'sto-band', surface: 'terminal', ...BAND })
   const text = (await ui.find({ type: 'Box' }))?.text ?? ''
   expect(text).toContain('fetcheando… 53% (3449/6453) 145.71 MiB')

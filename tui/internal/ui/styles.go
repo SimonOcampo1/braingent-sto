@@ -7,7 +7,7 @@ import (
 )
 
 // Only ANSI colors, so the TUI inherits the terminal's palette. The accent
-// is the one `sto ui` saved; setAccent repaints every style that uses it.
+// is the one `braingent ui` saved; setAccent repaints every style that uses it.
 var (
 	muted                                   = lipgloss.Color("8")
 	ink                                     = lipgloss.Color("0")
